@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PicScanner</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="source-screen" class="source-screen">
+      <div class="source-panel">
+        <div class="source-head">
+          <div>
+            <h1>选择来源</h1>
+            <p>选择 SD 卡磁盘，或者添加一个图片文件夹。</p>
+          </div>
+          <button id="refresh-sources" class="icon-btn" title="刷新磁盘">↻</button>
+        </div>
+        <div id="drive-list" class="source-grid"></div>
+        <div id="folder-wrap" class="folder-wrap">
+          <div class="section-title">已记忆文件夹</div>
+          <div id="folder-list" class="source-grid compact"></div>
+        </div>
+      </div>
+    </section>
+
+    <main id="workspace" class="workspace hidden">
+      <aside class="side">
+        <div class="brand-block">
+          <div class="brand-title">PicScanner</div>
+          <div id="current-source" class="brand-sub"></div>
+        </div>
+        <div id="progress-card" class="progress-card">
+          <div class="progress-block">
+            <div class="progress-top">
+              <span id="scan-status">等待扫描</span>
+              <span id="scan-count">0 / 0</span>
+            </div>
+            <div class="progress-track"><div id="progress-bar"></div></div>
+            <div id="scan-message" class="progress-msg"></div>
+          </div>
+          <div class="progress-block">
+            <div class="progress-top">
+              <span id="exif-status">等待 EXIF</span>
+              <span id="exif-count">0 / 0</span>
+            </div>
+            <div class="progress-track"><div id="exif-progress-bar"></div></div>
+            <div id="exif-message" class="progress-msg"></div>
+          </div>
+        </div>
+        <div class="stats-list">
+          <div class="stat-row"><span>文件</span><strong id="stat-total">0</strong></div>
+          <div class="stat-row"><span>EXIF</span><strong id="stat-exif">0</strong></div>
+          <div class="stat-row"><span>待扫</span><strong id="stat-pending">0</strong></div>
+          <div class="stat-row"><span>失败</span><strong id="stat-failed">0</strong></div>
+        </div>
+        <div class="mini-groups">
+          <div class="mini-group">
+            <div class="section-title">镜头</div>
+            <div id="lens-stats" class="chips"></div>
+          </div>
+          <div class="mini-group">
+            <div class="section-title">焦段</div>
+            <div id="focal-stats" class="chips"></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="gallery-wrap">
+        <div class="toolbar">
+          <button id="change-source" class="ghost-btn back-btn" title="返回选择来源"><span aria-hidden="true">←</span><span>返回上一级</span></button>
+          <button id="scan-all" class="ghost-btn">扫描所有图片</button>
+          <button id="read-exif" class="ghost-btn">读取 EXIF 统计</button>
+          <div class="toolbar-spacer"></div>
+          <span id="time-range" class="time-range"></span>
+        </div>
+        <div id="gallery-scroll" class="gallery-scroll">
+          <div id="gallery" class="gallery"></div>
+          <div id="older-sentinel" class="older-sentinel">检查更早日期...</div>
+        </div>
+      </section>
+
+      <nav class="date-rail">
+        <div class="section-title">日期</div>
+        <div id="date-rail-list" class="date-rail-list"></div>
+      </nav>
+    </main>
+  </div>
+
+  <div id="confirm-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>执行扫描？</h2>
+      <p id="confirm-path"></p>
+      <div class="modal-actions">
+        <button id="cancel-scan" class="ghost-btn">取消</button>
+        <button id="confirm-scan" class="primary-btn">开始扫描</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="exif-pop" class="exif-pop hidden"></div>
+
+  <div id="lightbox" class="lightbox hidden">
+    <button id="lightbox-close" class="lightbox-close" title="关闭">×</button>
+    <div id="lightbox-stage" class="lightbox-stage">
+      <img id="lightbox-img" class="lightbox-img" alt="" />
+    </div>
+    <div class="lightbox-toolbar">
+      <button id="lightbox-zoom-out" class="icon-btn" title="缩小">−</button>
+      <input id="lightbox-zoom" class="lightbox-readout zoom-input" value="1.00×" title="输入放大倍率" />
+      <button id="lightbox-zoom-in" class="icon-btn" title="放大">+</button>
+      <div class="toolbar-divider"></div>
+      <div id="lightbox-apsc-focal" class="lightbox-readout hidden">APS-C --</div>
+      <div id="lightbox-focal" class="lightbox-readout">等效 --</div>
+    </div>
+  </div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

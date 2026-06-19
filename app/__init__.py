@@ -1,0 +1,1 @@
+"""PicScanner application package."""

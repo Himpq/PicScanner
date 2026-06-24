@@ -1,3 +1,4 @@
 pywebview>=5.0
 exifread>=3.0.0
 Pillow>=10.0.0
+rawpy>=0.27.0

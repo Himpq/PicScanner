@@ -19,6 +19,16 @@ DEFAULT_CONFIG = {
     "last_source": "",
     "copy_mode": "current",
     "favorite_folders": [],
+    "gallery_item_size": 168,
+    "lightbox_info_visible": True,
+    "lightbox_info_position": None,
+    "lightbox_info_size": None,
+    "lightbox_info_details_collapsed": False,
+    "export_preset": {
+        "enabled": False,
+        "destination": "",
+        "template": "{origin_name}",
+    },
 }
 
 

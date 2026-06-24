@@ -48,6 +48,7 @@ class ScannerManager:
             "status": "idle",
             "message": "等待选择来源",
             "session_id": None,
+            "source_id": "",
             "root_path": "",
             "total_files": 0,
             "processed_files": 0,
@@ -86,18 +87,23 @@ class ScannerManager:
                 self._state.get("scan_running") or self._state.get("exif_running")
             )
 
-    def _root_is_scanning(self, root_path: str) -> bool:
+    def _root_is_scanning(self, root_path: str, source_id: str | None = None) -> bool:
         with self._lock:
+            current_source_id = str(self._state.get("source_id") or "")
             return bool(
                 self._state.get("scan_running")
-                and str(self._state.get("root_path") or "").lower() == str(root_path).lower()
+                and (
+                    (source_id and current_source_id == str(source_id))
+                    or str(self._state.get("root_path") or "").lower() == str(root_path).lower()
+                )
             )
 
-    def start_scan(self, root_path: str, limit: int | None = 10) -> dict:
+    def start_scan(self, root_path: str, source_id: str, limit: int | None = 10) -> dict:
         root = Path(root_path)
         if not root.exists() or not root.is_dir():
             return {"success": False, "message": f"目录不存在: {root_path}"}
         root_text = str(root.resolve())
+        source_text = str(source_id or "")
         with self._lock:
             if self._state.get("scan_running"):
                 return {
@@ -106,12 +112,13 @@ class ScannerManager:
                     "state": self.get_state(),
                 }
             self._scan_stop.clear()
-            session_id = storage.create_session(root_text)
-            indexed = storage.count_indexed_photos(root_text)
+            session_id = storage.create_session(root_text, source_text)
+            indexed = storage.count_indexed_photos(root_text, source_id=source_text)
             target = max(0, int(limit or 0))
             self._state.update(
                 {
                     "root_path": root_text,
+                    "source_id": source_text,
                     "session_id": session_id,
                     "scan_running": True,
                     "scan_status": "discovering",
@@ -128,25 +135,26 @@ class ScannerManager:
             )
             self._scan_thread = threading.Thread(
                 target=self._run_scan,
-                args=(session_id, root, limit),
+                args=(session_id, root, source_text, limit),
                 daemon=True,
             )
             self._scan_thread.start()
             return {"success": True, "session_id": session_id, "state": self.get_state()}
 
-    def scan_all(self, root_path: str) -> dict:
-        return self.start_scan(root_path, limit=None)
+    def scan_all(self, root_path: str, source_id: str) -> dict:
+        return self.start_scan(root_path, source_id, limit=None)
 
     def stop_scan(self) -> dict:
         self._scan_stop.set()
         self._set_state(scan_status="stopping", scan_message="正在停止扫描")
         return {"success": True}
 
-    def start_exif(self, root_path: str) -> dict:
+    def start_exif(self, root_path: str, source_id: str) -> dict:
         root = Path(root_path)
         if not root.exists() or not root.is_dir():
             return {"success": False, "message": f"目录不存在: {root_path}"}
         root_text = str(root.resolve())
+        source_text = str(source_id or "")
         with self._lock:
             if self._state.get("exif_running"):
                 return {
@@ -154,11 +162,12 @@ class ScannerManager:
                     "message": "EXIF 读取任务正在执行",
                     "state": self.get_state(),
                 }
-            pending = storage.count_exif_pending(root_text)
+            pending = storage.count_exif_pending(root_text, source_id=source_text)
             self._exif_stop.clear()
             self._state.update(
                 {
                     "root_path": root_text,
+                    "source_id": source_text,
                     "exif_running": True,
                     "exif_status": "reading_exif",
                     "exif_message": f"正在读取 EXIF：0/{pending}",
@@ -168,7 +177,7 @@ class ScannerManager:
             )
             self._exif_thread = threading.Thread(
                 target=self._run_exif,
-                args=(root_text,),
+                args=(root_text, source_text),
                 daemon=True,
             )
             self._exif_thread.start()
@@ -180,37 +189,31 @@ class ScannerManager:
         return {"success": True}
 
     def _iter_images(self, root: Path):
-        image_paths: list[tuple[float, str, Path]] = []
         for path in root.rglob("*"):
             if self._scan_stop.is_set():
                 break
             try:
                 if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
-                    image_paths.append((path.stat().st_mtime, str(path).lower(), path))
+                    yield path
             except OSError:
                 continue
-        image_paths.sort(key=lambda item: (-item[0], item[1]))
-        for _, _, path in image_paths:
-            if self._scan_stop.is_set():
-                break
-            yield path
 
-    def _run_scan(self, session_id: int, root: Path, limit: int | None) -> None:
+    def _run_scan(self, session_id: int, root: Path, source_id: str, limit: int | None) -> None:
         root_text = str(root.resolve())
         target = int(limit or 0)
         added = 0
-        indexed_at_start = storage.count_indexed_photos(root_text)
+        indexed_at_start = storage.count_indexed_photos(root_text, source_id=source_id)
         exhausted = True
         try:
-            self._set_state(scan_message="正在按最新时间查找图片")
+            self._set_state(scan_message="正在查找图片")
             for path in self._iter_images(root):
                 if self._scan_stop.is_set():
                     exhausted = False
                     break
-                if storage.photo_exists(path):
+                if storage.photo_exists(source_id, root_text, path):
                     continue
                 try:
-                    storage.upsert_pending(session_id, root_text, str(path))
+                    storage.upsert_pending(session_id, source_id, root_text, str(path))
                 except Exception:
                     traceback.print_exc()
                     continue
@@ -292,13 +295,18 @@ class ScannerManager:
             )
             storage.update_session(session_id, status="failed", message=str(exc), finished=True)
 
-    def _run_exif(self, root_path: str) -> None:
+    def _run_exif(self, root_path: str, source_id: str) -> None:
         processed = 0
         try:
             while not self._exif_stop.is_set():
-                rows = storage.pending_exif_photos(root_path, limit=20)
+                rows = storage.pending_exif_photos(root_path, source_id=source_id, limit=20)
                 if not rows:
-                    if self._root_is_scanning(root_path):
+                    if self._root_is_scanning(root_path, source_id):
+                        self._set_state(
+                            exif_processed_files=processed,
+                            exif_total_files=processed,
+                            exif_message=f"等待扫描发现新图片：{processed}/{processed}",
+                        )
                         time.sleep(0.2)
                         continue
                     break
@@ -306,9 +314,15 @@ class ScannerManager:
                     if self._exif_stop.is_set():
                         break
                     meta = read_metadata(photo["path"])
-                    storage.update_photo_metadata(photo["path"], meta)
+                    storage.update_photo_metadata(
+                        photo["path"],
+                        meta,
+                        photo_id=int(photo["id"]),
+                        source_id=str(photo.get("source_id") or source_id),
+                        relative_path=str(photo.get("relative_path") or ""),
+                    )
                     processed += 1
-                    pending = storage.count_exif_pending(root_path)
+                    pending = storage.count_exif_pending(root_path, source_id=source_id)
                     total = processed + pending
                     if processed % 3 == 0 or pending == 0:
                         self._set_state(
@@ -317,7 +331,7 @@ class ScannerManager:
                             exif_message=f"正在读取 EXIF：{processed}/{total}",
                         )
 
-            pending = storage.count_exif_pending(root_path)
+            pending = storage.count_exif_pending(root_path, source_id=source_id)
             if self._exif_stop.is_set():
                 self._set_state(
                     exif_running=False,
@@ -349,7 +363,7 @@ class ScannerManager:
         if photo.get("exif_status") == "complete":
             return photo
         meta = read_metadata(photo["path"])
-        storage.update_photo_metadata(photo["path"], meta)
+        storage.update_photo_metadata(photo["path"], meta, photo_id=int(photo["id"]))
         return storage.get_photo(photo_id)
 
 

@@ -24,6 +24,13 @@ DEFAULT_CONFIG = {
     "lightbox_info_position": None,
     "lightbox_info_size": None,
     "lightbox_info_details_collapsed": False,
+    "quick_edit_collapsed_sections": {
+        "tone": False,
+        "color": False,
+        "detail": False,
+        "hsl": False,
+        "lut": False,
+    },
     "export_preset": {
         "enabled": False,
         "destination": "",

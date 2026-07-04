@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="stylesheet" href="assets/style.css?v=settings-alt-exif-20260703-1" />
+  <link rel="stylesheet" href="assets/settings.css?v=settings-alt-exif-20260703-1" />
 </head>
 <body>
   <div id="app">
@@ -54,6 +55,12 @@
           <div class="shortcut-title">快捷键</div>
           <div class="shortcut-list">
             <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>F</kbd><span>搜索照片</span></div>
+            <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>滚轮</kbd><span>调整照片墙缩略图</span></div>
+            <div class="shortcut-row"><kbd>Alt</kbd><span>立即显示悬停照片参数</span></div>
+            <div class="shortcut-row"><kbd>滚轮</kbd><span>灯箱缩放图片</span></div>
+            <div class="shortcut-row"><kbd>Q</kbd><span>选择照片快速调整</span></div>
+            <div class="shortcut-row"><kbd>灯箱</kbd><kbd>Q</kbd><span>调整当前照片</span></div>
+            <div class="shortcut-row"><kbd>C</kbd><span>对比图片</span></div>
             <div class="shortcut-row"><kbd>F</kbd><span>收藏悬停照片</span></div>
             <div class="shortcut-row"><kbd>E</kbd><span>编辑悬停照片笔记</span></div>
             <div class="shortcut-row"><kbd>R</kbd><span>编辑当前日期笔记</span></div>
@@ -288,7 +295,11 @@
     <div id="lightbox-info" class="lightbox-info">
       <div id="lightbox-info-head" class="lightbox-info-head">
         <span>照片参数</span>
-        <button id="lightbox-info-details-toggle" class="lightbox-info-head-btn" title="折叠详细参数" aria-pressed="false">⌄</button>
+        <button id="lightbox-info-details-toggle" class="lightbox-info-head-btn" title="折叠详细参数" aria-expanded="true" aria-label="折叠详细参数">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m6 9 6 6 6-6"></path>
+          </svg>
+        </button>
         <button id="lightbox-info-close" class="lightbox-info-close" title="关闭参数">×</button>
       </div>
       <div id="lightbox-info-body"></div>
@@ -322,6 +333,9 @@
     </div>
   </div>
 
-  <script src="assets/app.js?v=favorite-retain-nav-hover-20260622-1"></script>
+  <script src="assets/quick_edit_worker.js?v=settings-alt-exif-20260703-1"></script>
+  <script src="assets/pic_modification.js?v=settings-alt-exif-20260703-1"></script>
+  <script src="assets/raw_edit.js?v=raw-develop-20260704-1"></script>
+  <script src="assets/app.js?v=settings-alt-exif-20260703-1"></script>
 </body>
 </html>

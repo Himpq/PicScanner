@@ -1,21 +1,30 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import ctypes
+import hashlib
 import math
 import os
 import re
 import shutil
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import webview
 
 from WebViewUI import WindowApi
-from .config_store import config_store
+from .config_store import DATA_DIR, config_store
 from .exif_reader import is_renderable_image
 from .scanner import scanner
 from .source_identity import ensure_marker, is_removable_source, marker_path, path_source_id, read_marker
 from .storage import storage
+from .raw_developer import (
+    RawDevelopError,
+    ensure_raw_developed_preview,
+    save_raw_developed_tiff,
+)
 from .thumbnailer import (
     LIGHTBOX_PREVIEW_ALGORITHM_VERSION,
     ThumbnailError,
@@ -36,6 +45,16 @@ DEFAULT_EXPORT_PRESET = {
     "destination": "",
     "template": "{origin_name}",
 }
+QUICK_EDIT_SAVE_FORMATS = {
+    "jpg": {"suffix": ".jpg", "mime": "image/jpeg", "label": "JPEG"},
+    "jpeg": {"suffix": ".jpg", "mime": "image/jpeg", "label": "JPEG"},
+    "png": {"suffix": ".png", "mime": "image/png", "label": "PNG"},
+    "webp": {"suffix": ".webp", "mime": "image/webp", "label": "WebP"},
+    "tif16": {"suffix": ".tif", "mime": "image/tiff", "label": "TIFF 16-bit"},
+    "tiff16": {"suffix": ".tif", "mime": "image/tiff", "label": "TIFF 16-bit"},
+}
+QUICK_EDIT_LUT_LIBRARY_DIR = DATA_DIR / "luts"
+QUICK_EDIT_LUT_MAX_BYTES = 32 * 1024 * 1024
 IMAGE_EXPORT_SUFFIXES = {
     ".arw", ".raw", ".dng", ".cr2", ".cr3", ".nef", ".nrw",
     ".raf", ".rw2", ".orf", ".srw", ".pef", ".jpg", ".jpeg",
@@ -152,6 +171,32 @@ def _windows_drives() -> list[dict]:
 class PicScannerApi(WindowApi):
     def __init__(self):
         super().__init__()
+
+    @staticmethod
+    def _format_perf_value(value):
+        if isinstance(value, float):
+            return f"{value:.2f}"
+        if isinstance(value, (int, str, bool)) or value is None:
+            return str(value)
+        if isinstance(value, dict):
+            return "{" + ", ".join(
+                f"{key}={PicScannerApi._format_perf_value(val)}"
+                for key, val in value.items()
+            ) + "}"
+        if isinstance(value, list):
+            return "[" + ", ".join(PicScannerApi._format_perf_value(item) for item in value) + "]"
+        return str(value)
+
+    def log_quick_edit_perf(self, label, payload=None):
+        label_text = str(label or "").strip() or "event"
+        data = payload if isinstance(payload, dict) else {}
+        parts = [
+            f"{key}={self._format_perf_value(value)}"
+            for key, value in data.items()
+        ]
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[PicScannerQuickEditPerf] {timestamp} {label_text} " + " ".join(parts), flush=True)
+        return {"success": True}
 
     def _resolve_source_path(self, root_path) -> str:
         return str(Path(str(root_path or "")).resolve())
@@ -835,6 +880,18 @@ class PicScannerApi(WindowApi):
         config_store.set("lightbox_info_details_collapsed", value)
         return {"success": True, "lightbox_info_details_collapsed": value}
 
+    def set_quick_edit_collapsed_sections(self, sections):
+        raw = sections if isinstance(sections, dict) else {}
+        value = {
+            "tone": bool(raw.get("tone")),
+            "color": bool(raw.get("color")),
+            "detail": bool(raw.get("detail")),
+            "hsl": bool(raw.get("hsl")),
+            "lut": bool(raw.get("lut")),
+        }
+        config_store.set("quick_edit_collapsed_sections", value)
+        return {"success": True, "quick_edit_collapsed_sections": value}
+
     def _normalize_export_preset(self, preset=None) -> dict:
         raw = preset if isinstance(preset, dict) else config_store.get("export_preset", {})
         raw = raw if isinstance(raw, dict) else {}
@@ -909,6 +966,369 @@ class PicScannerApi(WindowApi):
             "success": True,
             "path": folder,
             "title": Path(folder).name or folder,
+        }
+
+    def _quick_edit_lut_library_dir(self) -> Path:
+        QUICK_EDIT_LUT_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+        return QUICK_EDIT_LUT_LIBRARY_DIR.resolve()
+
+    @staticmethod
+    def _quick_edit_lut_title_from_path(path: Path) -> str:
+        stem = str(path.stem or "LUT").strip()
+        title = re.sub(r"--[0-9a-f]{12}$", "", stem, flags=re.IGNORECASE).strip()
+        return title or stem or "LUT"
+
+    def _quick_edit_lut_item(self, path: Path) -> dict:
+        p = Path(path)
+        stat = p.stat()
+        title = self._quick_edit_lut_title_from_path(p)
+        return {
+            "id": p.stem,
+            "name": p.name,
+            "title": title,
+            "bytes": int(stat.st_size),
+            "modified_at": int(stat.st_mtime),
+        }
+
+    def _quick_edit_lut_path(self, lut_id) -> Path | None:
+        raw_id = str(lut_id or "").strip()
+        if not raw_id or Path(raw_id).name != raw_id:
+            return None
+        if self._clean_export_path_part(raw_id) != raw_id:
+            return None
+        library = self._quick_edit_lut_library_dir()
+        path = (library / f"{raw_id}.cube").resolve(strict=False)
+        if path.parent != library:
+            return None
+        return path
+
+    @staticmethod
+    def _quick_edit_lut_digest(path: Path) -> str:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _validate_quick_edit_lut_text(text: str) -> None:
+        size = 0
+        data_rows = 0
+        for raw_line in str(text or "").splitlines():
+            line = str(raw_line or "").strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            key = str(parts[0] or "").upper()
+            if key == "LUT_3D_SIZE":
+                try:
+                    size = max(0, int(float(parts[1] if len(parts) > 1 else 0)))
+                except (TypeError, ValueError):
+                    size = 0
+                continue
+            if key in {"TITLE", "DOMAIN_MIN", "DOMAIN_MAX"} or re.fullmatch(r"[A-Z_]+", key, flags=re.IGNORECASE):
+                continue
+            try:
+                rgb = [float(part) for part in parts[:3]]
+            except (TypeError, ValueError):
+                continue
+            if len(rgb) == 3 and all(math.isfinite(value) for value in rgb):
+                data_rows += 1
+
+        if size < 2:
+            raise ValueError("LUT 缺少有效的 LUT_3D_SIZE")
+        expected_rows = size * size * size
+        if data_rows != expected_rows:
+            raise ValueError(f"LUT 数据数量不匹配，期望 {expected_rows} 行，实际 {data_rows} 行")
+
+    def list_quick_edit_luts(self):
+        library = self._quick_edit_lut_library_dir()
+        items = []
+        for path in library.glob("*.cube"):
+            if not path.is_file():
+                continue
+            try:
+                items.append(self._quick_edit_lut_item(path))
+            except OSError:
+                continue
+        items.sort(key=lambda item: (item.get("modified_at") or 0, item.get("title") or ""), reverse=True)
+        return {"success": True, "items": items}
+
+    def import_quick_edit_lut(self):
+        win = self._get_window("")
+        if win is None:
+            return {"success": False, "message": "窗口尚未就绪"}
+
+        result = win.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("Cube LUT (*.cube)",),
+        )
+        if not result:
+            return {"success": False, "cancelled": True}
+
+        selected = result[0] if isinstance(result, (list, tuple)) else result
+        source = Path(str(selected or "")).resolve()
+        if source.suffix.lower() != ".cube":
+            return {"success": False, "message": "请选择 .cube LUT 文件"}
+        if not source.exists() or not source.is_file():
+            return {"success": False, "message": f"LUT 文件不存在: {source}"}
+
+        size = int(source.stat().st_size)
+        if size <= 0:
+            return {"success": False, "message": "LUT 文件为空"}
+        if size > QUICK_EDIT_LUT_MAX_BYTES:
+            return {
+                "success": False,
+                "message": f"LUT 文件过大，当前限制 {_format_bytes(QUICK_EDIT_LUT_MAX_BYTES)}",
+            }
+
+        library = self._quick_edit_lut_library_dir()
+        digest = self._quick_edit_lut_digest(source)
+        short_hash = digest[:12]
+        existing = next(library.glob(f"*--{short_hash}.cube"), None)
+        duplicate = existing is not None
+
+        if existing is not None:
+            target = existing
+        else:
+            stem = self._clean_export_path_part(source.stem) or "LUT"
+            target = (library / f"{stem}--{short_hash}.cube").resolve(strict=False)
+            if target.parent != library:
+                return {"success": False, "message": "LUT 文件名解析异常"}
+            shutil.copy2(source, target)
+
+        item = self._quick_edit_lut_item(target)
+        return {
+            "success": True,
+            "item": item,
+            "duplicate": duplicate,
+            "message": ("LUT 已在库中：" if duplicate else "已导入 LUT：") + str(item.get("title") or item.get("name") or ""),
+        }
+
+    def save_quick_edit_lut(self, filename, text):
+        source_name = str(filename or "").strip() or "LUT.cube"
+        if Path(source_name).name != source_name:
+            return {"success": False, "message": "LUT 文件名无效"}
+        if Path(source_name).suffix.lower() != ".cube":
+            return {"success": False, "message": "请选择 .cube LUT 文件"}
+
+        content = str(text or "")
+        if not content.strip():
+            return {"success": False, "message": "LUT 文件为空"}
+        try:
+            self._validate_quick_edit_lut_text(content)
+        except ValueError as exc:
+            return {"success": False, "message": str(exc)}
+        data = content.encode("utf-8")
+        size = len(data)
+        if size > QUICK_EDIT_LUT_MAX_BYTES:
+            return {
+                "success": False,
+                "message": f"LUT 文件过大，当前限制 {_format_bytes(QUICK_EDIT_LUT_MAX_BYTES)}",
+            }
+
+        library = self._quick_edit_lut_library_dir()
+        digest = hashlib.sha256(data).hexdigest()
+        short_hash = digest[:12]
+        existing = next(library.glob(f"*--{short_hash}.cube"), None)
+        duplicate = existing is not None
+
+        if existing is not None:
+            target = existing
+        else:
+            stem = self._clean_export_path_part(Path(source_name).stem) or "LUT"
+            target = (library / f"{stem}--{short_hash}.cube").resolve(strict=False)
+            if target.parent != library:
+                return {"success": False, "message": "LUT 文件名解析异常"}
+            target.write_bytes(data)
+
+        item = self._quick_edit_lut_item(target)
+        return {
+            "success": True,
+            "item": item,
+            "duplicate": duplicate,
+            "message": ("LUT 已在库中：" if duplicate else "已导入 LUT：") + str(item.get("title") or item.get("name") or ""),
+        }
+
+    def read_quick_edit_lut(self, lut_id):
+        path = self._quick_edit_lut_path(lut_id)
+        if path is None:
+            return {"success": False, "message": "LUT 标识无效"}
+        if not path.exists() or not path.is_file():
+            return {"success": False, "message": "LUT 不存在，请刷新 LUT 库"}
+        size = int(path.stat().st_size)
+        if size <= 0:
+            return {"success": False, "message": "LUT 文件为空"}
+        if size > QUICK_EDIT_LUT_MAX_BYTES:
+            return {
+                "success": False,
+                "message": f"LUT 文件过大，当前限制 {_format_bytes(QUICK_EDIT_LUT_MAX_BYTES)}",
+            }
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError as exc:
+            return {"success": False, "message": f"LUT 文本编码不是 UTF-8/ASCII: {exc}"}
+        except OSError as exc:
+            return {"success": False, "message": f"LUT 读取失败: {exc}"}
+        return {"success": True, "item": self._quick_edit_lut_item(path), "text": text}
+
+    def _quick_edit_save_format(self, format_key) -> dict:
+        key = str(format_key or "jpg").strip().lower()
+        return QUICK_EDIT_SAVE_FORMATS.get(key) or QUICK_EDIT_SAVE_FORMATS["jpg"]
+
+    def _quick_edit_save_target(self, destination, source_path, format_key) -> tuple[Path | None, str | None]:
+        destination_text = str(destination or "").strip()
+        if not destination_text:
+            return None, "保存路径不能为空"
+        target_root = Path(destination_text).resolve()
+        if not target_root.exists() or not target_root.is_dir():
+            return None, f"保存目录不存在: {target_root}"
+
+        fmt = self._quick_edit_save_format(format_key)
+        source = Path(str(source_path or "")).resolve()
+        source_name = source.name if str(source_path or "").strip() else "photo"
+        stem = self._clean_export_path_part(Path(source_name).stem or "photo") or "photo"
+        target = (target_root / f"{stem}_edited{fmt['suffix']}").resolve(strict=False)
+        if target.parent != target_root:
+            return None, "保存文件名解析异常"
+
+        source_key = os.path.normcase(str(source.resolve(strict=False))) if str(source_path or "").strip() else ""
+        target_key = os.path.normcase(str(target))
+        if source_key and source_key == target_key:
+            return None, "不能覆盖原始文件"
+        if target.exists():
+            return None, f"目标文件已存在，为避免覆盖请更换目录或先重命名: {target}"
+        return target, None
+
+    def check_quick_edit_save_destination(self, destination, source_path, format_key="jpg"):
+        target, error = self._quick_edit_save_target(destination, source_path, format_key)
+        if error:
+            return {"success": False, "message": error}
+        return {"success": True, "path": str(target), "filename": target.name}
+
+    def save_quick_edit_image(self, data_url, destination, source_path, format_key="jpg", quality=92):
+        target, error = self._quick_edit_save_target(destination, source_path, format_key)
+        if error:
+            return {"success": False, "message": error}
+
+        fmt = self._quick_edit_save_format(format_key)
+        text = str(data_url or "")
+        marker = ";base64,"
+        if not text.startswith("data:") or marker not in text:
+            return {"success": False, "message": "保存数据格式无效"}
+        header, payload = text.split(marker, 1)
+        mime = header[5:].split(";", 1)[0].strip().lower()
+        if mime != fmt["mime"]:
+            return {
+                "success": False,
+                "message": f"编码格式不匹配：期望 {fmt['label']}，实际 {mime or '未知'}",
+            }
+        try:
+            binary = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            return {"success": False, "message": f"图片数据解码失败: {exc}"}
+        if not binary:
+            return {"success": False, "message": "图片数据为空"}
+
+        try:
+            with target.open("xb") as fh:
+                fh.write(binary)
+        except FileExistsError:
+            return {"success": False, "message": f"目标文件已存在，为避免覆盖请更换目录或先重命名: {target}"}
+        except Exception as exc:
+            return {"success": False, "message": f"保存失败: {exc}"}
+
+        return {
+            "success": True,
+            "path": str(target),
+            "filename": target.name,
+            "format": fmt["label"],
+            "quality": int(float(quality or 0)),
+            "bytes": len(binary),
+            "message": f"已保存到 {target}",
+        }
+
+    def develop_quick_edit_raw_preview(self, photo_id, raw_params=None, max_side=2400, preview_profile=True):
+        photo = storage.get_photo(int(photo_id))
+        if not photo:
+            return {"success": False, "message": "图片不存在"}
+        payload = self._photo_payload(photo, include_thumbnail=True)
+        source = Path(str(payload.get("path") or ""))
+        if not source.exists() or not source.is_file():
+            return {"success": False, "message": f"RAW 文件不存在: {source}", "photo": payload}
+        if not is_raw_image(source):
+            return {"success": False, "message": "当前图片不是 RAW 文件", "photo": payload}
+
+        try:
+            side = max(0, int(float(max_side or 0)))
+        except (TypeError, ValueError):
+            side = 2400
+        if side > 0:
+            side = max(720, min(4096, side))
+
+        try:
+            preview = ensure_raw_developed_preview(
+                source,
+                raw_params or {},
+                max_side=side,
+                preview_profile=preview_profile is not False,
+            )
+        except RawDevelopError as exc:
+            print(f"[PicScannerRawDevelop] 预览生成失败 photo_id={photo_id} path={source} error={exc}", flush=True)
+            return {"success": False, "message": str(exc), "photo": payload}
+        except Exception as exc:
+            print(f"[PicScannerRawDevelop] 预览生成异常 photo_id={photo_id} path={source} error={exc}", flush=True)
+            return {"success": False, "message": f"RAW 显影预览失败: {exc}", "photo": payload}
+
+        return {
+            "success": True,
+            "url": _versioned_file_uri(preview["path"]),
+            "path": str(preview["path"]),
+            "width": int(preview["width"]),
+            "height": int(preview["height"]),
+            "params": preview["params"],
+            "photo": payload,
+        }
+
+    def save_quick_edit_raw_tiff(self, photo_id, raw_params, destination, source_path=None, format_key="tif16"):
+        photo = storage.get_photo(int(photo_id))
+        if not photo:
+            return {"success": False, "message": "图片不存在"}
+        payload = self._photo_payload(photo)
+        source = Path(str(payload.get("path") or ""))
+        if not source.exists() or not source.is_file():
+            return {"success": False, "message": f"RAW 文件不存在: {source}"}
+        if not is_raw_image(source):
+            return {"success": False, "message": "当前图片不是 RAW 文件，不能导出 16bit RAW TIFF"}
+
+        key = str(format_key or "tif16").strip().lower()
+        if key not in {"tif16", "tiff16"}:
+            return {"success": False, "message": "RAW 16bit 导出格式必须是 TIFF 16-bit"}
+        target, error = self._quick_edit_save_target(destination, source_path or str(source), "tif16")
+        if error:
+            return {"success": False, "message": error}
+
+        try:
+            result = save_raw_developed_tiff(source, target, raw_params or {})
+        except RawDevelopError as exc:
+            print(f"[PicScannerRawDevelop] 16bit TIFF 保存失败 photo_id={photo_id} path={source} error={exc}", flush=True)
+            return {"success": False, "message": str(exc)}
+        except Exception as exc:
+            print(f"[PicScannerRawDevelop] 16bit TIFF 保存异常 photo_id={photo_id} path={source} error={exc}", flush=True)
+            return {"success": False, "message": f"16bit TIFF 保存失败: {exc}"}
+
+        return {
+            "success": True,
+            "path": str(result["path"]),
+            "filename": Path(result["path"]).name,
+            "format": "TIFF 16-bit",
+            "width": int(result["width"]),
+            "height": int(result["height"]),
+            "message": f"已保存到 {result['path']}",
         }
 
     def get_export_summary(self, source_id, export_type, category=None):
@@ -1148,6 +1568,29 @@ class PicScannerApi(WindowApi):
                 "photo": payload,
             }
         return {"success": True, "photo": payload}
+
+    def get_quick_edit_pair_options(self, photo_id):
+        photo = storage.get_photo(int(photo_id))
+        if not photo:
+            return {"success": False, "message": "图片不存在"}
+        payload = self._photo_payload(photo)
+        self._apply_photo_mark(payload)
+        if not payload.get("is_jpg") or not payload.get("has_raw_pair"):
+            return {"success": False, "message": "当前照片没有 RAW+JPG 配对"}
+
+        raw_rows = storage.raw_pairs_for_photo(int(photo_id))
+        raw_options = []
+        for row in raw_rows:
+            item = self._photo_payload(row)
+            self._apply_photo_mark(item)
+            raw_options.append(item)
+        if not raw_options:
+            return {"success": False, "message": "数据库标记存在 RAW 配对，但没有找到对应 RAW 文件，请重新扫描"}
+        return {
+            "success": True,
+            "jpg_photo": payload,
+            "raw_options": raw_options,
+        }
 
     def get_photo_lightbox_preview(self, photo_id):
         photo = storage.get_photo(int(photo_id))

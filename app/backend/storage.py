@@ -900,6 +900,36 @@ class Storage:
             ).fetchone()
             return dict(row) if row else None
 
+    def raw_pairs_for_photo(self, photo_id: int) -> list[dict]:
+        with self._lock, self._connect() as conn:
+            source = conn.execute(
+                """
+                SELECT source_id, folder_key, stem_key, is_jpg
+                FROM photos
+                WHERE id=?
+                """,
+                (int(photo_id),),
+            ).fetchone()
+            if not source or not int(source["is_jpg"] or 0):
+                return []
+            rows = conn.execute(
+                f"""
+                SELECT p.*, {self._raw_pair_sql("p")}
+                FROM photos AS p
+                WHERE p.source_id=?
+                  AND p.folder_key=?
+                  AND p.stem_key=?
+                  AND p.is_raw=1
+                ORDER BY p.id ASC
+                """,
+                (
+                    str(source["source_id"] or ""),
+                    str(source["folder_key"] or ""),
+                    str(source["stem_key"] or ""),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def photo_exists(self, source_id: str, root_path: str, path: str | Path) -> bool:
         p = Path(path)
         root = Path(root_path)

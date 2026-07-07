@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
         "tone": False,
         "color": False,
         "detail": False,
+        "splitTone": False,
         "hsl": False,
         "lut": False,
     },

@@ -132,9 +132,10 @@
       histogramData: null,
       histogramRenderToken: 0,
       hslColor: 'red',
+      hslPickerActive: false,
       lut: null,
       luts: [],
-      collapsedSections: { tone: false, color: false, detail: false, hsl: false, lut: false },
+      collapsedSections: { tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false },
       lutLibrary: [],
       lutLibraryLoaded: false,
       lutLibraryLoading: false,
@@ -178,6 +179,15 @@
       rawPreviewInFlightSignature: '',
       rawPreviewQueuedSignature: '',
       rawPreviewQueuedOptions: null,
+      presets: [],
+      presetsLoaded: false,
+      presetsLoading: false,
+      presetsMessage: '',
+      presetModal: null,
+      presetApplyConfirm: null,
+      presetApplyingId: '',
+      presetSelectedId: '',
+      compareOriginalActive: false,
       previewObjectUrl: '',
       zoomTimer: null,
       history: [],
@@ -237,7 +247,7 @@
   const PREVIEW_CONCURRENCY = 4;
   const MORE_SCAN_COOLDOWN_MS = 650;
   const RENDER_AHEAD_PHOTOS = 20;
-  const APP_BUILD = 'quick-edit-panel-preview-20260705-1';
+  const APP_BUILD = 'quick-edit-effects-20260708-1';
   const FAVORITE_CATEGORY = '__picscanner_favorite_filter__';
   const DATE_RAIL_LOAD_LIMIT = 5000;
   const INITIAL_PHOTO_LIMIT = 40;
@@ -296,8 +306,24 @@
     sharpening: 0,
     clarity: 0,
     grain: 0,
+    vignette: 0,
+    vignetteFeather: 58,
+    blackWhite: 0,
+    bwRed: 0,
+    bwYellow: 0,
+    bwGreen: 0,
+    bwAqua: 0,
+    bwBlue: 0,
+    bwMagenta: 0,
     temperature: QUICK_EDIT_TEMPERATURE_NEUTRAL_K,
     tint: 0,
+    splitToneShadowsHue: 220,
+    splitToneShadowsStrength: 0,
+    splitToneMidtonesHue: 35,
+    splitToneMidtonesStrength: 0,
+    splitToneHighlightsHue: 45,
+    splitToneHighlightsStrength: 0,
+    splitToneBalance: 0,
     rawHighlightRecovery: 0,
     rawNoiseReduction: 0,
     lutStrength: 100,
@@ -311,6 +337,12 @@
     QUICK_EDIT_DEFAULT_PARAMS['hsl_' + color.key + '_saturation'] = 0;
     QUICK_EDIT_DEFAULT_PARAMS['hsl_' + color.key + '_luminance'] = 0;
   });
+  const QUICK_EDIT_SPLIT_TONE_PRESETS = [
+    { key: 'tealOrange', label: '青橙', shadowsHue: 205, shadowsStrength: 26, midtonesHue: 35, midtonesStrength: 8, highlightsHue: 42, highlightsStrength: 22, balance: 10 },
+    { key: 'warmFilm', label: '暖胶片', shadowsHue: 225, shadowsStrength: 12, midtonesHue: 38, midtonesStrength: 14, highlightsHue: 48, highlightsStrength: 28, balance: 18 },
+    { key: 'coolNight', label: '冷夜', shadowsHue: 225, shadowsStrength: 32, midtonesHue: 205, midtonesStrength: 14, highlightsHue: 48, highlightsStrength: 8, balance: -18 },
+    { key: 'retroGreen', label: '复古绿', shadowsHue: 155, shadowsStrength: 22, midtonesHue: 55, midtonesStrength: 10, highlightsHue: 43, highlightsStrength: 20, balance: 0 },
+  ];
   const QUICK_EDIT_SAVE_OPTIONS_KEY = 'PicScannerQuickEditSaveOptions';
   const QUICK_EDIT_SAVE_FORMATS = [
     { key: 'jpg', label: 'JPEG', detail: '体积小，适合分享和通用查看' },
@@ -550,6 +582,7 @@
     const field = multiline ? els.inputModalTextarea : els.inputModalInput;
     field.value = String(config.value || '');
     field.placeholder = String(config.placeholder || '');
+    document.body.appendChild(els.inputModal);
     show(els.inputModal);
     requestAnimationFrame(() => {
       field.focus();
@@ -1854,6 +1887,9 @@
         title: '快速调整面板',
         detail: '影调 ' + (quickSections.tone ? '折叠' : '展开')
           + ' · 饱和度&色温 ' + (quickSections.color ? '折叠' : '展开')
+          + ' · 效果 ' + (quickSections.effects ? '折叠' : '展开')
+          + ' · 黑白混色 ' + (quickSections.blackWhite ? '折叠' : '展开')
+          + ' · 色调分离 ' + (quickSections.splitTone ? '折叠' : '展开')
           + ' · HSL ' + (quickSections.hsl ? '折叠' : '展开')
           + ' · LUT ' + (quickSections.lut ? '折叠' : '展开'),
         value: '已记忆',
@@ -1979,6 +2015,27 @@
       '适合只处理明暗层次时减少干扰。',
       sections.color,
       (checked) => setQuickEditCollapsedSections(Object.assign({}, quickEditCollapsedSections(), { color: checked })),
+    );
+    appendSettingsSwitch(
+      quick.body,
+      '效果区默认折叠',
+      '适合暂时不使用暗角等氛围效果时减少面板高度。',
+      sections.effects,
+      (checked) => setQuickEditCollapsedSections(Object.assign({}, quickEditCollapsedSections(), { effects: checked })),
+    );
+    appendSettingsSwitch(
+      quick.body,
+      '黑白混色区默认折叠',
+      '适合只做彩色照片时减少面板高度。',
+      sections.blackWhite,
+      (checked) => setQuickEditCollapsedSections(Object.assign({}, quickEditCollapsedSections(), { blackWhite: checked })),
+    );
+    appendSettingsSwitch(
+      quick.body,
+      '色调分离区默认折叠',
+      '适合只做基础色彩或 HSL 微调时减少面板高度。',
+      sections.splitTone,
+      (checked) => setQuickEditCollapsedSections(Object.assign({}, quickEditCollapsedSections(), { splitTone: checked })),
     );
     appendSettingsSwitch(
       quick.body,
@@ -5154,8 +5211,24 @@
       sharpening: clamp(Number(raw.sharpening || 0), 0, 100),
       clarity: clamp(Number(raw.clarity || 0), -100, 100),
       grain: clamp(Number(raw.grain || 0), 0, 100),
+      vignette: clamp(Number(raw.vignette || 0), -100, 100),
+      vignetteFeather: clamp(Number(raw.vignetteFeather === undefined ? 58 : raw.vignetteFeather), 0, 100),
+      blackWhite: clamp(Number(raw.blackWhite || 0), 0, 100),
+      bwRed: clamp(Number(raw.bwRed || 0), -100, 100),
+      bwYellow: clamp(Number(raw.bwYellow || 0), -100, 100),
+      bwGreen: clamp(Number(raw.bwGreen || 0), -100, 100),
+      bwAqua: clamp(Number(raw.bwAqua || 0), -100, 100),
+      bwBlue: clamp(Number(raw.bwBlue || 0), -100, 100),
+      bwMagenta: clamp(Number(raw.bwMagenta || 0), -100, 100),
       temperature: normalizeQuickEditTemperature(raw.temperature),
       tint: clamp(Number(raw.tint || 0), -100, 100),
+      splitToneShadowsHue: clamp(Number(raw.splitToneShadowsHue === undefined ? 220 : raw.splitToneShadowsHue), 0, 360),
+      splitToneShadowsStrength: clamp(Number(raw.splitToneShadowsStrength || 0), 0, 100),
+      splitToneMidtonesHue: clamp(Number(raw.splitToneMidtonesHue === undefined ? 35 : raw.splitToneMidtonesHue), 0, 360),
+      splitToneMidtonesStrength: clamp(Number(raw.splitToneMidtonesStrength || 0), 0, 100),
+      splitToneHighlightsHue: clamp(Number(raw.splitToneHighlightsHue === undefined ? 45 : raw.splitToneHighlightsHue), 0, 360),
+      splitToneHighlightsStrength: clamp(Number(raw.splitToneHighlightsStrength || 0), 0, 100),
+      splitToneBalance: clamp(Number(raw.splitToneBalance || 0), -100, 100),
       rawHighlightRecovery: clamp(Number(raw.rawHighlightRecovery || 0), 0, 100),
       rawNoiseReduction: clamp(Number(raw.rawNoiseReduction || 0), 0, 100),
       lutStrength: clamp(Number(raw.lutStrength === undefined ? 100 : raw.lutStrength), 0, 100),
@@ -5209,8 +5282,24 @@
         sharpening: cleanBase.sharpening + cleanExtra.sharpening,
         clarity: cleanBase.clarity + cleanExtra.clarity,
         grain: cleanBase.grain + cleanExtra.grain,
+        vignette: cleanBase.vignette + cleanExtra.vignette,
+        vignetteFeather: cleanExtra.vignette ? cleanExtra.vignetteFeather : cleanBase.vignetteFeather,
+        blackWhite: cleanBase.blackWhite + cleanExtra.blackWhite,
+        bwRed: cleanBase.bwRed + cleanExtra.bwRed,
+        bwYellow: cleanBase.bwYellow + cleanExtra.bwYellow,
+        bwGreen: cleanBase.bwGreen + cleanExtra.bwGreen,
+        bwAqua: cleanBase.bwAqua + cleanExtra.bwAqua,
+        bwBlue: cleanBase.bwBlue + cleanExtra.bwBlue,
+        bwMagenta: cleanBase.bwMagenta + cleanExtra.bwMagenta,
         temperature: combineQuickEditTemperature(cleanBase.temperature, cleanExtra.temperature),
         tint: cleanBase.tint + cleanExtra.tint,
+        splitToneShadowsHue: cleanExtra.splitToneShadowsStrength ? cleanExtra.splitToneShadowsHue : cleanBase.splitToneShadowsHue,
+        splitToneShadowsStrength: cleanBase.splitToneShadowsStrength + cleanExtra.splitToneShadowsStrength,
+        splitToneMidtonesHue: cleanExtra.splitToneMidtonesStrength ? cleanExtra.splitToneMidtonesHue : cleanBase.splitToneMidtonesHue,
+        splitToneMidtonesStrength: cleanBase.splitToneMidtonesStrength + cleanExtra.splitToneMidtonesStrength,
+        splitToneHighlightsHue: cleanExtra.splitToneHighlightsStrength ? cleanExtra.splitToneHighlightsHue : cleanBase.splitToneHighlightsHue,
+        splitToneHighlightsStrength: cleanBase.splitToneHighlightsStrength + cleanExtra.splitToneHighlightsStrength,
+        splitToneBalance: cleanBase.splitToneBalance + cleanExtra.splitToneBalance,
         rawHighlightRecovery: cleanBase.rawHighlightRecovery + cleanExtra.rawHighlightRecovery,
         rawNoiseReduction: cleanBase.rawNoiseReduction + cleanExtra.rawNoiseReduction,
         lutStrength: cleanExtra.lutStrength,
@@ -5252,10 +5341,28 @@
       || key === 'saturation'
       || key === 'vibrance'
       || key === 'clarity'
+      || key === 'vignette'
+      || key === 'bwRed'
+      || key === 'bwYellow'
+      || key === 'bwGreen'
+      || key === 'bwAqua'
+      || key === 'bwBlue'
+      || key === 'bwMagenta'
     ) return (number > 0 ? '+' : '') + Math.round(number) + '%';
-    if (key === 'sharpening' || key === 'grain') return Math.round(number) + '%';
+    if (key === 'sharpening' || key === 'grain' || key === 'blackWhite' || key === 'vignetteFeather') return Math.round(number) + '%';
     if (key === 'temperature') return Math.round(normalizeQuickEditTemperature(number)) + ' K';
     if (key === 'tint') return (number > 0 ? '+' : '') + Math.round(number);
+    if (
+      key === 'splitToneShadowsHue'
+      || key === 'splitToneMidtonesHue'
+      || key === 'splitToneHighlightsHue'
+    ) return Math.round(number) + ' 度';
+    if (
+      key === 'splitToneShadowsStrength'
+      || key === 'splitToneMidtonesStrength'
+      || key === 'splitToneHighlightsStrength'
+    ) return Math.round(number) + '%';
+    if (key === 'splitToneBalance') return (number > 0 ? '+' : '') + Math.round(number);
     if (key === 'rawHighlightRecovery' || key === 'rawNoiseReduction') return Math.round(number) + '%';
     if (key === 'lutStrength') return Math.round(number) + '%';
     return String(number);
@@ -5268,6 +5375,19 @@
   function quickEditHslParamKey(field) {
     const color = quickEditHslColorConfig(state.quickEdit.hslColor);
     return 'hsl_' + color.key + '_' + field;
+  }
+
+  function quickEditHslColorFromHue(hue) {
+    let best = QUICK_EDIT_HSL_COLORS[0];
+    let bestDistance = Infinity;
+    QUICK_EDIT_HSL_COLORS.forEach((color) => {
+      const distance = quickEditHueDistance(hue, color.hue);
+      if (distance < bestDistance) {
+        best = color;
+        bestDistance = distance;
+      }
+    });
+    return best;
   }
 
   function quickEditHslValueText(field, value) {
@@ -5466,6 +5586,51 @@
     return quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255)
       | (quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255) << 8)
       | (quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255) << 16);
+  }
+
+  function quickEditSplitToneActive(params) {
+    return !!(
+      Number(params.splitToneShadowsStrength || 0)
+      || Number(params.splitToneMidtonesStrength || 0)
+      || Number(params.splitToneHighlightsStrength || 0)
+    );
+  }
+
+  function quickEditSplitToneWeight(value, center, width) {
+    const distance = Math.abs(Number(value || 0) - Number(center || 0));
+    const raw = clamp(1 - distance / Math.max(0.0001, Number(width || 1)), 0, 1);
+    return raw * raw * (3 - 2 * raw);
+  }
+
+  function quickEditSplitToneColor(hue) {
+    return quickEditHslToRgb(hue, 0.72, 0.5);
+  }
+
+  function quickEditBlendSplitToneChannel(value, toneValue, weight) {
+    return quickEditClampByte(Number(value || 0) + (Number(toneValue || 0) - Number(value || 0)) * weight);
+  }
+
+  function quickEditApplySplitTone(r, g, b, clean) {
+    const luminance = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255, 0, 1);
+    const balance = clamp(Number(clean.splitToneBalance || 0) / 100, -1, 1);
+    const shadowCenter = 0.24 + balance * 0.16;
+    const highlightCenter = 0.76 + balance * 0.16;
+    const midCenter = 0.5 + balance * 0.08;
+    const shadowWeight = quickEditSplitToneWeight(luminance, shadowCenter, 0.46) * clamp(Number(clean.splitToneShadowsStrength || 0) / 100, 0, 1);
+    const midtoneWeight = quickEditSplitToneWeight(luminance, midCenter, 0.38) * clamp(Number(clean.splitToneMidtonesStrength || 0) / 100, 0, 1);
+    const highlightWeight = quickEditSplitToneWeight(luminance, highlightCenter, 0.46) * clamp(Number(clean.splitToneHighlightsStrength || 0) / 100, 0, 1);
+    const totalWeight = shadowWeight + midtoneWeight + highlightWeight;
+    if (totalWeight <= 0.0001) return r | (g << 8) | (b << 16);
+    const shadowColor = quickEditSplitToneColor(clean.splitToneShadowsHue);
+    const midtoneColor = quickEditSplitToneColor(clean.splitToneMidtonesHue);
+    const highlightColor = quickEditSplitToneColor(clean.splitToneHighlightsHue);
+    const strength = clamp(totalWeight * 0.42, 0, 0.72);
+    const toneR = (shadowColor.r * shadowWeight + midtoneColor.r * midtoneWeight + highlightColor.r * highlightWeight) / totalWeight;
+    const toneG = (shadowColor.g * shadowWeight + midtoneColor.g * midtoneWeight + highlightColor.g * highlightWeight) / totalWeight;
+    const toneB = (shadowColor.b * shadowWeight + midtoneColor.b * midtoneWeight + highlightColor.b * highlightWeight) / totalWeight;
+    return quickEditBlendSplitToneChannel(r, toneR, strength)
+      | (quickEditBlendSplitToneChannel(g, toneG, strength) << 8)
+      | (quickEditBlendSplitToneChannel(b, toneB, strength) << 16);
   }
 
   function quickEditHueDistance(a, b) {
@@ -5749,6 +5914,60 @@
     return packed;
   }
 
+  function quickEditBwWeightForHue(hue, center, width) {
+    const distance = quickEditHueDistance(hue, center);
+    return clamp(1 - distance / Math.max(1, Number(width || 1)), 0, 1);
+  }
+
+  function quickEditApplyBlackWhiteMixer(r, g, b, clean) {
+    const amount = clamp(Number(clean.blackWhite || 0) / 100, 0, 1);
+    if (!amount) return r | (g << 8) | (b << 16);
+    const hsl = quickEditRgbToHsl(r, g, b);
+    const weights = [
+      quickEditBwWeightForHue(hsl.h, 0, 42) * Number(clean.bwRed || 0),
+      quickEditBwWeightForHue(hsl.h, 60, 48) * Number(clean.bwYellow || 0),
+      quickEditBwWeightForHue(hsl.h, 120, 54) * Number(clean.bwGreen || 0),
+      quickEditBwWeightForHue(hsl.h, 180, 48) * Number(clean.bwAqua || 0),
+      quickEditBwWeightForHue(hsl.h, 230, 54) * Number(clean.bwBlue || 0),
+      quickEditBwWeightForHue(hsl.h, 310, 54) * Number(clean.bwMagenta || 0),
+    ];
+    const mixAdjust = weights.reduce((sum, value) => sum + value, 0) / 100;
+    const luma = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 + mixAdjust * 0.32, 0, 1);
+    const gray = quickEditClampByte(luma * 255);
+    return quickEditClampByte(r + (gray - r) * amount)
+      | (quickEditClampByte(g + (gray - g) * amount) << 8)
+      | (quickEditClampByte(b + (gray - b) * amount) << 16);
+  }
+
+  function quickEditApplyVignette(pixels, width, height, clean) {
+    const amount = clamp(Number(clean.vignette || 0) / 100, -1, 1);
+    const w = Math.max(1, Math.round(Number(width || 0)));
+    const h = Math.max(1, Math.round(Number(height || 0)));
+    if (!amount || w < 2 || h < 2 || pixels.length < w * h * 4) return;
+    const feather = clamp(Number(clean.vignetteFeather === undefined ? 58 : clean.vignetteFeather) / 100, 0, 1);
+    const inner = 0.18 + feather * 0.34;
+    const outer = 0.92 + feather * 0.18;
+    const cx = (w - 1) / 2;
+    const cy = (h - 1) / 2;
+    const invX = 1 / Math.max(1, cx);
+    const invY = 1 / Math.max(1, cy);
+    for (let y = 0; y < h; y += 1) {
+      const ny = (y - cy) * invY;
+      for (let x = 0; x < w; x += 1) {
+        const i = (y * w + x) * 4;
+        if (!pixels[i + 3]) continue;
+        const nx = (x - cx) * invX;
+        const distance = Math.sqrt(nx * nx + ny * ny);
+        const raw = clamp((distance - inner) / Math.max(0.0001, outer - inner), 0, 1);
+        const weight = raw * raw * (3 - 2 * raw);
+        const factor = amount > 0 ? 1 - weight * amount * 0.72 : 1 + weight * (-amount) * 0.48;
+        pixels[i] = quickEditClampByte(pixels[i] * factor);
+        pixels[i + 1] = quickEditClampByte(pixels[i + 1] * factor);
+        pixels[i + 2] = quickEditClampByte(pixels[i + 2] * factor);
+      }
+    }
+  }
+
   function applyQuickEditSharpening(pixels, width, height, sharpening) {
     const amount = clamp(Number(sharpening || 0), 0, 100) / 100;
     const w = Math.max(1, Math.round(Number(width || 0)));
@@ -5862,6 +6081,8 @@
     const blacks = clean.blacks;
     const dehaze = clean.dehaze;
     const vibrance = clean.vibrance;
+    const blackWhiteActive = !!clean.blackWhite;
+    const vignetteActive = !!clean.vignette;
     const temperature = quickEditTemperatureStrength(clean.temperature);
     const tint = clean.tint / 100;
     const redGain = 1 + temperature * 0.18 + Math.max(0, tint) * 0.08;
@@ -5870,6 +6091,7 @@
     const curveNeutral = isQuickEditCurveNeutral(clean);
     const hslAdjustments = quickEditActiveHslAdjustments(clean);
     const hslActive = hslAdjustments.length > 0;
+    const splitToneActive = quickEditSplitToneActive(clean);
     const useSaturationMatrix = Math.abs(globalSaturation - 1) > 0.0001;
     const useContrast = !!contrast;
     const useWhiteBlackLevels = !!(whites || blacks);
@@ -5880,6 +6102,9 @@
     const activeLuts = quickEditActiveLuts();
     if (
       !hslActive
+      && !splitToneActive
+      && !blackWhiteActive
+      && !vignetteActive
       && !useSaturationMatrix
       && !useContrast
       && !useWhiteBlackLevels
@@ -5893,7 +6118,11 @@
         let r = quickEditClampByte(pixels[i] * redGain);
         let g = quickEditClampByte(pixels[i + 1] * greenGain);
         let b = quickEditClampByte(pixels[i + 2] * blueGain);
-        const lutColor = quickEditBlendLutColor(r, g, b, activeLuts);
+        const bwColor = blackWhiteActive ? quickEditApplyBlackWhiteMixer(r, g, b, clean) : (r | (g << 8) | (b << 16));
+        const bwR = bwColor & 255;
+        const bwG = (bwColor >> 8) & 255;
+        const bwB = (bwColor >> 16) & 255;
+        const lutColor = quickEditBlendLutColor(bwR, bwG, bwB, activeLuts);
         r = lutColor & 255;
         g = (lutColor >> 8) & 255;
         b = (lutColor >> 16) & 255;
@@ -5953,11 +6182,19 @@
       const vibrantR = vibrant & 255;
       const vibrantG = (vibrant >> 8) & 255;
       const vibrantB = (vibrant >> 16) & 255;
-      const mixed = hslActive ? quickEditApplyHslMixer(vibrantR, vibrantG, vibrantB, hslAdjustments) : vibrant;
+      const splitToned = splitToneActive ? quickEditApplySplitTone(vibrantR, vibrantG, vibrantB, clean) : vibrant;
+      const splitR = splitToned & 255;
+      const splitG = (splitToned >> 8) & 255;
+      const splitB = (splitToned >> 16) & 255;
+      const mixed = hslActive ? quickEditApplyHslMixer(splitR, splitG, splitB, hslAdjustments) : splitToned;
       const mixedR = mixed & 255;
       const mixedG = (mixed >> 8) & 255;
       const mixedB = (mixed >> 16) & 255;
-      const lutColor = quickEditBlendLutColor(mixedR, mixedG, mixedB, activeLuts);
+      const bwColor = blackWhiteActive ? quickEditApplyBlackWhiteMixer(mixedR, mixedG, mixedB, clean) : mixed;
+      const bwR = bwColor & 255;
+      const bwG = (bwColor >> 8) & 255;
+      const bwB = (bwColor >> 16) & 255;
+      const lutColor = quickEditBlendLutColor(bwR, bwG, bwB, activeLuts);
       const lutR = lutColor & 255;
       const lutG = (lutColor >> 8) & 255;
       const lutB = (lutColor >> 16) & 255;
@@ -5965,6 +6202,7 @@
       pixels[i + 1] = curveMap ? curveMap[lutG] : lutG;
       pixels[i + 2] = curveMap ? curveMap[lutB] : lutB;
     }
+    quickEditApplyVignette(pixels, width, height, clean);
     applyQuickEditDetailEffects(pixels, width, height, clean);
   }
 
@@ -6044,6 +6282,13 @@
     img.style.width = fit.width.toFixed(2) + 'px';
     img.style.height = fit.height.toFixed(2) + 'px';
     img.style.aspectRatio = Math.round(w) + ' / ' + Math.round(h);
+    const el = state.quickEdit.el;
+    const compareImg = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
+    if (compareImg) {
+      compareImg.style.width = img.style.width;
+      compareImg.style.height = img.style.height;
+      compareImg.style.aspectRatio = img.style.aspectRatio;
+    }
   }
 
   function refreshQuickEditImageDisplayBasis() {
@@ -6105,6 +6350,42 @@
       if (!opts.preserveDisplayBasis) setQuickEditImageDisplayBasis(img, 0, 0);
       if (!deferDisplay) img.src = state.quickEdit.sourceSrc;
     }
+  }
+
+  function quickEditOriginalCompareUrl() {
+    const photo = state.quickEdit.photo || {};
+    const cachedPhoto = state.photoCache.get(Number(photo.id || 0)) || {};
+    const sourceSrc = String(state.quickEdit.sourceSrc || '');
+    if (sourceSrc) return sourceSrc;
+    return String(photo.preview_url || cachedPhoto.preview_url || '');
+  }
+
+  function showQuickEditOriginalCompare() {
+    if (!state.quickEdit.open || state.quickEdit.compareOriginalActive) return false;
+    const el = state.quickEdit.el;
+    const overlay = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
+    const originalUrl = quickEditOriginalCompareUrl();
+    if (!overlay || !originalUrl) {
+      console.warn('[PicScanner] 快速调整原图对比缺少可显示的缩略图', {
+        photoId: state.quickEdit.photo && state.quickEdit.photo.id,
+        sourceReady: !!state.quickEdit.sourceSrc,
+      });
+      return false;
+    }
+    state.quickEdit.compareOriginalActive = true;
+    if (overlay.src !== originalUrl) overlay.src = originalUrl;
+    applyQuickEditPreview({ skipColorRender: true, skipOverlay: true });
+    overlay.classList.remove('hidden');
+    return true;
+  }
+
+  function hideQuickEditOriginalCompare() {
+    if (!state.quickEdit.compareOriginalActive) return;
+    const el = state.quickEdit.el;
+    const overlay = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
+    state.quickEdit.compareOriginalActive = false;
+    if (overlay) overlay.classList.add('hidden');
+    applyQuickEditPreview();
   }
 
   function clearQuickEditRawPreviewTimer() {
@@ -6363,8 +6644,24 @@
       clarity: clean.clarity,
       sharpening: clean.sharpening,
       grain: clean.grain,
+      vignette: clean.vignette,
+      vignetteFeather: clean.vignetteFeather,
+      blackWhite: clean.blackWhite,
+      bwRed: clean.bwRed,
+      bwYellow: clean.bwYellow,
+      bwGreen: clean.bwGreen,
+      bwAqua: clean.bwAqua,
+      bwBlue: clean.bwBlue,
+      bwMagenta: clean.bwMagenta,
       temperature: clean.temperature,
       tint: clean.tint,
+      splitToneShadowsHue: clean.splitToneShadowsHue,
+      splitToneShadowsStrength: clean.splitToneShadowsStrength,
+      splitToneMidtonesHue: clean.splitToneMidtonesHue,
+      splitToneMidtonesStrength: clean.splitToneMidtonesStrength,
+      splitToneHighlightsHue: clean.splitToneHighlightsHue,
+      splitToneHighlightsStrength: clean.splitToneHighlightsStrength,
+      splitToneBalance: clean.splitToneBalance,
       luts: quickEditEnabledLuts().map((lut) => ({
         id: quickEditLutKey(lut),
         strength: quickEditNormalizeLutStrength(lut.strength, lut),
@@ -6399,8 +6696,11 @@
       || clean.clarity
       || clean.sharpening
       || clean.grain
+      || clean.vignette
+      || clean.blackWhite
       || clean.temperature !== QUICK_EDIT_TEMPERATURE_NEUTRAL_K
       || clean.tint
+      || quickEditSplitToneActive(clean)
       || !isQuickEditCurveNeutral(clean)
     ) return false;
     return !hasQuickEditHslAdjustments(clean) && !quickEditActiveLuts().length;
@@ -6506,8 +6806,11 @@
       close: '<svg ' + attrs + '><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>',
       chevron: '<svg ' + attrs + '><path d="m6 9 6 6 6-6"/></svg>',
       import: '<svg ' + attrs + '><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+      export: '<svg ' + attrs + '><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>',
       refresh: '<svg ' + attrs + '><path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"/><path d="M20 20v-4h-4"/></svg>',
       plus: '<svg ' + attrs + '><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
+      trash: '<svg ' + attrs + '><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>',
+      pipette: '<svg ' + attrs + '><path d="m14.5 5.5 4 4"/><path d="M12 8 5 15v4h4l7-7"/><path d="m14 4 6 6"/><path d="m5 19-2 2"/></svg>',
       library: '<svg ' + attrs + '><path d="M4 19.5V5a2 2 0 0 1 2-2h11"/><path d="M8 7h12v14H8z"/><path d="M12 11h4"/></svg>',
     };
     return icons[name] || '';
@@ -6916,6 +7219,502 @@
     commitQuickEditLutChange({ message: '已停用 LUT' });
   }
 
+  function normalizeQuickEditPresetItem(item) {
+    const raw = item && typeof item === 'object' ? item : {};
+    const id = String(raw.id || '').trim();
+    const name = String(raw.name || '').trim();
+    if (!id || !name) return null;
+    return {
+      id,
+      name,
+      params: normalizeQuickEditParams(raw.params || quickEditDefaultParams()),
+      luts: Array.isArray(raw.luts) ? raw.luts.map(normalizeQuickEditLut).filter(Boolean) : [],
+      favorite: raw.favorite === true,
+      order: Number(raw.order || 0),
+      createdAt: Math.max(0, Number(raw.created_at || 0)),
+      updatedAt: Math.max(0, Number(raw.updated_at || 0)),
+    };
+  }
+
+  function quickEditPresetStyleParams(params) {
+    const clean = normalizeQuickEditParams(params || quickEditEffectiveParams());
+    clean.cropTop = 0;
+    clean.cropRight = 0;
+    clean.cropBottom = 0;
+    clean.cropLeft = 0;
+    clean.rotation = 0;
+    clean.straighten = 0;
+    return clean;
+  }
+
+  function quickEditPresetById(presetId) {
+    const id = String(presetId || '').trim();
+    return (state.quickEdit.presets || []).find((preset) => preset.id === id) || null;
+  }
+
+  function quickEditPresetStatusText() {
+    if (state.quickEdit.presetsLoading) return '正在读取预设';
+    if (state.quickEdit.presetsMessage) return state.quickEdit.presetsMessage;
+    const count = (state.quickEdit.presets || []).length;
+    return count ? '已有 ' + count + ' 个预设' : '还没有预设';
+  }
+
+  function syncQuickEditPresetUi() {
+    const el = state.quickEdit.el;
+    if (el) syncQuickEditPresetSide(el);
+    syncQuickEditPresetModal();
+  }
+
+  function syncQuickEditPresetSide(el) {
+    const list = el.querySelector('[data-quick-edit-preset-list]');
+    const status = el.querySelector('[data-quick-edit-preset-status]');
+    if (status) status.textContent = quickEditPresetStatusText();
+    if (!list) return;
+    const presets = state.quickEdit.presets || [];
+    if (state.quickEdit.presetsLoading && !presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-empty">正在读取预设</div>';
+      return;
+    }
+    if (!presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-empty">保存当前参数后会显示在这里</div>';
+      return;
+    }
+    list.innerHTML = presets.slice(0, 5).map((preset) => (
+      '<button class="quick-edit-preset-pill" type="button" data-quick-edit-preset-apply="' + escapeHtml(preset.id) + '" title="' + escapeHtml(preset.name) + '">' +
+      (preset.favorite ? '<b aria-hidden="true">★</b>' : '') +
+      '<span>' + escapeHtml(preset.name) + '</span>' +
+      '</button>'
+    )).join('');
+  }
+
+  function syncQuickEditPresetModal() {
+    const modal = state.quickEdit.presetModal;
+    if (!modal || !modal.isConnected) return;
+    const list = modal.querySelector('[data-quick-edit-preset-modal-list]');
+    const count = modal.querySelector('[data-quick-edit-preset-modal-count]');
+    const message = modal.querySelector('[data-quick-edit-preset-modal-message]');
+    const presets = state.quickEdit.presets || [];
+    if (count) count.textContent = presets.length ? presets.length + ' 个预设' : '没有预设';
+    if (message) message.textContent = quickEditPresetStatusText();
+    modal.classList.toggle('loading', !!state.quickEdit.presetsLoading);
+    if (!list) return;
+    if (state.quickEdit.presetsLoading && !presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-modal-empty">正在读取预设</div>';
+      return;
+    }
+    if (!presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-modal-empty">还没有预设，先保存当前调整</div>';
+      return;
+    }
+    list.innerHTML = presets.map((preset) => {
+      const loading = state.quickEdit.presetApplyingId === preset.id;
+      const selected = state.quickEdit.presetSelectedId === preset.id;
+      const detail = [
+        preset.favorite ? '已收藏' : '',
+        preset.luts.length ? preset.luts.length + ' 个 LUT' : '',
+        preset.updatedAt ? new Date(preset.updatedAt * 1000).toLocaleString() : '',
+      ].filter(Boolean).join(' · ') || '样式参数';
+      return '<div class="quick-edit-preset-modal-item' + (loading ? ' loading' : '') + (selected ? ' selected' : '') + '" data-quick-edit-preset-modal-id="' + escapeHtml(preset.id) + '">' +
+        '<button class="icon-btn quick-edit-preset-apply-btn" type="button" data-quick-edit-preset-modal-apply="' + escapeHtml(preset.id) + '" title="应用预设" aria-label="应用预设">' + quickEditIconSvg(loading ? 'refresh' : 'check') + '</button>' +
+        '<span><b>' + escapeHtml(preset.name) + '</b><em>' + escapeHtml(detail) + '</em></span>' +
+        '<button class="icon-btn quick-edit-preset-favorite-btn' + (preset.favorite ? ' active' : '') + '" type="button" data-quick-edit-preset-modal-favorite="' + escapeHtml(preset.id) + '" title="收藏置顶" aria-label="收藏置顶">★</button>' +
+        '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-preset-modal-move="up" data-quick-edit-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="上移" aria-label="上移">↑</button>' +
+        '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-preset-modal-move="down" data-quick-edit-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="下移" aria-label="下移">↓</button>' +
+        '<button class="icon-btn quick-edit-preset-rename-btn" type="button" data-quick-edit-preset-modal-rename="' + escapeHtml(preset.id) + '" title="重命名" aria-label="重命名">名</button>' +
+        '<button class="icon-btn quick-edit-preset-delete-btn" type="button" data-quick-edit-preset-modal-delete="' + escapeHtml(preset.id) + '" title="删除预设" aria-label="删除预设">' + quickEditIconSvg('trash') + '</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  async function refreshQuickEditPresets(options) {
+    const opts = options || {};
+    if (state.quickEdit.presetsLoading) return;
+    state.quickEdit.presetsLoading = true;
+    state.quickEdit.presetsMessage = '正在读取预设';
+    syncQuickEditPresetUi();
+    try {
+      const res = await call('list_quick_edit_presets');
+      if (!res || !res.success) {
+        const message = res && res.message ? res.message : '预设读取失败';
+        state.quickEdit.presetsMessage = message;
+        if (!opts.silent) showToast(message, 'error');
+        return;
+      }
+      state.quickEdit.presets = (Array.isArray(res.items) ? res.items : [])
+        .map(normalizeQuickEditPresetItem)
+        .filter(Boolean);
+      state.quickEdit.presetsLoaded = true;
+      state.quickEdit.presetsMessage = '';
+    } catch (err) {
+      const message = String((err && err.message) || err || '预设读取失败');
+      state.quickEdit.presetsMessage = message;
+      if (!opts.silent) showToast(message, 'error');
+    } finally {
+      state.quickEdit.presetsLoading = false;
+      syncQuickEditPresetUi();
+    }
+  }
+
+  function quickEditPresetPayloadParams() {
+    return quickEditPresetStyleParams(quickEditEffectiveParams());
+  }
+
+  async function saveCurrentQuickEditPreset() {
+    if (!state.quickEdit.open) return;
+    const name = await openTextInput({
+      title: '保存预设',
+      message: '保存当前影调、色彩、细节、色调分离、HSL 和 LUT，不包含裁切、旋转、缩放。',
+      placeholder: '例如：暖调人像',
+      value: '',
+    });
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return;
+    try {
+      const res = await call('save_quick_edit_preset', cleanName, quickEditPresetPayloadParams(), quickEditEnabledLuts());
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设保存失败', 'error');
+        return;
+      }
+      state.quickEdit.presetsMessage = '';
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已保存预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设保存失败', err);
+      showToast(String((err && err.message) || '预设保存失败'), 'error');
+    }
+  }
+
+  async function quickEditHydratePresetLuts(preset) {
+    const source = Array.isArray(preset && preset.luts) ? preset.luts : [];
+    const loaded = [];
+    const missing = [];
+    for (const ref of source) {
+      const id = quickEditLutKey(ref);
+      if (!id) continue;
+      try {
+        const res = await call('read_quick_edit_lut', id);
+        if (!res || !res.success) {
+          missing.push(ref.title || id);
+          continue;
+        }
+        const meta = normalizeQuickEditLutLibraryItem(res.item) || { id, title: ref.title || id, name: ref.name || id };
+        const lut = parseQuickEditCube(res.text || '', meta.name || meta.title || id, {
+          id: meta.id,
+          libraryId: meta.id,
+          name: meta.name || ref.name || meta.title || id,
+          title: ref.title || meta.title || meta.name || id,
+        });
+        lut.strength = quickEditNormalizeLutStrength(ref.strength, lut);
+        loaded.push(lut);
+      } catch (err) {
+        missing.push(ref.title || id);
+      }
+    }
+    return { loaded, missing };
+  }
+
+  function ensureQuickEditPresetApplyConfirm() {
+    if (state.quickEdit.presetApplyConfirm && state.quickEdit.presetApplyConfirm.isConnected) return state.quickEdit.presetApplyConfirm;
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-apply-confirm hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '应用预设确认');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-exit-card">',
+      '<h2>应用预设？</h2>',
+      '<p data-quick-edit-preset-apply-message>当前样式参数会被预设替换。</p>',
+      '<div class="modal-actions">',
+      '<button class="ghost-btn" type="button" data-quick-edit-preset-apply-cancel>取消</button>',
+      '<button class="primary-btn" type="button" data-quick-edit-preset-apply-confirm>确认应用</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-preset-apply-cancel]').addEventListener('click', () => hideQuickEditPresetApplyConfirm());
+    modal.querySelector('[data-quick-edit-preset-apply-confirm]').addEventListener('click', () => {
+      const presetId = String(modal.dataset.quickEditPresetApplyId || '');
+      hideQuickEditPresetApplyConfirm();
+      applyQuickEditPresetNow(presetId);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.presetApplyConfirm = modal;
+    return modal;
+  }
+
+  function hideQuickEditPresetApplyConfirm() {
+    const modal = state.quickEdit.presetApplyConfirm;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.dataset.quickEditPresetApplyId = '';
+  }
+
+  function applyQuickEditPreset(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset || state.quickEdit.presetApplyingId) return;
+    const modal = ensureQuickEditPresetApplyConfirm();
+    const message = modal.querySelector('[data-quick-edit-preset-apply-message]');
+    if (message) {
+      message.textContent = '将应用“' + preset.name + '”，当前影调、色彩、细节、色调分离、HSL 和 LUT 会被替换；裁切、旋转、缩放不会改变。';
+    }
+    modal.dataset.quickEditPresetApplyId = preset.id;
+    modal.classList.remove('hidden');
+    const confirm = modal.querySelector('[data-quick-edit-preset-apply-confirm]');
+    if (confirm) requestAnimationFrame(() => confirm.focus({ preventScroll: true }));
+  }
+
+  async function applyQuickEditPresetNow(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset || state.quickEdit.presetApplyingId) return;
+    state.quickEdit.presetApplyingId = preset.id;
+    syncQuickEditPresetUi();
+    try {
+      const hydrated = await quickEditHydratePresetLuts(preset);
+      state.quickEdit.params = quickEditPresetStyleParams(preset.params);
+      state.quickEdit.committedParams = quickEditDefaultParams();
+      quickEditSetLuts(hydrated.loaded);
+      invalidateQuickEditRenderedPreview({ clearTimers: true });
+      syncQuickEditControls();
+      applyQuickEditPreview({ interactive: true });
+      scheduleQuickEditHistogramRender(180);
+      if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ interactive: true });
+      showToast(hydrated.missing.length ? ('已应用预设，' + hydrated.missing.length + ' 个 LUT 缺失') : ('已应用预设：' + preset.name));
+    } catch (err) {
+      console.warn('[PicScanner] 预设应用失败', err);
+      showToast(String((err && err.message) || '预设应用失败'), 'error');
+    } finally {
+      state.quickEdit.presetApplyingId = '';
+      syncQuickEditPresetUi();
+    }
+  }
+
+  async function deleteQuickEditPreset(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('delete_quick_edit_preset', preset.id);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设删除失败', 'error');
+        return;
+      }
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已删除预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设删除失败', err);
+      showToast(String((err && err.message) || '预设删除失败'), 'error');
+    }
+  }
+
+  function setQuickEditPresetsFromResponse(res) {
+    state.quickEdit.presets = (Array.isArray(res && res.items) ? res.items : [])
+      .map(normalizeQuickEditPresetItem)
+      .filter(Boolean);
+    state.quickEdit.presetsLoaded = true;
+    if (state.quickEdit.presetSelectedId && !quickEditPresetById(state.quickEdit.presetSelectedId)) {
+      state.quickEdit.presetSelectedId = '';
+    }
+    syncQuickEditPresetUi();
+  }
+
+  async function renameQuickEditPreset(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset) return;
+    const name = await openTextInput({
+      title: '重命名预设',
+      message: '输入新的预设名称。',
+      placeholder: '预设名称',
+      value: preset.name,
+    });
+    const cleanName = String(name || '').trim();
+    if (!cleanName || cleanName === preset.name) return;
+    try {
+      const res = await call('rename_quick_edit_preset', preset.id, cleanName);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设重命名失败', 'error');
+        return;
+      }
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已重命名预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设重命名失败', err);
+      showToast(String((err && err.message) || '预设重命名失败'), 'error');
+    }
+  }
+
+  async function toggleQuickEditPresetFavorite(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('set_quick_edit_preset_favorite', preset.id, !preset.favorite);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设收藏失败', 'error');
+        return;
+      }
+      state.quickEdit.presetSelectedId = preset.id;
+      setQuickEditPresetsFromResponse(res);
+      showToast(preset.favorite ? '已取消预设置顶' : '已收藏置顶');
+    } catch (err) {
+      console.warn('[PicScanner] 预设收藏失败', err);
+      showToast(String((err && err.message) || '预设收藏失败'), 'error');
+    }
+  }
+
+  async function moveQuickEditPreset(presetId, direction) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('move_quick_edit_preset', preset.id, direction);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设排序失败', 'error');
+        return;
+      }
+      state.quickEdit.presetSelectedId = preset.id;
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已调整预设顺序');
+    } catch (err) {
+      console.warn('[PicScanner] 预设排序失败', err);
+      showToast(String((err && err.message) || '预设排序失败'), 'error');
+    }
+  }
+
+  async function exportQuickEditPresets() {
+    try {
+      const res = await call('export_quick_edit_presets');
+      if (!res || !res.success) {
+        if (res && res.cancelled) return;
+        showToast(res && res.message ? res.message : '预设导出失败', 'error');
+        return;
+      }
+      showToast(res.message || '已导出预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设导出失败', err);
+      showToast(String((err && err.message) || '预设导出失败'), 'error');
+    }
+  }
+
+  async function importQuickEditPresets() {
+    try {
+      const res = await call('import_quick_edit_presets');
+      if (!res || !res.success) {
+        if (res && res.cancelled) return;
+        showToast(res && res.message ? res.message : '预设导入失败', 'error');
+        return;
+      }
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已导入预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设导入失败', err);
+      showToast(String((err && err.message) || '预设导入失败'), 'error');
+    }
+  }
+
+  function hideQuickEditPresetModal() {
+    const modal = state.quickEdit.presetModal;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    state.quickEdit.presetApplyingId = '';
+  }
+
+  function ensureQuickEditPresetModal() {
+    if (state.quickEdit.presetModal && state.quickEdit.presetModal.isConnected) return state.quickEdit.presetModal;
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-modal hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '预设管理');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-preset-card">',
+      '<div class="quick-edit-save-head">',
+      '<h2>预设管理</h2>',
+      '<div class="quick-edit-lut-head-actions">',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-modal-save title="保存当前为预设" aria-label="保存当前为预设">' + quickEditIconSvg('plus') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-modal-import title="导入预设文件" aria-label="导入预设文件">' + quickEditIconSvg('import') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-modal-export title="导出预设文件" aria-label="导出预设文件">' + quickEditIconSvg('export') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-modal-refresh title="刷新预设" aria-label="刷新预设">' + quickEditIconSvg('refresh') + '</button>',
+      '<button class="icon-btn quick-edit-save-close" type="button" data-quick-edit-preset-cancel title="关闭" aria-label="关闭">' + quickEditIconSvg('close') + '</button>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-preset-modal-head"><span data-quick-edit-preset-modal-message></span><em data-quick-edit-preset-modal-count>没有预设</em></div>',
+      '<div class="quick-edit-preset-modal-list" data-quick-edit-preset-modal-list></div>',
+      '</div>',
+    ].join('');
+    modal.querySelectorAll('[data-quick-edit-preset-cancel]').forEach((btn) => {
+      btn.addEventListener('click', () => hideQuickEditPresetModal());
+    });
+    modal.querySelector('[data-quick-edit-preset-modal-save]').addEventListener('click', () => {
+      saveCurrentQuickEditPreset();
+    });
+    modal.querySelector('[data-quick-edit-preset-modal-import]').addEventListener('click', () => {
+      importQuickEditPresets();
+    });
+    modal.querySelector('[data-quick-edit-preset-modal-export]').addEventListener('click', () => {
+      exportQuickEditPresets();
+    });
+    modal.querySelector('[data-quick-edit-preset-modal-refresh]').addEventListener('click', () => {
+      refreshQuickEditPresets();
+    });
+    modal.querySelector('[data-quick-edit-preset-modal-list]').addEventListener('click', (ev) => {
+      const apply = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-apply]') : null;
+      if (apply) {
+        applyQuickEditPreset(String(apply.dataset.quickEditPresetModalApply || ''));
+        return;
+      }
+      const favorite = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-favorite]') : null;
+      if (favorite) {
+        toggleQuickEditPresetFavorite(String(favorite.dataset.quickEditPresetModalFavorite || ''));
+        return;
+      }
+      const move = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-move]') : null;
+      if (move) {
+        moveQuickEditPreset(
+          String(move.dataset.quickEditPresetModalMoveId || ''),
+          String(move.dataset.quickEditPresetModalMove || ''),
+        );
+        return;
+      }
+      const rename = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-rename]') : null;
+      if (rename) {
+        renameQuickEditPreset(String(rename.dataset.quickEditPresetModalRename || ''));
+        return;
+      }
+      const del = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-delete]') : null;
+      if (del) {
+        deleteQuickEditPreset(String(del.dataset.quickEditPresetModalDelete || ''));
+        return;
+      }
+      const row = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-id]') : null;
+      if (row) {
+        state.quickEdit.presetSelectedId = String(row.dataset.quickEditPresetModalId || '');
+        syncQuickEditPresetUi();
+      }
+    });
+    modal.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'f' && ev.key !== 'F') return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const preset = quickEditPresetById(state.quickEdit.presetSelectedId) || (state.quickEdit.presets || [])[0];
+      if (!preset) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleQuickEditPresetFavorite(preset.id);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.presetModal = modal;
+    return modal;
+  }
+
+  function showQuickEditPresetModal() {
+    const modal = ensureQuickEditPresetModal();
+    modal.classList.remove('hidden');
+    if (!state.quickEdit.presetSelectedId && (state.quickEdit.presets || []).length) {
+      state.quickEdit.presetSelectedId = state.quickEdit.presets[0].id;
+    }
+    syncQuickEditPresetUi();
+    if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
+      refreshQuickEditPresets({ silent: true });
+    }
+    const first = modal.querySelector('[data-quick-edit-preset-modal-save]');
+    if (first) requestAnimationFrame(() => first.focus({ preventScroll: true }));
+  }
+
   function loadQuickEditImage(src) {
     return new Promise((resolve, reject) => {
       const image = new Image();
@@ -6952,6 +7751,41 @@
       throw err;
     });
     return state.quickEdit.sourceImagePromise;
+  }
+
+  function quickEditImagePointFromEvent(img, ev) {
+    if (!img || !ev) return null;
+    const rect = img.getBoundingClientRect();
+    const width = Math.max(1, Number(img.offsetWidth || img.width || rect.width || 1));
+    const height = Math.max(1, Number(img.offsetHeight || img.height || rect.height || 1));
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const matrix = new DOMMatrixReadOnly(window.getComputedStyle(img).transform || 'none');
+    const local = matrix.inverse().transformPoint(new DOMPoint(ev.clientX - cx, ev.clientY - cy));
+    const x = local.x + width / 2;
+    const y = local.y + height / 2;
+    if (x < 0 || y < 0 || x > width || y > height) return null;
+    return {
+      x: clamp(x / width, 0, 1),
+      y: clamp(y / height, 0, 1),
+    };
+  }
+
+  async function sampleQuickEditHslFromEvent(ev) {
+    const el = state.quickEdit.el;
+    const img = el ? el.querySelector('[data-quick-edit-img]') : null;
+    const point = quickEditImagePointFromEvent(img, ev);
+    if (!point || !img || !imageHasSource(img) || !img.naturalWidth || !img.naturalHeight) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    const sx = clamp(Math.round(point.x * Math.max(1, img.naturalWidth - 1)), 0, Math.max(0, img.naturalWidth - 1));
+    const sy = clamp(Math.round(point.y * Math.max(1, img.naturalHeight - 1)), 0, Math.max(0, img.naturalHeight - 1));
+    ctx.drawImage(img, sx, sy, 1, 1, 0, 0, 1, 1);
+    const data = ctx.getImageData(0, 0, 1, 1).data;
+    return quickEditRgbToHsl(data[0], data[1], data[2]);
   }
 
   function quickEditWorkerParams(params, options) {
@@ -8823,7 +9657,7 @@
   }
 
   function quickEditCollapsedSections() {
-    const sections = Object.assign({ tone: false, color: false, detail: false, hsl: false, lut: false }, state.quickEdit.collapsedSections || {});
+    const sections = Object.assign({ tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false }, state.quickEdit.collapsedSections || {});
     state.quickEdit.collapsedSections = sections;
     return sections;
   }
@@ -8834,6 +9668,9 @@
       tone: raw.tone === true,
       color: raw.color === true,
       detail: raw.detail === true,
+      effects: raw.effects === true,
+      blackWhite: raw.blackWhite === true,
+      splitTone: raw.splitTone === true,
       hsl: raw.hsl === true,
       lut: raw.lut === true,
     };
@@ -8851,7 +9688,7 @@
 
   function toggleQuickEditSection(section) {
     const key = String(section || '').trim();
-    if (!['tone', 'color', 'detail', 'hsl', 'lut'].includes(key)) return;
+    if (!['tone', 'color', 'detail', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut'].includes(key)) return;
     const sections = quickEditCollapsedSections();
     sections[key] = !sections[key];
     if (key === 'lut' && sections[key]) hideQuickEditLutModal();
@@ -8871,6 +9708,66 @@
     });
   }
 
+  function setQuickEditHslPickerActive(active) {
+    state.quickEdit.hslPickerActive = !!active;
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const stage = el.querySelector('[data-quick-edit-stage]');
+    const btn = el.querySelector('[data-quick-edit-hsl-picker]');
+    const status = el.querySelector('[data-quick-edit-hsl-picker-status]');
+    if (stage) stage.classList.toggle('hsl-picking', state.quickEdit.hslPickerActive);
+    if (btn) {
+      btn.classList.toggle('active', state.quickEdit.hslPickerActive);
+      btn.setAttribute('aria-pressed', state.quickEdit.hslPickerActive ? 'true' : 'false');
+    }
+    if (status) status.textContent = state.quickEdit.hslPickerActive ? '在画面点击颜色' : '点击吸管后在画面取色';
+  }
+
+  function applyQuickEditSplitTonePreset(key) {
+    const preset = QUICK_EDIT_SPLIT_TONE_PRESETS.find((item) => item.key === key);
+    if (!preset) return;
+    const before = snapshotQuickEditState();
+    const next = normalizeQuickEditParams(state.quickEdit.params);
+    next.splitToneShadowsHue = preset.shadowsHue;
+    next.splitToneShadowsStrength = preset.shadowsStrength;
+    next.splitToneMidtonesHue = preset.midtonesHue;
+    next.splitToneMidtonesStrength = preset.midtonesStrength;
+    next.splitToneHighlightsHue = preset.highlightsHue;
+    next.splitToneHighlightsStrength = preset.highlightsStrength;
+    next.splitToneBalance = preset.balance;
+    state.quickEdit.params = normalizeQuickEditParams(next);
+    if (before) {
+      state.quickEdit.history.push(before);
+      if (state.quickEdit.history.length > 24) state.quickEdit.history.shift();
+    }
+    syncQuickEditControls();
+    applyQuickEditPreview({ interactive: true });
+    scheduleQuickEditHistogramRender(80);
+    showToast('已应用色调分离：' + preset.label);
+  }
+
+  async function pickQuickEditHslColor(ev) {
+    if (!state.quickEdit.hslPickerActive) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    try {
+      const hsl = await sampleQuickEditHslFromEvent(ev);
+      if (!hsl) {
+        showToast('没有取到图片颜色', 'error');
+        return true;
+      }
+      const color = quickEditHslColorFromHue(hsl.h);
+      state.quickEdit.hslColor = color.key;
+      setQuickEditHslPickerActive(false);
+      syncQuickEditControls();
+      showToast('已选中 HSL：' + color.name);
+    } catch (err) {
+      console.warn('[PicScanner] HSL 吸管取色失败', err);
+      showToast('取色失败，详情见控制台', 'error');
+    }
+    return true;
+  }
+
   function ensureQuickEdit() {
     if (state.quickEdit.el && state.quickEdit.el.isConnected) return state.quickEdit.el;
     const el = document.createElement('section');
@@ -8888,6 +9785,7 @@
       '<div class="quick-edit-preview">',
       '<div class="quick-edit-stage" data-quick-edit-stage>',
       '<img class="quick-edit-img" alt="" data-quick-edit-img />',
+      '<img class="quick-edit-compare-img hidden" alt="" data-quick-edit-compare-img />',
       '<div class="quick-edit-crop-overlay hidden" data-quick-edit-crop-overlay>',
       '<div class="quick-edit-crop-box" data-quick-edit-crop-box>',
       '<div class="quick-edit-crop-grid"></div>',
@@ -8926,7 +9824,7 @@
       '<button class="quick-edit-histogram-tab active" type="button" data-quick-edit-histogram-mode="white" aria-pressed="true">W</button>',
       '<div class="quick-edit-histogram-rgb-wrap">',
       '<button class="quick-edit-histogram-tab" type="button" data-quick-edit-histogram-mode="rgb" aria-pressed="false"><span data-quick-edit-rgb-label>RGB</span></button>',
-      '<button class="quick-edit-histogram-menu-trigger" type="button" data-quick-edit-rgb-menu-trigger title="选择 RGB 通道" aria-label="选择 RGB 通道">⌄</button>',
+      '<button class="quick-edit-histogram-menu-trigger" type="button" data-quick-edit-rgb-menu-trigger title="选择 RGB 通道" aria-label="选择 RGB 通道">' + quickEditIconSvg('chevron') + '</button>',
       '<div class="quick-edit-rgb-menu hidden" data-quick-edit-rgb-menu>',
       '<button type="button" role="menuitemcheckbox" data-quick-edit-rgb-channel="red" aria-checked="true"><span></span><b>R</b></button>',
       '<button type="button" role="menuitemcheckbox" data-quick-edit-rgb-channel="green" aria-checked="true"><span></span><b>G</b></button>',
@@ -8936,6 +9834,16 @@
       '</div>',
       '</div>',
       '<div class="quick-edit-histogram" data-quick-edit-histogram-open><canvas width="288" height="96" data-quick-edit-histogram></canvas><div class="quick-edit-histogram-empty hidden" data-quick-edit-histogram-empty>无法读取</div></div>',
+      '</div>',
+      '<div class="quick-edit-group quick-edit-preset-group">',
+      '<div class="quick-edit-preset-head">',
+      '<div><div class="quick-edit-group-title">预设</div><div class="quick-edit-preset-status" data-quick-edit-preset-status>还没有预设</div></div>',
+      '<div class="quick-edit-preset-actions">',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-save title="保存当前为预设" aria-label="保存当前为预设">' + quickEditIconSvg('plus') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-preset-manage title="管理预设" aria-label="管理预设">' + quickEditIconSvg('library') + '</button>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-preset-list" data-quick-edit-preset-list><div class="quick-edit-preset-empty">保存当前参数后会显示在这里</div></div>',
       '</div>',
       '<div class="quick-edit-group">',
       '<div class="quick-edit-group-title">功能区</div>',
@@ -8991,12 +9899,61 @@
       '<label class="quick-edit-control"><span>颗粒</span><b data-quick-edit-value="grain">0%</b><input type="range" min="0" max="100" step="1" value="0" data-quick-edit-range="grain" /></label>',
       '</div>',
       '</div>',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="effects">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="effects" aria-expanded="true">',
+      '<span><b>效果</b><em>暗角与边缘氛围</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="effects">',
+      '<label class="quick-edit-control"><span>暗角</span><b data-quick-edit-value="vignette">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="vignette" /></label>',
+      '<label class="quick-edit-control"><span>羽化</span><b data-quick-edit-value="vignetteFeather">58%</b><input type="range" min="0" max="100" step="1" value="58" data-quick-edit-range="vignetteFeather" /></label>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="blackWhite">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="blackWhite" aria-expanded="true">',
+      '<span><b>黑白混色</b><em>控制各色在黑白中的明暗</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="blackWhite">',
+      '<label class="quick-edit-control"><span>黑白强度</span><b data-quick-edit-value="blackWhite">0%</b><input type="range" min="0" max="100" step="1" value="0" data-quick-edit-range="blackWhite" /></label>',
+      '<div class="quick-edit-bw-grid">',
+      '<label class="quick-edit-control"><span>红</span><b data-quick-edit-value="bwRed">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwRed" /></label>',
+      '<label class="quick-edit-control"><span>黄</span><b data-quick-edit-value="bwYellow">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwYellow" /></label>',
+      '<label class="quick-edit-control"><span>绿</span><b data-quick-edit-value="bwGreen">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwGreen" /></label>',
+      '<label class="quick-edit-control"><span>青</span><b data-quick-edit-value="bwAqua">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwAqua" /></label>',
+      '<label class="quick-edit-control"><span>蓝</span><b data-quick-edit-value="bwBlue">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwBlue" /></label>',
+      '<label class="quick-edit-control"><span>品红</span><b data-quick-edit-value="bwMagenta">0%</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="bwMagenta" /></label>',
+      '</div>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="splitTone">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="splitTone" aria-expanded="true">',
+      '<span><b>色调分离</b><em>阴影、中间调与高光染色</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="splitTone">',
+      '<div class="quick-edit-split-tone-presets">',
+      QUICK_EDIT_SPLIT_TONE_PRESETS.map((preset) => '<button type="button" data-quick-edit-split-tone-preset="' + preset.key + '">' + preset.label + '</button>').join(''),
+      '</div>',
+      '<label class="quick-edit-control quick-edit-split-tone-control"><span>阴影色相</span><b data-quick-edit-value="splitToneShadowsHue">220 度</b><input type="range" min="0" max="360" step="1" value="220" data-quick-edit-range="splitToneShadowsHue" /></label>',
+      '<label class="quick-edit-control"><span>阴影强度</span><b data-quick-edit-value="splitToneShadowsStrength">0%</b><input type="range" min="0" max="100" step="1" value="0" data-quick-edit-range="splitToneShadowsStrength" /></label>',
+      '<label class="quick-edit-control quick-edit-split-tone-control"><span>中间调色相</span><b data-quick-edit-value="splitToneMidtonesHue">35 度</b><input type="range" min="0" max="360" step="1" value="35" data-quick-edit-range="splitToneMidtonesHue" /></label>',
+      '<label class="quick-edit-control"><span>中间调强度</span><b data-quick-edit-value="splitToneMidtonesStrength">0%</b><input type="range" min="0" max="100" step="1" value="0" data-quick-edit-range="splitToneMidtonesStrength" /></label>',
+      '<label class="quick-edit-control quick-edit-split-tone-control"><span>高光色相</span><b data-quick-edit-value="splitToneHighlightsHue">45 度</b><input type="range" min="0" max="360" step="1" value="45" data-quick-edit-range="splitToneHighlightsHue" /></label>',
+      '<label class="quick-edit-control"><span>高光强度</span><b data-quick-edit-value="splitToneHighlightsStrength">0%</b><input type="range" min="0" max="100" step="1" value="0" data-quick-edit-range="splitToneHighlightsStrength" /></label>',
+      '<label class="quick-edit-control"><span>Balance</span><b data-quick-edit-value="splitToneBalance">0</b><input type="range" min="-100" max="100" step="1" value="0" data-quick-edit-range="splitToneBalance" /></label>',
+      '</div>',
+      '</div>',
       '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="hsl">',
       '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="hsl" aria-expanded="true">',
       '<span><b>HSL 混合器</b><em data-quick-edit-hsl-active>红色</em></span>',
       '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
       '</button>',
       '<div class="quick-edit-section-body" data-quick-edit-section-body="hsl">',
+      '<div class="quick-edit-hsl-tools">',
+      '<button class="icon-btn quick-edit-hsl-picker" type="button" data-quick-edit-hsl-picker title="吸取画面颜色" aria-label="吸取画面颜色">' + quickEditIconSvg('pipette') + '</button>',
+      '<span data-quick-edit-hsl-picker-status>点击吸管后在画面取色</span>',
+      '</div>',
       '<div class="quick-edit-hsl-swatches">',
       QUICK_EDIT_HSL_COLORS.map((color) => '<button type="button" data-quick-edit-hsl-color="' + color.key + '" title="' + color.name + '" aria-label="' + color.name + '" style="--hsl-color:' + color.color + '"><span>' + color.label + '</span></button>').join(''),
       '</div>',
@@ -9032,7 +9989,12 @@
     el.querySelector('[data-quick-edit-close]').addEventListener('click', () => closeQuickEdit());
     const stage = el.querySelector('[data-quick-edit-stage]');
     if (stage) {
+      stage.addEventListener('pointerdown', (ev) => {
+        if (!state.quickEdit.hslPickerActive) return;
+        pickQuickEditHslColor(ev);
+      }, true);
       stage.addEventListener('wheel', onQuickEditWheel, { passive: false });
+      stage.addEventListener('dblclick', onQuickEditDoubleClick);
       ensureQuickEditPanController(stage);
     }
     const previewImg = el.querySelector('[data-quick-edit-img]');
@@ -9150,12 +10112,36 @@
     el.querySelectorAll('[data-quick-edit-hsl-color]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.quickEdit.hslColor = quickEditHslColorConfig(String(btn.dataset.quickEditHslColor || '')).key;
+        setQuickEditHslPickerActive(false);
         syncQuickEditControls();
       });
     });
+    el.querySelectorAll('[data-quick-edit-split-tone-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        applyQuickEditSplitTonePreset(String(btn.dataset.quickEditSplitTonePreset || ''));
+      });
+    });
+    const hslPicker = el.querySelector('[data-quick-edit-hsl-picker]');
+    if (hslPicker) {
+      hslPicker.addEventListener('click', () => {
+        setQuickEditHslPickerActive(!state.quickEdit.hslPickerActive);
+      });
+    }
     const lutOpen = el.querySelector('[data-quick-edit-lut-open]');
     const lutActiveList = el.querySelector('[data-quick-edit-lut-active-list]');
     const lutFileInput = el.querySelector('[data-quick-edit-lut-file]');
+    const presetList = el.querySelector('[data-quick-edit-preset-list]');
+    const presetSave = el.querySelector('[data-quick-edit-preset-save]');
+    const presetManage = el.querySelector('[data-quick-edit-preset-manage]');
+    if (presetSave) presetSave.addEventListener('click', () => saveCurrentQuickEditPreset());
+    if (presetManage) presetManage.addEventListener('click', () => showQuickEditPresetModal());
+    if (presetList) {
+      presetList.addEventListener('click', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-apply]') : null;
+        if (!btn) return;
+        applyQuickEditPreset(String(btn.dataset.quickEditPresetApply || ''));
+      });
+    }
     if (lutOpen) {
       lutOpen.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -9321,6 +10307,7 @@
     state.quickEdit.histogramMenuOpen = false;
     state.quickEdit.histogramData = null;
     state.quickEdit.hslColor = 'red';
+    state.quickEdit.hslPickerActive = false;
     state.quickEdit.lut = null;
     state.quickEdit.luts = [];
     state.quickEdit.lutDraft = null;
@@ -9549,14 +10536,19 @@
     );
   }
 
-  function setQuickEditZoom(nextZoom, anchorEvent) {
+  function setQuickEditZoom(nextZoom, anchorEvent, options) {
     if (!state.quickEdit.open) return;
+    const opts = options || {};
     const oldZoom = Number(state.quickEdit.viewZoom || 1);
+    const oldPanX = Number(state.quickEdit.panX || 0);
+    const oldPanY = Number(state.quickEdit.panY || 0);
     const zoom = clamp(Number(nextZoom || 1), quickEditMinimumZoomForCropFrame(), QUICK_EDIT_MAX_ZOOM);
-    if (Math.abs(zoom - oldZoom) < 0.0001) return;
     const el = state.quickEdit.el;
     const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
-    if (anchorEvent && stage) {
+    if (opts.resetPan) {
+      state.quickEdit.panX = 0;
+      state.quickEdit.panY = 0;
+    } else if (anchorEvent && stage) {
       const rect = stage.getBoundingClientRect();
       const localX = anchorEvent.clientX - rect.left - rect.width / 2;
       const localY = anchorEvent.clientY - rect.top - rect.height / 2;
@@ -9572,6 +10564,9 @@
       state.quickEdit.panX = 0;
       state.quickEdit.panY = 0;
     }
+    const panChanged = Math.abs(Number(state.quickEdit.panX || 0) - oldPanX) > 0.01
+      || Math.abs(Number(state.quickEdit.panY || 0) - oldPanY) > 0.01;
+    if (Math.abs(zoom - oldZoom) < 0.0001 && !panChanged) return;
     if (stage) {
       stage.classList.add('zooming');
       clearTimeout(state.quickEdit.zoomTimer);
@@ -9608,6 +10603,13 @@
     ev.stopPropagation();
     const factor = ev.deltaY < 0 ? QUICK_EDIT_ZOOM_STEP : 1 / QUICK_EDIT_ZOOM_STEP;
     setQuickEditZoom(state.quickEdit.viewZoom * factor, ev);
+  }
+
+  function onQuickEditDoubleClick(ev) {
+    if (!state.quickEdit.open) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setQuickEditZoom(QUICK_EDIT_MIN_ZOOM, null, { resetPan: true });
   }
 
   function setQuickEditRotation(value) {
@@ -9720,6 +10722,7 @@
     const hslColor = quickEditHslColorConfig(state.quickEdit.hslColor);
     const hslActive = el.querySelector('[data-quick-edit-hsl-active]');
     if (hslActive) hslActive.textContent = hslColor.name;
+    setQuickEditHslPickerActive(state.quickEdit.hslPickerActive);
     el.querySelectorAll('[data-quick-edit-hsl-color]').forEach((btn) => {
       const active = String(btn.dataset.quickEditHslColor || '') === hslColor.key;
       btn.classList.toggle('active', active);
@@ -10366,11 +11369,20 @@
     const el = ensureQuickEdit();
     const img = el.querySelector('[data-quick-edit-img]');
     if (!img) return;
+    const compareImg = el.querySelector('[data-quick-edit-compare-img]');
     const params = quickEditEffectiveParams();
     const pan = quickEditEffectivePan();
     const angle = params.rotation + params.straighten;
-    img.style.transform = 'translate(' + pan.x.toFixed(2) + 'px, ' + pan.y.toFixed(2) + 'px) scale(' + state.quickEdit.viewZoom.toFixed(4) + ') rotate(' + angle.toFixed(2) + 'deg)';
+    const transform = 'translate(' + pan.x.toFixed(2) + 'px, ' + pan.y.toFixed(2) + 'px) scale(' + state.quickEdit.viewZoom.toFixed(4) + ') rotate(' + angle.toFixed(2) + 'deg)';
+    img.style.transform = transform;
     img.style.filter = quickEditPreviewFilter(params);
+    if (compareImg) {
+      compareImg.style.width = img.style.width || '';
+      compareImg.style.height = img.style.height || '';
+      compareImg.style.aspectRatio = img.style.aspectRatio || '';
+      compareImg.style.transform = transform;
+      compareImg.style.filter = 'none';
+    }
     if (!opts.skipColorRender) {
       const interactive = !!opts.interactive && quickEditShouldUseLowResolutionInteractive(params);
       scheduleQuickEditPreviewRender({
@@ -10471,6 +11483,8 @@
     }
     hideQuickEditExitConfirm();
     hideQuickEditSaveConfirm();
+    hideQuickEditPresetApplyConfirm();
+    hideQuickEditPresetModal();
     hideQuickEditLutModal();
     cancelQuickEditPan();
     hideQuickEditCurvePanel();
@@ -10488,6 +11502,7 @@
     state.quickEdit.histogramMenuOpen = false;
     state.quickEdit.histogramData = null;
     state.quickEdit.hslColor = 'red';
+    state.quickEdit.hslPickerActive = false;
     state.quickEdit.lut = null;
     state.quickEdit.luts = [];
     state.quickEdit.lutDraft = null;
@@ -10496,6 +11511,7 @@
     state.quickEdit.exitConfirm = state.quickEdit.exitConfirm || null;
     state.quickEdit.saveConfirm = state.quickEdit.saveConfirm || null;
     state.quickEdit.saveProgress = null;
+    state.quickEdit.compareOriginalActive = false;
     state.quickEdit.history = [];
     state.quickEdit.cropDrag = null;
     state.quickEdit.rotationDrag = null;
@@ -10529,6 +11545,12 @@
       img.removeAttribute('src');
       img.removeAttribute('style');
       img.alt = '';
+    }
+    const compareImg = el.querySelector('[data-quick-edit-compare-img]');
+    if (compareImg) {
+      compareImg.classList.add('hidden');
+      compareImg.removeAttribute('src');
+      compareImg.removeAttribute('style');
     }
     const overlay = el.querySelector('[data-quick-edit-crop-overlay]');
     if (overlay) {
@@ -10583,14 +11605,19 @@
     state.quickEdit.lutDraftLoadingId = '';
     hideQuickEditSaveConfirm();
     state.quickEdit.saveProgress = null;
+    state.quickEdit.compareOriginalActive = false;
     state.quickEdit.history = [];
     state.quickEdit.cropDrag = null;
     state.quickEdit.rotationDrag = null;
     state.quickEdit.viewZoom = 1;
     resetQuickEditRawPreviewState();
     syncQuickEditControls();
+    syncQuickEditPresetUi();
     if (!state.quickEdit.lutLibraryLoaded && !state.quickEdit.lutLibraryLoading) {
       refreshQuickEditLutLibrary({ silent: true });
+    }
+    if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
+      refreshQuickEditPresets({ silent: true });
     }
     renderQuickEditMeta(current, 'loading');
     show(el);
@@ -12238,6 +13265,41 @@
       ev.stopPropagation();
       return;
     }
+    if (
+      state.quickEdit.open
+      && (ev.key === 'c' || ev.key === 'C')
+      && !ev.ctrlKey
+      && !ev.metaKey
+      && !ev.altKey
+      && !isTypingTarget(document.activeElement)
+      && (!state.quickEdit.presetModal || state.quickEdit.presetModal.classList.contains('hidden'))
+      && (!state.quickEdit.presetApplyConfirm || state.quickEdit.presetApplyConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.saveConfirm || state.quickEdit.saveConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.exitConfirm || state.quickEdit.exitConfirm.classList.contains('hidden'))
+    ) {
+      if (!ev.repeat) showQuickEditOriginalCompare();
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    if (
+      state.quickEdit.open
+      && (ev.key === 'f' || ev.key === 'F')
+      && !ev.ctrlKey
+      && !ev.metaKey
+      && !ev.altKey
+      && state.quickEdit.presetModal
+      && !state.quickEdit.presetModal.classList.contains('hidden')
+      && (!state.quickEdit.presetApplyConfirm || state.quickEdit.presetApplyConfirm.classList.contains('hidden'))
+    ) {
+      const preset = quickEditPresetById(state.quickEdit.presetSelectedId) || (state.quickEdit.presets || [])[0];
+      if (preset) {
+        toggleQuickEditPresetFavorite(preset.id);
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      return;
+    }
     if (handleCategoryPickerKey(ev)) return;
     if (ev.key === 'Escape' && state.quickEdit.open) {
       const exitConfirm = state.quickEdit.exitConfirm;
@@ -12250,6 +13312,20 @@
       const saveConfirm = state.quickEdit.saveConfirm;
       if (saveConfirm && !saveConfirm.classList.contains('hidden')) {
         hideQuickEditSaveConfirm();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const presetApplyConfirm = state.quickEdit.presetApplyConfirm;
+      if (presetApplyConfirm && !presetApplyConfirm.classList.contains('hidden')) {
+        hideQuickEditPresetApplyConfirm();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const presetModal = state.quickEdit.presetModal;
+      if (presetModal && !presetModal.classList.contains('hidden')) {
+        hideQuickEditPresetModal();
         ev.preventDefault();
         ev.stopPropagation();
         return;
@@ -12361,6 +13437,16 @@
     if (ev.key === 'Escape' && !els.lightbox.classList.contains('hidden')) closeLightbox();
   });
   document.addEventListener('keyup', (ev) => {
+    if (
+      state.quickEdit.open
+      && (ev.key === 'c' || ev.key === 'C')
+      && state.quickEdit.compareOriginalActive
+    ) {
+      hideQuickEditOriginalCompare();
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
     if (ev.key !== 'Alt') return;
     if (!canShowGalleryExif() || isTypingTarget(document.activeElement)) return;
     ev.preventDefault();

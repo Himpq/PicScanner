@@ -4,9 +4,11 @@ import base64
 import binascii
 import ctypes
 import hashlib
+import json
 import math
 import os
 import re
+import secrets
 import shutil
 import webbrowser
 from datetime import datetime
@@ -54,7 +56,9 @@ QUICK_EDIT_SAVE_FORMATS = {
     "tiff16": {"suffix": ".tif", "mime": "image/tiff", "label": "TIFF 16-bit"},
 }
 QUICK_EDIT_LUT_LIBRARY_DIR = DATA_DIR / "luts"
+QUICK_EDIT_PRESETS_PATH = DATA_DIR / "quick_edit_presets.json"
 QUICK_EDIT_LUT_MAX_BYTES = 32 * 1024 * 1024
+QUICK_EDIT_PRESET_MAX_COUNT = 120
 IMAGE_EXPORT_SUFFIXES = {
     ".arw", ".raw", ".dng", ".cr2", ".cr3", ".nef", ".nrw",
     ".raf", ".rw2", ".orf", ".srw", ".pef", ".jpg", ".jpeg",
@@ -886,11 +890,411 @@ class PicScannerApi(WindowApi):
             "tone": bool(raw.get("tone")),
             "color": bool(raw.get("color")),
             "detail": bool(raw.get("detail")),
+            "splitTone": bool(raw.get("splitTone")),
             "hsl": bool(raw.get("hsl")),
             "lut": bool(raw.get("lut")),
         }
         config_store.set("quick_edit_collapsed_sections", value)
         return {"success": True, "quick_edit_collapsed_sections": value}
+
+    @staticmethod
+    def _quick_edit_preset_path() -> Path:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return QUICK_EDIT_PRESETS_PATH
+
+    @staticmethod
+    def _quick_edit_preset_clean_id(value=None) -> str:
+        raw = str(value or "").strip()
+        if re.fullmatch(r"[0-9a-f]{16,48}", raw, flags=re.IGNORECASE):
+            return raw.lower()
+        return secrets.token_hex(12)
+
+    @staticmethod
+    def _quick_edit_clean_preset_params(params) -> dict:
+        raw = params if isinstance(params, dict) else {}
+        clean = {}
+        numeric_ranges = {
+            "exposure": (-5, 5),
+            "contrast": (-100, 100),
+            "highlights": (-100, 100),
+            "shadows": (-100, 100),
+            "whites": (-100, 100),
+            "blacks": (-100, 100),
+            "dehaze": (-100, 100),
+            "saturation": (-100, 100),
+            "vibrance": (-100, 100),
+            "sharpening": (0, 100),
+            "clarity": (-100, 100),
+            "grain": (0, 100),
+            "temperature": (2000, 10000),
+            "tint": (-100, 100),
+            "rawHighlightRecovery": (0, 100),
+            "rawNoiseReduction": (0, 100),
+            "splitToneShadowsHue": (0, 360),
+            "splitToneShadowsStrength": (0, 100),
+            "splitToneMidtonesHue": (0, 360),
+            "splitToneMidtonesStrength": (0, 100),
+            "splitToneHighlightsHue": (0, 360),
+            "splitToneHighlightsStrength": (0, 100),
+            "splitToneBalance": (-100, 100),
+        }
+        for key, (low, high) in numeric_ranges.items():
+            try:
+                value = float(raw.get(key, 6500 if key == "temperature" else 0))
+            except (TypeError, ValueError):
+                value = 6500 if key == "temperature" else 0
+            if not math.isfinite(value):
+                value = 6500 if key == "temperature" else 0
+            value = max(low, min(high, value))
+            clean[key] = int(round(value)) if key != "exposure" else round(value, 3)
+
+        curve_points = raw.get("curvePoints")
+        points = []
+        if isinstance(curve_points, list):
+            for point in curve_points[:16]:
+                if not isinstance(point, dict):
+                    continue
+                try:
+                    x = float(point.get("x"))
+                    y = float(point.get("y"))
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(x) and math.isfinite(y):
+                    points.append({
+                        "x": round(max(0, min(100, x)), 3),
+                        "y": round(max(0, min(100, y)), 3),
+                    })
+        clean["curvePoints"] = points if len(points) >= 2 else [{"x": 0, "y": 0}, {"x": 100, "y": 100}]
+
+        for prefix in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"):
+            for field in ("hue", "saturation", "luminance"):
+                key = f"hsl_{prefix}_{field}"
+                low, high = (-60, 60) if field == "hue" else (-100, 100)
+                try:
+                    value = float(raw.get(key, 0))
+                except (TypeError, ValueError):
+                    value = 0
+                if not math.isfinite(value):
+                    value = 0
+                clean[key] = int(round(max(low, min(high, value))))
+        return clean
+
+    @staticmethod
+    def _quick_edit_clean_preset_luts(luts) -> list[dict]:
+        clean = []
+        seen = set()
+        for lut in luts if isinstance(luts, list) else []:
+            if not isinstance(lut, dict):
+                continue
+            lut_id = str(lut.get("libraryId") or lut.get("id") or "").strip()
+            if not lut_id or Path(lut_id).name != lut_id or lut_id in seen:
+                continue
+            seen.add(lut_id)
+            title = str(lut.get("title") or lut.get("name") or lut_id).strip()[:120] or lut_id
+            try:
+                strength = int(round(float(lut.get("strength", 100))))
+            except (TypeError, ValueError):
+                strength = 100
+            clean.append({
+                "id": lut_id,
+                "libraryId": lut_id,
+                "title": title,
+                "name": str(lut.get("name") or title).strip()[:120] or title,
+                "strength": max(0, min(100, strength)),
+            })
+        return clean[:16]
+
+    def _quick_edit_clean_preset(self, preset) -> dict | None:
+        raw = preset if isinstance(preset, dict) else {}
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            return None
+        now = int(datetime.now().timestamp())
+        try:
+            created = int(raw.get("created_at") or now)
+        except (TypeError, ValueError):
+            created = now
+        try:
+            updated = int(raw.get("updated_at") or now)
+        except (TypeError, ValueError):
+            updated = now
+        try:
+            order = float(raw.get("order", updated))
+        except (TypeError, ValueError):
+            order = float(updated)
+        if not math.isfinite(order):
+            order = float(updated)
+        return {
+            "id": self._quick_edit_preset_clean_id(raw.get("id")),
+            "name": name[:80],
+            "params": self._quick_edit_clean_preset_params(raw.get("params")),
+            "luts": self._quick_edit_clean_preset_luts(raw.get("luts")),
+            "favorite": bool(raw.get("favorite")),
+            "order": order,
+            "created_at": created,
+            "updated_at": updated,
+        }
+
+    @staticmethod
+    def _sort_quick_edit_presets(presets) -> list[dict]:
+        return sorted(
+            presets if isinstance(presets, list) else [],
+            key=lambda item: (
+                1 if item.get("favorite") else 0,
+                float(item.get("order") or 0),
+                int(item.get("updated_at") or 0),
+                str(item.get("name") or ""),
+            ),
+            reverse=True,
+        )
+
+    def _read_quick_edit_presets(self) -> list[dict]:
+        path = self._quick_edit_preset_path()
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            raise RuntimeError(f"预设读取失败: {exc}") from exc
+        source = data.get("presets") if isinstance(data, dict) else data
+        presets = []
+        seen = set()
+        for item in source if isinstance(source, list) else []:
+            preset = self._quick_edit_clean_preset(item)
+            if not preset or preset["id"] in seen:
+                continue
+            seen.add(preset["id"])
+            presets.append(preset)
+        return self._sort_quick_edit_presets(presets)[:QUICK_EDIT_PRESET_MAX_COUNT]
+
+    def _write_quick_edit_presets(self, presets) -> None:
+        path = self._quick_edit_preset_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        clean = []
+        seen = set()
+        for item in presets if isinstance(presets, list) else []:
+            preset = self._quick_edit_clean_preset(item)
+            if not preset or preset["id"] in seen:
+                continue
+            seen.add(preset["id"])
+            clean.append(preset)
+        clean = clean[:QUICK_EDIT_PRESET_MAX_COUNT]
+        path.write_text(
+            json.dumps({"presets": clean}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def list_quick_edit_presets(self):
+        try:
+            return {"success": True, "items": self._read_quick_edit_presets()}
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc), "items": []}
+
+    def save_quick_edit_preset(self, name, params, luts=None):
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return {"success": False, "message": "预设名称不能为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        now = int(datetime.now().timestamp())
+        preset = {
+            "id": self._quick_edit_preset_clean_id(),
+            "name": clean_name,
+            "params": self._quick_edit_clean_preset_params(params),
+            "luts": self._quick_edit_clean_preset_luts(luts),
+            "favorite": False,
+            "order": float(now),
+            "created_at": now,
+            "updated_at": now,
+        }
+        presets = [preset] + [item for item in presets if str(item.get("name") or "").casefold() != clean_name.casefold()]
+        self._write_quick_edit_presets(presets)
+        return {"success": True, "preset": preset, "items": self._read_quick_edit_presets(), "message": f"已保存预设：{preset['name']}"}
+
+    def delete_quick_edit_preset(self, preset_id):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "预设标识为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        next_presets = [item for item in presets if str(item.get("id") or "") != clean_id]
+        if len(next_presets) == len(presets):
+            return {"success": False, "message": "预设不存在，请刷新列表"}
+        self._write_quick_edit_presets(next_presets)
+        return {"success": True, "items": self._read_quick_edit_presets(), "message": "已删除预设"}
+
+    def rename_quick_edit_preset(self, preset_id, name):
+        clean_id = str(preset_id or "").strip()
+        clean_name = str(name or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "预设标识为空"}
+        if not clean_name:
+            return {"success": False, "message": "预设名称不能为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = False
+        now = int(datetime.now().timestamp())
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["name"] = clean_name[:80]
+            preset["updated_at"] = now
+            found = True
+            break
+        if not found:
+            return {"success": False, "message": "预设不存在，请刷新列表"}
+        self._write_quick_edit_presets(presets)
+        return {"success": True, "items": self._read_quick_edit_presets(), "message": "已重命名预设"}
+
+    def set_quick_edit_preset_favorite(self, preset_id, favorite):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "预设标识为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = False
+        now = int(datetime.now().timestamp())
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["favorite"] = bool(favorite)
+            preset["updated_at"] = now
+            if preset["favorite"]:
+                preset["order"] = max([float(item.get("order") or 0) for item in presets] + [0]) + 1
+            found = True
+            break
+        if not found:
+            return {"success": False, "message": "预设不存在，请刷新列表"}
+        self._write_quick_edit_presets(presets)
+        return {"success": True, "items": self._read_quick_edit_presets(), "message": "已更新预设收藏"}
+
+    def move_quick_edit_preset(self, preset_id, direction):
+        clean_id = str(preset_id or "").strip()
+        step = -1 if str(direction or "").lower() in {"down", "next", "1"} else 1
+        if not clean_id:
+            return {"success": False, "message": "预设标识为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        ordered = self._sort_quick_edit_presets(presets)
+        index = next((i for i, item in enumerate(ordered) if str(item.get("id") or "") == clean_id), -1)
+        if index < 0:
+            return {"success": False, "message": "预设不存在，请刷新列表"}
+        favorite_group = bool(ordered[index].get("favorite"))
+        target_index = -1
+        cursor = index - step
+        while 0 <= cursor < len(ordered):
+            if bool(ordered[cursor].get("favorite")) == favorite_group:
+                target_index = cursor
+                break
+            cursor -= step
+        if target_index < 0:
+            return {"success": True, "items": ordered, "message": "预设顺序未变化"}
+        ordered[index], ordered[target_index] = ordered[target_index], ordered[index]
+        base = float(int(datetime.now().timestamp()) + len(ordered) + 1)
+        for position, preset in enumerate(ordered):
+            preset["order"] = base - position
+        self._write_quick_edit_presets(ordered)
+        return {"success": True, "items": self._read_quick_edit_presets(), "message": "已调整预设顺序"}
+
+    def export_quick_edit_presets(self):
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        if not presets:
+            return {"success": False, "message": "没有可导出的预设"}
+        win = self._get_window("")
+        if win is None:
+            return {"success": False, "message": "窗口尚未就绪"}
+        try:
+            result = win.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename="picscanner_quick_edit_presets.json",
+                file_types=("PicScanner Presets (*.json)",),
+            )
+        except TypeError:
+            result = win.create_file_dialog(webview.SAVE_DIALOG)
+        if not result:
+            return {"success": False, "cancelled": True}
+        target = Path(result[0] if isinstance(result, (list, tuple)) else result).resolve()
+        if target.suffix.lower() != ".json":
+            target = target.with_suffix(".json")
+        payload = {
+            "app": "PicScanner",
+            "kind": "quick_edit_presets",
+            "version": 1,
+            "exported_at": int(datetime.now().timestamp()),
+            "presets": presets,
+        }
+        try:
+            target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return {"success": False, "message": f"预设导出失败: {exc}"}
+        return {"success": True, "path": str(target), "message": f"已导出预设：{target}"}
+
+    def import_quick_edit_presets(self):
+        win = self._get_window("")
+        if win is None:
+            return {"success": False, "message": "窗口尚未就绪"}
+        result = win.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("PicScanner Presets (*.json)",),
+        )
+        if not result:
+            return {"success": False, "cancelled": True}
+        source = Path(str(result[0] if isinstance(result, (list, tuple)) else result)).resolve()
+        if source.suffix.lower() != ".json":
+            return {"success": False, "message": "请选择 .json 预设文件"}
+        if not source.exists() or not source.is_file():
+            return {"success": False, "message": f"预设文件不存在: {source}"}
+        if int(source.stat().st_size) > 8 * 1024 * 1024:
+            return {"success": False, "message": "预设文件过大"}
+        try:
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            return {"success": False, "message": f"预设文件读取失败: {exc}"}
+        raw_items = data.get("presets") if isinstance(data, dict) else data
+        incoming = []
+        for item in raw_items if isinstance(raw_items, list) else []:
+            preset = self._quick_edit_clean_preset(item)
+            if preset:
+                preset["id"] = self._quick_edit_preset_clean_id()
+                incoming.append(preset)
+        if not incoming:
+            return {"success": False, "message": "预设文件中没有有效预设"}
+        try:
+            existing = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        existing_names = {str(item.get("name") or "").casefold() for item in existing}
+        merged = list(existing)
+        now = int(datetime.now().timestamp())
+        for preset in incoming:
+            base_name = str(preset.get("name") or "导入预设").strip() or "导入预设"
+            name = base_name
+            suffix = 2
+            while name.casefold() in existing_names:
+                name = f"{base_name} {suffix}"
+                suffix += 1
+            existing_names.add(name.casefold())
+            preset["name"] = name[:80]
+            preset["created_at"] = now
+            preset["updated_at"] = now
+            preset["order"] = max([float(item.get("order") or 0) for item in merged] + [float(now)]) + 1
+            merged.append(preset)
+        self._write_quick_edit_presets(self._sort_quick_edit_presets(merged))
+        return {"success": True, "items": self._read_quick_edit_presets(), "message": f"已导入 {len(incoming)} 个预设"}
 
     def _normalize_export_preset(self, preset=None) -> dict:
         raw = preset if isinstance(preset, dict) else config_store.get("export_preset", {})

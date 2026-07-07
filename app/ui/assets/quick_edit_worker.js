@@ -112,8 +112,24 @@ function quickEditWorkerMain() {
       sharpening: clamp(Number(raw.sharpening || 0), 0, 100),
       clarity: clamp(Number(raw.clarity || 0), -100, 100),
       grain: clamp(Number(raw.grain || 0), 0, 100),
+      vignette: clamp(Number(raw.vignette || 0), -100, 100),
+      vignetteFeather: clamp(Number(raw.vignetteFeather === undefined ? 58 : raw.vignetteFeather), 0, 100),
+      blackWhite: clamp(Number(raw.blackWhite || 0), 0, 100),
+      bwRed: clamp(Number(raw.bwRed || 0), -100, 100),
+      bwYellow: clamp(Number(raw.bwYellow || 0), -100, 100),
+      bwGreen: clamp(Number(raw.bwGreen || 0), -100, 100),
+      bwAqua: clamp(Number(raw.bwAqua || 0), -100, 100),
+      bwBlue: clamp(Number(raw.bwBlue || 0), -100, 100),
+      bwMagenta: clamp(Number(raw.bwMagenta || 0), -100, 100),
       temperature: normalizeQuickEditTemperature(raw.temperature),
       tint: clamp(Number(raw.tint || 0), -100, 100),
+      splitToneShadowsHue: clamp(Number(raw.splitToneShadowsHue === undefined ? 220 : raw.splitToneShadowsHue), 0, 360),
+      splitToneShadowsStrength: clamp(Number(raw.splitToneShadowsStrength || 0), 0, 100),
+      splitToneMidtonesHue: clamp(Number(raw.splitToneMidtonesHue === undefined ? 35 : raw.splitToneMidtonesHue), 0, 360),
+      splitToneMidtonesStrength: clamp(Number(raw.splitToneMidtonesStrength || 0), 0, 100),
+      splitToneHighlightsHue: clamp(Number(raw.splitToneHighlightsHue === undefined ? 45 : raw.splitToneHighlightsHue), 0, 360),
+      splitToneHighlightsStrength: clamp(Number(raw.splitToneHighlightsStrength || 0), 0, 100),
+      splitToneBalance: clamp(Number(raw.splitToneBalance || 0), -100, 100),
       lutStrength: clamp(Number(raw.lutStrength === undefined ? 100 : raw.lutStrength), 0, 100),
       curvePoints: normalizeQuickEditCurvePoints(raw.curvePoints),
       luts: normalizeQuickEditLutEntries(raw),
@@ -240,6 +256,51 @@ function quickEditWorkerMain() {
     return quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255)
       | (quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255) << 8)
       | (quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255) << 16);
+  }
+
+  function quickEditSplitToneActive(params) {
+    return !!(
+      Number(params.splitToneShadowsStrength || 0)
+      || Number(params.splitToneMidtonesStrength || 0)
+      || Number(params.splitToneHighlightsStrength || 0)
+    );
+  }
+
+  function quickEditSplitToneWeight(value, center, width) {
+    const distance = Math.abs(Number(value || 0) - Number(center || 0));
+    const raw = clamp(1 - distance / Math.max(0.0001, Number(width || 1)), 0, 1);
+    return raw * raw * (3 - 2 * raw);
+  }
+
+  function quickEditSplitToneColor(hue) {
+    return quickEditHslToRgb(hue, 0.72, 0.5);
+  }
+
+  function quickEditBlendSplitToneChannel(value, toneValue, weight) {
+    return quickEditClampByte(Number(value || 0) + (Number(toneValue || 0) - Number(value || 0)) * weight);
+  }
+
+  function quickEditApplySplitTone(r, g, b, clean) {
+    const luminance = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255, 0, 1);
+    const balance = clamp(Number(clean.splitToneBalance || 0) / 100, -1, 1);
+    const shadowCenter = 0.24 + balance * 0.16;
+    const highlightCenter = 0.76 + balance * 0.16;
+    const midCenter = 0.5 + balance * 0.08;
+    const shadowWeight = quickEditSplitToneWeight(luminance, shadowCenter, 0.46) * clamp(Number(clean.splitToneShadowsStrength || 0) / 100, 0, 1);
+    const midtoneWeight = quickEditSplitToneWeight(luminance, midCenter, 0.38) * clamp(Number(clean.splitToneMidtonesStrength || 0) / 100, 0, 1);
+    const highlightWeight = quickEditSplitToneWeight(luminance, highlightCenter, 0.46) * clamp(Number(clean.splitToneHighlightsStrength || 0) / 100, 0, 1);
+    const totalWeight = shadowWeight + midtoneWeight + highlightWeight;
+    if (totalWeight <= 0.0001) return r | (g << 8) | (b << 16);
+    const shadowColor = quickEditSplitToneColor(clean.splitToneShadowsHue);
+    const midtoneColor = quickEditSplitToneColor(clean.splitToneMidtonesHue);
+    const highlightColor = quickEditSplitToneColor(clean.splitToneHighlightsHue);
+    const strength = clamp(totalWeight * 0.42, 0, 0.72);
+    const toneR = (shadowColor.r * shadowWeight + midtoneColor.r * midtoneWeight + highlightColor.r * highlightWeight) / totalWeight;
+    const toneG = (shadowColor.g * shadowWeight + midtoneColor.g * midtoneWeight + highlightColor.g * highlightWeight) / totalWeight;
+    const toneB = (shadowColor.b * shadowWeight + midtoneColor.b * midtoneWeight + highlightColor.b * highlightWeight) / totalWeight;
+    return quickEditBlendSplitToneChannel(r, toneR, strength)
+      | (quickEditBlendSplitToneChannel(g, toneG, strength) << 8)
+      | (quickEditBlendSplitToneChannel(b, toneB, strength) << 16);
   }
 
   function quickEditHueDistance(a, b) {
@@ -518,6 +579,60 @@ function quickEditWorkerMain() {
     return quickEditHslToPackedRgb(hsl.h, clamp(hsl.s * factor, 0, 1), hsl.l);
   }
 
+  function quickEditBwWeightForHue(hue, center, width) {
+    const distance = quickEditHueDistance(hue, center);
+    return clamp(1 - distance / Math.max(1, Number(width || 1)), 0, 1);
+  }
+
+  function quickEditApplyBlackWhiteMixer(r, g, b, clean) {
+    const amount = clamp(Number(clean.blackWhite || 0) / 100, 0, 1);
+    if (!amount) return r | (g << 8) | (b << 16);
+    const hsl = quickEditRgbToHsl(r, g, b);
+    const weights = [
+      quickEditBwWeightForHue(hsl.h, 0, 42) * Number(clean.bwRed || 0),
+      quickEditBwWeightForHue(hsl.h, 60, 48) * Number(clean.bwYellow || 0),
+      quickEditBwWeightForHue(hsl.h, 120, 54) * Number(clean.bwGreen || 0),
+      quickEditBwWeightForHue(hsl.h, 180, 48) * Number(clean.bwAqua || 0),
+      quickEditBwWeightForHue(hsl.h, 230, 54) * Number(clean.bwBlue || 0),
+      quickEditBwWeightForHue(hsl.h, 310, 54) * Number(clean.bwMagenta || 0),
+    ];
+    const mixAdjust = weights.reduce((sum, value) => sum + value, 0) / 100;
+    const luma = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 + mixAdjust * 0.32, 0, 1);
+    const gray = quickEditClampByte(luma * 255);
+    return quickEditClampByte(r + (gray - r) * amount)
+      | (quickEditClampByte(g + (gray - g) * amount) << 8)
+      | (quickEditClampByte(b + (gray - b) * amount) << 16);
+  }
+
+  function quickEditApplyVignette(pixels, width, height, clean) {
+    const amount = clamp(Number(clean.vignette || 0) / 100, -1, 1);
+    const w = Math.max(1, Math.round(Number(width || 0)));
+    const h = Math.max(1, Math.round(Number(height || 0)));
+    if (!amount || w < 2 || h < 2 || pixels.length < w * h * 4) return;
+    const feather = clamp(Number(clean.vignetteFeather === undefined ? 58 : clean.vignetteFeather) / 100, 0, 1);
+    const inner = 0.18 + feather * 0.34;
+    const outer = 0.92 + feather * 0.18;
+    const cx = (w - 1) / 2;
+    const cy = (h - 1) / 2;
+    const invX = 1 / Math.max(1, cx);
+    const invY = 1 / Math.max(1, cy);
+    for (let y = 0; y < h; y += 1) {
+      const ny = (y - cy) * invY;
+      for (let x = 0; x < w; x += 1) {
+        const i = (y * w + x) * 4;
+        if (!pixels[i + 3]) continue;
+        const nx = (x - cx) * invX;
+        const distance = Math.sqrt(nx * nx + ny * ny);
+        const raw = clamp((distance - inner) / Math.max(0.0001, outer - inner), 0, 1);
+        const weight = raw * raw * (3 - 2 * raw);
+        const factor = amount > 0 ? 1 - weight * amount * 0.72 : 1 + weight * (-amount) * 0.48;
+        pixels[i] = quickEditClampByte(pixels[i] * factor);
+        pixels[i + 1] = quickEditClampByte(pixels[i + 1] * factor);
+        pixels[i + 2] = quickEditClampByte(pixels[i + 2] * factor);
+      }
+    }
+  }
+
   function applyQuickEditSharpening(pixels, width, height, sharpening, onProgress) {
     const amount = clamp(Number(sharpening || 0), 0, 100) / 100;
     const w = Math.max(1, Math.round(Number(width || 0)));
@@ -691,6 +806,8 @@ function quickEditWorkerMain() {
     const blacks = clean.blacks;
     const dehaze = clean.dehaze;
     const vibrance = clean.vibrance;
+    const blackWhiteActive = !!clean.blackWhite;
+    const vignetteActive = !!clean.vignette;
     const temperature = quickEditTemperatureStrength(clean.temperature);
     const tint = clean.tint / 100;
     const redGain = 1 + temperature * 0.18 + Math.max(0, tint) * 0.08;
@@ -699,6 +816,7 @@ function quickEditWorkerMain() {
     const curveNeutral = isQuickEditCurveNeutral(clean);
     const hslAdjustments = quickEditActiveHslAdjustments(clean);
     const hslActive = hslAdjustments.length > 0;
+    const splitToneActive = quickEditSplitToneActive(clean);
     const useSaturationMatrix = Math.abs(globalSaturation - 1) > 0.0001;
     const useContrast = !!contrast;
     const useWhiteBlackLevels = !!(whites || blacks);
@@ -709,6 +827,9 @@ function quickEditWorkerMain() {
     const activeLuts = quickEditActiveLuts(clean);
     if (
       !hslActive
+      && !splitToneActive
+      && !blackWhiteActive
+      && !vignetteActive
       && !useSaturationMatrix
       && !useContrast
       && !useWhiteBlackLevels
@@ -723,7 +844,11 @@ function quickEditWorkerMain() {
         let r = quickEditClampByte(pixels[i] * redGain);
         let g = quickEditClampByte(pixels[i + 1] * greenGain);
         let b = quickEditClampByte(pixels[i + 2] * blueGain);
-        const lutColor = quickEditBlendLutColor(r, g, b, activeLuts);
+        const bwColor = blackWhiteActive ? quickEditApplyBlackWhiteMixer(r, g, b, clean) : (r | (g << 8) | (b << 16));
+        const bwR = bwColor & 255;
+        const bwG = (bwColor >> 8) & 255;
+        const bwB = (bwColor >> 16) & 255;
+        const lutColor = quickEditBlendLutColor(bwR, bwG, bwB, activeLuts);
         r = lutColor & 255;
         g = (lutColor >> 8) & 255;
         b = (lutColor >> 16) & 255;
@@ -785,11 +910,19 @@ function quickEditWorkerMain() {
       const vibrantR = vibrant & 255;
       const vibrantG = (vibrant >> 8) & 255;
       const vibrantB = (vibrant >> 16) & 255;
-      const mixed = hslActive ? quickEditApplyHslMixer(vibrantR, vibrantG, vibrantB, hslAdjustments) : vibrant;
+      const splitToned = splitToneActive ? quickEditApplySplitTone(vibrantR, vibrantG, vibrantB, clean) : vibrant;
+      const splitR = splitToned & 255;
+      const splitG = (splitToned >> 8) & 255;
+      const splitB = (splitToned >> 16) & 255;
+      const mixed = hslActive ? quickEditApplyHslMixer(splitR, splitG, splitB, hslAdjustments) : splitToned;
       const mixedR = mixed & 255;
       const mixedG = (mixed >> 8) & 255;
       const mixedB = (mixed >> 16) & 255;
-      const lutColor = quickEditBlendLutColor(mixedR, mixedG, mixedB, activeLuts);
+      const bwColor = blackWhiteActive ? quickEditApplyBlackWhiteMixer(mixedR, mixedG, mixedB, clean) : mixed;
+      const bwR = bwColor & 255;
+      const bwG = (bwColor >> 8) & 255;
+      const bwB = (bwColor >> 16) & 255;
+      const lutColor = quickEditBlendLutColor(bwR, bwG, bwB, activeLuts);
       const lutR = lutColor & 255;
       const lutG = (lutColor >> 8) & 255;
       const lutB = (lutColor >> 16) & 255;
@@ -797,6 +930,7 @@ function quickEditWorkerMain() {
       pixels[i + 1] = curveMap ? curveMap[lutG] : lutG;
       pixels[i + 2] = curveMap ? curveMap[lutB] : lutB;
     }
+    quickEditApplyVignette(pixels, width, height, clean);
     applyQuickEditDetailEffects(pixels, width, height, clean, reportProgress ? reportDetailProgress : null);
     if (reportProgress) reportProgress(1);
   }

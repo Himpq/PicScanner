@@ -513,6 +513,122 @@ class Storage:
         with self._lock, self._connect() as conn2:
             conn2.execute(sql, args)
 
+    @staticmethod
+    def _relocated_photo_path(root: Path, relative_path: str) -> Path:
+        relative = Path(str(relative_path or ""))
+        target = (root / relative).resolve(strict=False)
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError(f"图片相对路径越出来源目录: {relative_path}") from exc
+        return target
+
+    def source_relocation_plan(self, source_id: str, root_path: str | Path) -> list[dict]:
+        source_id = str(source_id or "").strip()
+        root = Path(root_path).resolve()
+        if not source_id:
+            return []
+        root_key = _norm_key(str(root))
+        with self._lock, self._connect() as conn:
+            roots = conn.execute(
+                "SELECT DISTINCT root_path FROM photos WHERE source_id=?",
+                (source_id,),
+            ).fetchall()
+            if not any(_norm_key(str(row["root_path"] or "")) != root_key for row in roots):
+                return []
+            rows = conn.execute(
+                """
+                SELECT id, root_path, path, relative_path, size, mtime, renderable, is_raw
+                FROM photos
+                WHERE source_id=?
+                ORDER BY id
+                """,
+                (source_id,),
+            ).fetchall()
+
+        plan = []
+        for row in rows:
+            current_path = self._relocated_photo_path(root, str(row["relative_path"] or ""))
+            if (
+                _norm_key(str(row["root_path"] or "")) == root_key
+                and _norm_key(str(row["path"] or "")) == _norm_key(str(current_path))
+            ):
+                continue
+            plan.append(
+                {
+                    "id": int(row["id"]),
+                    "previous_root_path": str(row["root_path"] or ""),
+                    "previous_path": str(row["path"] or ""),
+                    "current_path": str(current_path),
+                    "relative_path": str(row["relative_path"] or ""),
+                    "size": int(row["size"] or 0),
+                    "mtime": float(row["mtime"] or 0),
+                    "previewable": bool(row["renderable"] or row["is_raw"]),
+                }
+            )
+        return plan
+
+    def rebind_source_root(self, source_id: str, root_path: str | Path) -> dict:
+        source_id = str(source_id or "").strip()
+        root = Path(root_path).resolve()
+        if not source_id:
+            return {"photos": 0, "sessions": 0, "cover": 0}
+
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, path, relative_path FROM photos WHERE source_id=? ORDER BY id",
+                (source_id,),
+            ).fetchall()
+            updates = []
+            path_map = {}
+            root_key = _norm_key(str(root))
+            for row in rows:
+                current_path = self._relocated_photo_path(root, str(row["relative_path"] or ""))
+                previous_path = str(row["path"] or "")
+                if _norm_key(previous_path) == _norm_key(str(current_path)):
+                    continue
+                updates.append((str(root), str(current_path), int(row["id"])))
+                path_map[_norm_key(previous_path)] = str(current_path)
+
+            if updates:
+                conn.executemany(
+                    "UPDATE photos SET root_path=?, path=? WHERE id=?",
+                    updates,
+                )
+            session_cursor = conn.execute(
+                """
+                UPDATE scan_sessions
+                SET root_path=?
+                WHERE source_id=? AND lower(replace(root_path, '\\', '/'))<>?
+                """,
+                (str(root), source_id, root_key),
+            )
+
+            cover_changed = 0
+            state = conn.execute(
+                "SELECT cover_photo_path FROM source_state WHERE source_id=?",
+                (source_id,),
+            ).fetchone()
+            cover_path = str(state["cover_photo_path"] or "") if state else ""
+            relocated_cover = path_map.get(_norm_key(cover_path), "")
+            if relocated_cover:
+                cursor = conn.execute(
+                    "UPDATE source_state SET root_path=?, cover_photo_path=?, updated_at=? WHERE source_id=?",
+                    (str(root), relocated_cover, now_text(), source_id),
+                )
+                cover_changed = int(cursor.rowcount or 0)
+            else:
+                conn.execute(
+                    "UPDATE source_state SET root_path=?, updated_at=? WHERE source_id=?",
+                    (str(root), now_text(), source_id),
+                )
+
+            return {
+                "photos": len(updates),
+                "sessions": int(session_cursor.rowcount or 0),
+                "cover": cover_changed,
+            }
+
     def set_source_cover(self, source_id: str, cover_photo_path: str, cover_thumb_path: str) -> None:
         source_id = str(source_id or "").strip()
         cover_photo_path = str(cover_photo_path or "")
@@ -572,6 +688,7 @@ class Storage:
                        s.cover_photo_path,
                        s.cover_thumb_path,
                        s.last_viewed_date,
+                       s.last_viewed_offset,
                        s.created_at,
                        s.updated_at,
                        COALESCE(reg.registered_count, 0) AS registered_count,

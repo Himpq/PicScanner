@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     "app_id": "",
     "remembered_folders": [],
     "last_source": "",
+    "last_source_id": "",
     "copy_mode": "current",
     "favorite_folders": [],
     "gallery_item_size": 168,
@@ -31,6 +32,9 @@ DEFAULT_CONFIG = {
         "splitTone": False,
         "hsl": False,
         "lut": False,
+        "framePresets": False,
+        "frameAdjust": False,
+        "frameText": False,
     },
     "export_preset": {
         "enabled": False,
@@ -81,15 +85,21 @@ class ConfigStore:
         self._data[key] = value
         self.save()
 
-    def remember_folder(self, folder: str) -> list[str]:
+    def remember_folder(self, folder: str, source_id: str = "") -> list[str]:
         p = str(Path(folder).resolve())
         folders = [str(Path(x).resolve()) for x in self._data.get("remembered_folders", []) if x]
         folders = [x for x in folders if x.lower() != p.lower()]
         folders.insert(0, p)
         self._data["remembered_folders"] = folders[:24]
         self._data["last_source"] = p
+        self._data["last_source_id"] = str(source_id or "").strip()
         self.save()
         return self._data["remembered_folders"]
+
+    def set_last_source(self, folder: str, source_id: str) -> None:
+        self._data["last_source"] = str(Path(folder).resolve())
+        self._data["last_source_id"] = str(source_id or "").strip()
+        self.save()
 
 
 config_store = ConfigStore()

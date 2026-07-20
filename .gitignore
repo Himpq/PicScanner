@@ -37,3 +37,6 @@ dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Other files
+icons

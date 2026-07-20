@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -17,9 +18,12 @@ from pathlib import Path
 import webview
 
 from WebViewUI import WindowApi
+from .batch_processor import BatchProcessingApiMixin
 from .config_store import DATA_DIR, config_store
 from .exif_reader import is_renderable_image
+from .metadata_copy import MetadataCopyError, copy_complete_metadata
 from .scanner import scanner
+from .source_discovery import discover_marked_sources
 from .source_identity import ensure_marker, is_removable_source, marker_path, path_source_id, read_marker
 from .storage import storage
 from .raw_developer import (
@@ -36,12 +40,14 @@ from .thumbnailer import (
     existing_thumbnail,
     is_previewable_image,
     is_raw_image,
+    migrate_thumbnail_cache,
     warm_thumbnails,
 )
 
 
 ACTIVE_SCAN_STATUSES = {"discovering", "stopping"}
 MISSING_SOURCE_ID = "__picscanner_missing_source__"
+_SOURCE_LOCATION_LOCK = threading.RLock()
 DEFAULT_EXPORT_PRESET = {
     "enabled": False,
     "destination": "",
@@ -57,8 +63,19 @@ QUICK_EDIT_SAVE_FORMATS = {
 }
 QUICK_EDIT_LUT_LIBRARY_DIR = DATA_DIR / "luts"
 QUICK_EDIT_PRESETS_PATH = DATA_DIR / "quick_edit_presets.json"
+QUICK_EDIT_FRAME_PRESETS_PATH = DATA_DIR / "quick_edit_frame_presets.json"
+QUICK_EDIT_FRAME_ASSET_DIR = DATA_DIR / "frame_assets"
 QUICK_EDIT_LUT_MAX_BYTES = 32 * 1024 * 1024
+QUICK_EDIT_FRAME_ASSET_MAX_BYTES = 12 * 1024 * 1024
 QUICK_EDIT_PRESET_MAX_COUNT = 120
+QUICK_EDIT_FRAME_PRESET_MAX_COUNT = 80
+QUICK_EDIT_FRAME_ASSET_FORMATS = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
 IMAGE_EXPORT_SUFFIXES = {
     ".arw", ".raw", ".dng", ".cr2", ".cr3", ".nef", ".nrw",
     ".raf", ".rw2", ".orf", ".srw", ".pef", ".jpg", ".jpeg",
@@ -100,79 +117,7 @@ def _versioned_file_uri(path: str | Path) -> str:
     return f"{p.resolve().as_uri()}?v={int(stat.st_mtime_ns)}-{int(stat.st_size)}"
 
 
-def _drive_type_name(code: int) -> str:
-    return {
-        2: "可移动磁盘",
-        3: "本地磁盘",
-        4: "网络磁盘",
-        5: "光驱",
-        6: "内存磁盘",
-    }.get(int(code), "磁盘")
-
-
-def _windows_drives() -> list[dict]:
-    if os.name != "nt":
-        return [{"kind": "drive", "path": "/", "title": "/", "subtitle": "根目录"}]
-    kernel32 = ctypes.windll.kernel32
-    bitmask = kernel32.GetLogicalDrives()
-    drives = []
-    for idx in range(26):
-        if not (bitmask & (1 << idx)):
-            continue
-        letter = chr(ord("A") + idx)
-        root = f"{letter}:\\"
-        dtype = int(kernel32.GetDriveTypeW(ctypes.c_wchar_p(root)))
-        if dtype == 1:
-            continue
-        label_buf = ctypes.create_unicode_buffer(261)
-        fs_buf = ctypes.create_unicode_buffer(261)
-        serial = ctypes.c_ulong()
-        max_comp = ctypes.c_ulong()
-        flags = ctypes.c_ulong()
-        label = ""
-        try:
-            ok = kernel32.GetVolumeInformationW(
-                ctypes.c_wchar_p(root),
-                label_buf,
-                ctypes.sizeof(label_buf),
-                ctypes.byref(serial),
-                ctypes.byref(max_comp),
-                ctypes.byref(flags),
-                fs_buf,
-                ctypes.sizeof(fs_buf),
-            )
-            if ok:
-                label = label_buf.value.strip()
-        except Exception:
-            label = ""
-        free = ctypes.c_ulonglong()
-        total = ctypes.c_ulonglong()
-        try:
-            kernel32.GetDiskFreeSpaceExW(
-                ctypes.c_wchar_p(root),
-                ctypes.byref(free),
-                ctypes.byref(total),
-                None,
-            )
-            space = f"{_format_bytes(free.value)} 可用 / {_format_bytes(total.value)}"
-        except Exception:
-            space = ""
-        title = f"{label} ({letter}:)" if label else f"{letter}:"
-        subtitle = " · ".join(x for x in [_drive_type_name(dtype), space] if x)
-        drives.append(
-            {
-                "id": f"drive:{root}",
-                "kind": "drive",
-                "path": root,
-                "title": title,
-                "subtitle": subtitle,
-                "drive_type": dtype,
-            }
-        )
-    return drives
-
-
-class PicScannerApi(WindowApi):
+class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def __init__(self):
         super().__init__()
 
@@ -282,6 +227,8 @@ class PicScannerApi(WindowApi):
 
         marker_text = str(marker_path(root)) if marker_exists else ""
         if resolved_source_id and should_persist:
+            if marker_exists:
+                self._synchronize_source_location(resolved_source_id, root)
             storage.upsert_source(resolved_source_id, str(root), marker_path=marker_text)
         return {
             "root_path": str(root),
@@ -292,6 +239,37 @@ class PicScannerApi(WindowApi):
             "exists": True,
             "source_mismatch": False,
         }
+
+    def _synchronize_source_location(self, source_id: str, root_path: str | Path) -> None:
+        with _SOURCE_LOCATION_LOCK:
+            plan = storage.source_relocation_plan(source_id, root_path)
+            if not plan:
+                return
+
+            outcomes: dict[str, int] = {}
+            previous_roots = sorted(
+                {str(item.get("previous_root_path") or "") for item in plan if item.get("previous_root_path")}
+            )
+            for item in plan:
+                if not item.get("previewable"):
+                    outcome = "not_previewable"
+                else:
+                    outcome = migrate_thumbnail_cache(
+                        item["previous_path"],
+                        item["current_path"],
+                        expected_size=item["size"],
+                        expected_mtime=item["mtime"],
+                    )
+                outcomes[outcome] = outcomes.get(outcome, 0) + 1
+
+            rebound = storage.rebind_source_root(source_id, root_path)
+            outcome_text = ", ".join(f"{key}={value}" for key, value in sorted(outcomes.items()))
+            print(
+                "[PicScannerSource] source location rebound "
+                f"source_id={source_id} old_roots={previous_roots} new_root={Path(root_path).resolve()} "
+                f"photos={rebound['photos']} sessions={rebound['sessions']} cover={rebound['cover']} "
+                f"thumbnails=({outcome_text})"
+            )
 
     def _state_from_session(self, session: dict | None) -> dict | None:
         if not session:
@@ -431,6 +409,7 @@ class PicScannerApi(WindowApi):
             "session_message": session.get("message") if session else "",
             "finished_at": session.get("finished_at") if session else "",
             "last_viewed_date": source_state.get("last_viewed_date") or "",
+            "last_viewed_offset": int(source_state.get("last_viewed_offset") or 0),
             "cover_url": cover_url,
         }
 
@@ -445,70 +424,78 @@ class PicScannerApi(WindowApi):
             payload["source_id"] = ""
         return payload
 
-    def _history_source_payload(self, row: dict) -> dict:
-        source_id = str(row.get("source_id") or "")
-        root_path = str(row.get("root_path") or "")
-        context = self._source_context(root_path, source_id=source_id) if root_path else {}
-        available = bool(context.get("exists") and not context.get("source_mismatch"))
-        visible_count = int(row.get("visible_count") or 0)
-        registered_count = int(row.get("registered_count") or 0)
-        scanned_count = max(int(row.get("session_total_files") or 0), registered_count, visible_count)
-        summary = {
-            "source_id": source_id if available else "",
-            "marker_exists": bool(context.get("marker_exists")),
-            "has_cache": scanned_count > 0,
-            "visible_files": visible_count,
-            "total_files": scanned_count,
-            "session_status": str(row.get("session_status") or ""),
-            "session_message": "",
-            "finished_at": "",
-            "last_viewed_date": str(row.get("last_viewed_date") or ""),
-            "cover_url": str(row.get("cover_url") or ""),
-        }
-        return {
-            "id": f"history:{source_id}",
-            "kind": "history",
-            "path": root_path,
-            "title": Path(root_path).name or root_path or source_id,
-            "subtitle": root_path,
-            "exists": available,
-            "unavailable": not available,
-            "unavailable_message": "来源未插入或已更换",
-            "source_id": source_id if available else "",
-            "requested_source_id": source_id,
-            "summary": summary,
-        }
-
     def get_sources(self):
-        remembered = []
-        seen_history_keys = set()
-        for folder in config_store.get("remembered_folders", []):
-            p = Path(folder)
+        storage_rows = storage.list_storage_sources()
+        hint_paths = [str(row.get("root_path") or "") for row in storage_rows]
+        hint_paths.extend(str(path or "") for path in config_store.get("remembered_folders", []))
+        discovery = discover_marked_sources([path for path in hint_paths if path])
+        sources = []
+        for item in discovery["sources"]:
+            path = str(item["path"])
             payload = self._source_payload(
                 {
-                    "id": f"folder:{folder}",
-                    "kind": "folder",
-                    "path": str(p),
-                    "title": p.name or str(p),
-                    "subtitle": str(p),
-                    "exists": p.exists() and p.is_dir(),
+                    "id": f"source:{item['source_id']}",
+                    "kind": "source",
+                    "path": path,
+                    "title": path,
+                    "subtitle": path,
+                    "exists": True,
+                    "marker_path": str(item["marker_path"]),
+                    "requested_source_id": str(item["source_id"]),
                 }
             )
-            key = (payload.get("source_id") or str(p).lower())
-            seen_history_keys.add(key)
-            remembered.append(payload)
-        for row in self._storage_sources_payload():
-            key = str(row.get("source_id") or row.get("root_path") or "")
-            if not key or key in seen_history_keys:
-                continue
-            payload = self._history_source_payload(row)
-            seen_history_keys.add(key)
-            remembered.append(payload)
+            if payload.get("source_id") != item["source_id"]:
+                raise RuntimeError(f"来源发现后身份发生变化: {path}")
+            sources.append(payload)
+
+        last_source_id = str(config_store.get("last_source_id", "") or "")
+        legacy_last_path = str(config_store.get("last_source", "") or "")
+        if not last_source_id and legacy_last_path:
+            legacy_key = os.path.normcase(os.path.normpath(legacy_last_path))
+            legacy_row = next(
+                (
+                    row for row in storage_rows
+                    if os.path.normcase(os.path.normpath(str(row.get("root_path") or ""))) == legacy_key
+                ),
+                None,
+            )
+            if legacy_row:
+                last_source_id = str(legacy_row.get("source_id") or "")
+            matched = next(
+                (
+                    item for item in sources
+                    if os.path.normcase(os.path.normpath(str(item.get("path") or ""))) == legacy_key
+                ),
+                None,
+            )
+            if not last_source_id and matched:
+                last_source_id = str(matched.get("source_id") or "")
+        sources.sort(
+            key=lambda item: (
+                str(item.get("source_id") or "") != last_source_id,
+                str(item.get("path") or "").lower(),
+            )
+        )
+        resolved_last = next(
+            (item for item in sources if str(item.get("source_id") or "") == last_source_id),
+            None,
+        )
+        if resolved_last:
+            resolved_path = str(resolved_last.get("path") or "")
+            if (
+                str(config_store.get("last_source_id", "") or "") != last_source_id
+                or os.path.normcase(os.path.normpath(legacy_last_path))
+                != os.path.normcase(os.path.normpath(resolved_path))
+            ):
+                config_store.set_last_source(resolved_path, last_source_id)
         return {
             "success": True,
-            "drives": [self._source_payload(item) for item in _windows_drives()],
-            "remembered_folders": remembered,
-            "last_source": config_store.get("last_source", ""),
+            "sources": sources,
+            "source_conflicts": discovery["conflicts"],
+            "source_discovery_errors": discovery["errors"],
+            "source_discovery_checked_paths": discovery["checked_paths"],
+            "last_source": str((resolved_last or {}).get("path") or ""),
+            "last_source_id": last_source_id if resolved_last else "",
             "config": config_store.snapshot(),
         }
 
@@ -524,12 +511,13 @@ class PicScannerApi(WindowApi):
             return {"success": False, "cancelled": True}
         folder = result[0] if isinstance(result, (list, tuple)) else result
         folder = str(Path(folder).resolve())
-        config_store.remember_folder(folder)
+        summary = self._source_summary(folder)
+        config_store.remember_folder(folder, str(summary.get("source_id") or ""))
         return {
             "success": True,
             "path": folder,
             "title": Path(folder).name or folder,
-            "summary": self._source_summary(folder),
+            "summary": summary,
             "message": "文件夹已记忆",
         }
 
@@ -537,7 +525,8 @@ class PicScannerApi(WindowApi):
         p = Path(str(folder or "")).resolve()
         if not p.exists() or not p.is_dir():
             return {"success": False, "message": f"目录不存在: {p}"}
-        folders = config_store.remember_folder(str(p))
+        context = self._source_context(str(p))
+        folders = config_store.remember_folder(str(p), str(context.get("source_id") or ""))
         return {"success": True, "folders": folders}
 
     def start_scan(self, root_path, limit=10):
@@ -546,7 +535,7 @@ class PicScannerApi(WindowApi):
             return {"success": False, "message": f"目录不存在: {p}"}
         context = self._source_context(str(p), create_marker=True)
         source_id = context["source_id"]
-        config_store.set("last_source", str(p))
+        config_store.set_last_source(str(p), source_id)
         result = scanner.start_scan(str(p), source_id, limit=int(limit or 10))
         result["source_id"] = source_id
         return result
@@ -557,7 +546,7 @@ class PicScannerApi(WindowApi):
             return {"success": False, "message": f"目录不存在: {p}"}
         context = self._source_context(str(p), create_marker=True)
         source_id = context["source_id"]
-        config_store.set("last_source", str(p))
+        config_store.set_last_source(str(p), source_id)
         result = scanner.scan_all(str(p), source_id)
         result["source_id"] = source_id
         return result
@@ -612,11 +601,13 @@ class PicScannerApi(WindowApi):
         }
 
     def get_startup_state(self):
-        last_source = str(config_store.get("last_source", "") or "")
+        sources = self.get_sources()
+        last_source = str(sources.get("last_source") or "")
+        last_source_id = str(sources.get("last_source_id") or "")
         return {
             "success": True,
-            "sources": self.get_sources(),
-            "scan": self.get_scan_state(last_source or None),
+            "sources": sources,
+            "scan": self.get_scan_state(last_source or None, last_source_id or None),
         }
 
     def _storage_sources_payload(self) -> list[dict]:
@@ -639,6 +630,7 @@ class PicScannerApi(WindowApi):
                     "cover_photo_path": str(row.get("cover_photo_path") or ""),
                     "cover_thumb_path": str(row.get("cover_thumb_path") or ""),
                     "last_viewed_date": str(row.get("last_viewed_date") or ""),
+                    "last_viewed_offset": int(row.get("last_viewed_offset") or 0),
                     "cover_url": cover_url,
                     "session_total_files": session_total,
                     "scanned_count": max(session_total, registered_count),
@@ -840,8 +832,10 @@ class PicScannerApi(WindowApi):
         p = Path(str(root_path or "")).resolve()
         if not p.exists() or not p.is_dir():
             return {"success": False, "message": f"目录不存在: {p}"}
-        config_store.set("last_source", str(p))
-        return {"success": True, "last_source": str(p)}
+        context = self._source_context(str(p))
+        source_id = str(context.get("source_id") or "")
+        config_store.set_last_source(str(p), source_id)
+        return {"success": True, "last_source": str(p), "last_source_id": source_id}
 
     def set_lightbox_info_visible(self, visible):
         value = bool(visible)
@@ -893,6 +887,9 @@ class PicScannerApi(WindowApi):
             "splitTone": bool(raw.get("splitTone")),
             "hsl": bool(raw.get("hsl")),
             "lut": bool(raw.get("lut")),
+            "framePresets": bool(raw.get("framePresets")),
+            "frameAdjust": bool(raw.get("frameAdjust")),
+            "frameText": bool(raw.get("frameText")),
         }
         config_store.set("quick_edit_collapsed_sections", value)
         return {"success": True, "quick_edit_collapsed_sections": value}
@@ -1127,6 +1124,31 @@ class PicScannerApi(WindowApi):
         self._write_quick_edit_presets(next_presets)
         return {"success": True, "items": self._read_quick_edit_presets(), "message": "已删除预设"}
 
+    def update_quick_edit_preset(self, preset_id, params, luts=None):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "预设标识为空"}
+        try:
+            presets = self._read_quick_edit_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = None
+        now = int(datetime.now().timestamp())
+        clean_params = self._quick_edit_clean_preset_params(params)
+        clean_luts = self._quick_edit_clean_preset_luts(luts)
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["params"] = clean_params
+            preset["luts"] = clean_luts
+            preset["updated_at"] = now
+            found = preset
+            break
+        if not found:
+            return {"success": False, "message": "预设不存在，请刷新列表"}
+        self._write_quick_edit_presets(presets)
+        return {"success": True, "preset": found, "items": self._read_quick_edit_presets(), "message": f"已覆盖预设：{found['name']}"}
+
     def rename_quick_edit_preset(self, preset_id, name):
         clean_id = str(preset_id or "").strip()
         clean_name = str(name or "").strip()
@@ -1295,6 +1317,576 @@ class PicScannerApi(WindowApi):
             merged.append(preset)
         self._write_quick_edit_presets(self._sort_quick_edit_presets(merged))
         return {"success": True, "items": self._read_quick_edit_presets(), "message": f"已导入 {len(incoming)} 个预设"}
+
+    @staticmethod
+    def _quick_edit_frame_preset_path() -> Path:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return QUICK_EDIT_FRAME_PRESETS_PATH
+
+    @staticmethod
+    def _quick_edit_frame_asset_dir() -> Path:
+        QUICK_EDIT_FRAME_ASSET_DIR.mkdir(parents=True, exist_ok=True)
+        return QUICK_EDIT_FRAME_ASSET_DIR
+
+    @staticmethod
+    def _quick_edit_frame_asset_mime(path_or_id) -> str:
+        return QUICK_EDIT_FRAME_ASSET_FORMATS.get(Path(str(path_or_id or "")).suffix.lower(), "")
+
+    def _quick_edit_frame_asset_path(self, asset_id) -> Path | None:
+        raw_id = str(asset_id or "").strip()
+        if not raw_id or raw_id in {".", ".."} or Path(raw_id).name != raw_id:
+            return None
+        if not self._quick_edit_frame_asset_mime(raw_id):
+            return None
+        library = self._quick_edit_frame_asset_dir()
+        path = (library / raw_id).resolve(strict=False)
+        if path.parent != library:
+            return None
+        return path
+
+    def _quick_edit_frame_asset_item(self, path: Path) -> dict:
+        stat = path.stat()
+        title = path.stem
+        title = re.sub(r"--[0-9a-f]{12}$", "", title, flags=re.IGNORECASE).strip() or path.stem
+        return {
+            "id": path.name,
+            "name": title[:80],
+            "mime": self._quick_edit_frame_asset_mime(path),
+            "size": int(stat.st_size),
+            "modified_at": int(stat.st_mtime),
+        }
+
+    def _quick_edit_frame_asset_usage(self) -> dict[str, list[str]]:
+        usage: dict[str, list[str]] = {}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError:
+            presets = []
+        for preset in presets:
+            preset_name = str(preset.get("name") or "").strip() or "未命名相框预设"
+            frame = preset.get("frame") if isinstance(preset.get("frame"), dict) else {}
+            for layer in frame.get("imageLayers", []) if isinstance(frame, dict) else []:
+                asset_id = str(layer.get("assetId") or layer.get("asset_id") or "").strip()
+                if not asset_id:
+                    continue
+                usage.setdefault(asset_id, [])
+                if preset_name not in usage[asset_id]:
+                    usage[asset_id].append(preset_name)
+        return usage
+
+    def _quick_edit_list_frame_assets(self) -> list[dict]:
+        library = self._quick_edit_frame_asset_dir()
+        usage = self._quick_edit_frame_asset_usage()
+        items = []
+        for path in library.iterdir():
+            if not path.is_file() or not self._quick_edit_frame_asset_mime(path):
+                continue
+            try:
+                item = self._quick_edit_frame_asset_item(path)
+            except OSError:
+                continue
+            used_by = usage.get(item["id"], [])
+            item["used_by_presets"] = used_by[:8]
+            item["used_count"] = len(used_by)
+            items.append(item)
+        items.sort(key=lambda item: (int(item.get("modified_at") or 0), item.get("name") or ""), reverse=True)
+        return items
+
+    @staticmethod
+    def _quick_edit_clean_frame_insets(insets) -> dict:
+        raw = insets if isinstance(insets, dict) else {}
+        clean = {}
+        for key in ("top", "right", "bottom", "left"):
+            try:
+                value = float(raw.get(key, 0))
+            except (TypeError, ValueError):
+                value = 0
+            if not math.isfinite(value):
+                value = 0
+            clean[key] = int(round(max(0, min(40, value))))
+        return clean
+
+    @staticmethod
+    def _quick_edit_clean_frame_image_layers(layers) -> list[dict]:
+        clean = []
+        used_ids = set()
+        coordinate_space_name = "short-edge-anchor-v1"
+        allowed_anchors = {
+            "top-left", "top-center", "top-right",
+            "center-left", "center", "center-right",
+            "bottom-left", "bottom-center", "bottom-right",
+        }
+        for layer in layers if isinstance(layers, list) else []:
+            if not isinstance(layer, dict):
+                continue
+            layer_id = str(layer.get("id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", layer_id or "") or layer_id in used_ids:
+                layer_id = f"frame-image-{secrets.token_hex(6)}"
+            used_ids.add(layer_id)
+            asset_id = str(layer.get("assetId") or layer.get("asset_id") or "").strip()
+            if not asset_id or asset_id in {".", ".."} or Path(asset_id).name != asset_id:
+                continue
+            mime = QUICK_EDIT_FRAME_ASSET_FORMATS.get(Path(asset_id).suffix.lower(), "")
+            if not mime:
+                continue
+            name = str(layer.get("name") or Path(asset_id).stem).strip()[:80] or Path(asset_id).stem[:80]
+            try:
+                size = float(layer.get("size", 18))
+            except (TypeError, ValueError):
+                size = 18
+            if not math.isfinite(size):
+                size = 18
+            try:
+                x = float(layer.get("x", 0))
+            except (TypeError, ValueError):
+                x = 0
+            if not math.isfinite(x):
+                x = 0
+            try:
+                y = float(layer.get("y", 0))
+            except (TypeError, ValueError):
+                y = 0
+            if not math.isfinite(y):
+                y = 0
+            try:
+                rotation = float(layer.get("rotation", 0))
+            except (TypeError, ValueError):
+                rotation = 0
+            if not math.isfinite(rotation):
+                rotation = 0
+            try:
+                opacity = float(layer.get("opacity", 100))
+            except (TypeError, ValueError):
+                opacity = 100
+            if not math.isfinite(opacity):
+                opacity = 100
+            item = {
+                "id": layer_id,
+                "assetId": asset_id,
+                "name": name,
+                "mime": mime,
+                "x": round(max(-160, min(160, x)), 1),
+                "y": round(max(-160, min(160, y)), 1),
+                "size": round(max(2, min(90, size)), 1),
+                "rotation": round(max(-180, min(180, rotation)), 1),
+                "opacity": int(round(max(0, min(100, opacity)))),
+                "enabled": layer.get("enabled") is not False,
+            }
+            coordinate_space = str(layer.get("coordinateSpace") or layer.get("coordinate_space") or "").strip()
+            anchor = str(layer.get("anchor") or "").strip()
+            if coordinate_space == coordinate_space_name and anchor in allowed_anchors:
+                item["coordinateSpace"] = coordinate_space_name
+                item["anchor"] = anchor
+            clean.append(item)
+            if len(clean) >= 12:
+                break
+        return clean
+
+    @staticmethod
+    def _quick_edit_clean_frame_text_layers(layers) -> list[dict]:
+        clean = []
+        used_ids = set()
+        coordinate_space_name = "short-edge-anchor-v1"
+        allowed_positions = {"top-center", "bottom-center", "bottom-left", "bottom-right"}
+        for layer in layers if isinstance(layers, list) else []:
+            if not isinstance(layer, dict):
+                continue
+            layer_id = str(layer.get("id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", layer_id or "") or layer_id in used_ids:
+                layer_id = f"frame-text-{secrets.token_hex(6)}"
+            used_ids.add(layer_id)
+            text = str(layer.get("text") or "")[:120]
+            position = str(layer.get("position") or "bottom-center")
+            if position not in allowed_positions:
+                position = "bottom-center"
+            try:
+                size = float(layer.get("size", 18))
+            except (TypeError, ValueError):
+                size = 18
+            if not math.isfinite(size):
+                size = 18
+            try:
+                x = float(layer.get("x", layer.get("offsetX", 0)))
+            except (TypeError, ValueError):
+                x = 0
+            if not math.isfinite(x):
+                x = 0
+            try:
+                y = float(layer.get("y", layer.get("offsetY", 0)))
+            except (TypeError, ValueError):
+                y = 0
+            if not math.isfinite(y):
+                y = 0
+            font_family = str(layer.get("fontFamily") or layer.get("font_family") or "system-ui")
+            font_family = re.sub(r"[;\r\n]+", "", font_family).strip()[:80] or "system-ui"
+            try:
+                weight = float(layer.get("weight", 560))
+            except (TypeError, ValueError):
+                weight = 560
+            if not math.isfinite(weight):
+                weight = 560
+            color = str(layer.get("color") or "").strip().lower()
+            if not re.fullmatch(r"#[0-9a-f]{6}", color):
+                color = "#222222"
+            item = {
+                "id": layer_id,
+                "text": text,
+                "position": position,
+                "x": round(max(-100, min(100, x)), 1),
+                "y": round(max(-100, min(100, y)), 1),
+                "fontFamily": font_family,
+                "size": int(round(max(8, min(72, size)))),
+                "weight": int(round(max(100, min(900, weight)))),
+                "color": color,
+                "enabled": layer.get("enabled") is not False,
+            }
+            coordinate_space = str(layer.get("coordinateSpace") or layer.get("coordinate_space") or "").strip()
+            if coordinate_space == coordinate_space_name:
+                item["coordinateSpace"] = coordinate_space_name
+            clean.append(item)
+            if len(clean) >= 12:
+                break
+        return clean
+
+    def _quick_edit_clean_frame_payload(self, frame) -> dict:
+        raw = frame if isinstance(frame, dict) else {}
+        preset = str(raw.get("preset") or raw.get("framePreset") or raw.get("key") or "none")
+        if preset not in {"none", "white", "black", "paper"}:
+            preset = "none"
+        text_layers = raw.get("textLayers")
+        if text_layers is None:
+            text_layers = raw.get("text_layers")
+        image_layers = raw.get("imageLayers")
+        if image_layers is None:
+            image_layers = raw.get("image_layers")
+        return {
+            "preset": preset,
+            "insets": self._quick_edit_clean_frame_insets(raw.get("insets")),
+            "textLayers": self._quick_edit_clean_frame_text_layers(text_layers),
+            "imageLayers": self._quick_edit_clean_frame_image_layers(image_layers),
+        }
+
+    def _quick_edit_clean_frame_preset(self, preset) -> dict | None:
+        raw = preset if isinstance(preset, dict) else {}
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            return None
+        frame = self._quick_edit_clean_frame_payload(raw.get("frame") if isinstance(raw.get("frame"), dict) else raw)
+        if frame["preset"] == "none" and not frame["textLayers"] and not frame["imageLayers"]:
+            return None
+        now = int(datetime.now().timestamp())
+        try:
+            created = int(raw.get("created_at") or now)
+        except (TypeError, ValueError):
+            created = now
+        try:
+            updated = int(raw.get("updated_at") or now)
+        except (TypeError, ValueError):
+            updated = now
+        try:
+            order = float(raw.get("order", updated))
+        except (TypeError, ValueError):
+            order = float(updated)
+        if not math.isfinite(order):
+            order = float(updated)
+        return {
+            "id": self._quick_edit_preset_clean_id(raw.get("id")),
+            "name": name[:80],
+            "frame": frame,
+            "favorite": bool(raw.get("favorite")),
+            "order": order,
+            "created_at": created,
+            "updated_at": updated,
+        }
+
+    def _read_quick_edit_frame_presets(self) -> list[dict]:
+        path = self._quick_edit_frame_preset_path()
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            raise RuntimeError(f"相框预设读取失败: {exc}") from exc
+        source = data.get("presets") if isinstance(data, dict) else data
+        presets = []
+        seen = set()
+        for item in source if isinstance(source, list) else []:
+            preset = self._quick_edit_clean_frame_preset(item)
+            if not preset or preset["id"] in seen:
+                continue
+            seen.add(preset["id"])
+            presets.append(preset)
+        return self._sort_quick_edit_presets(presets)[:QUICK_EDIT_FRAME_PRESET_MAX_COUNT]
+
+    def _write_quick_edit_frame_presets(self, presets) -> None:
+        path = self._quick_edit_frame_preset_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        clean = []
+        seen = set()
+        for item in presets if isinstance(presets, list) else []:
+            preset = self._quick_edit_clean_frame_preset(item)
+            if not preset or preset["id"] in seen:
+                continue
+            seen.add(preset["id"])
+            clean.append(preset)
+        clean = clean[:QUICK_EDIT_FRAME_PRESET_MAX_COUNT]
+        path.write_text(
+            json.dumps({"presets": clean}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def list_quick_edit_frame_presets(self):
+        try:
+            return {"success": True, "items": self._read_quick_edit_frame_presets()}
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc), "items": []}
+
+    def list_quick_edit_frame_assets(self):
+        return {"success": True, "items": self._quick_edit_list_frame_assets()}
+
+    def import_quick_edit_frame_asset(self):
+        win = self._get_window("")
+        if win is None:
+            return {"success": False, "message": "窗口尚未准备好"}
+
+        result = win.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("Image (*.png;*.jpg;*.jpeg;*.webp;*.svg)",),
+        )
+        if not result:
+            return {"success": False, "cancelled": True}
+
+        selected = result[0] if isinstance(result, (list, tuple)) else result
+        source = Path(str(selected or "")).resolve()
+        suffix = source.suffix.lower()
+        if suffix not in QUICK_EDIT_FRAME_ASSET_FORMATS:
+            return {"success": False, "message": "请选择 PNG、JPG、WebP 或 SVG 图片"}
+        if not source.exists() or not source.is_file():
+            return {"success": False, "message": f"标识图片不存在: {source}"}
+
+        size = int(source.stat().st_size)
+        if size <= 0:
+            return {"success": False, "message": "标识图片为空"}
+        if size > QUICK_EDIT_FRAME_ASSET_MAX_BYTES:
+            return {
+                "success": False,
+                "message": f"标识图片过大，当前上限 {_format_bytes(QUICK_EDIT_FRAME_ASSET_MAX_BYTES)}",
+            }
+
+        library = self._quick_edit_frame_asset_dir()
+        digest = self._quick_edit_lut_digest(source)
+        short_hash = digest[:12]
+        existing = next(library.glob(f"*--{short_hash}{suffix}"), None)
+        duplicate = existing is not None
+        if existing is not None:
+            target = existing
+        else:
+            stem = self._clean_export_path_part(source.stem) or "frame_asset"
+            target = (library / f"{stem}--{short_hash}{suffix}").resolve(strict=False)
+            if target.parent != library:
+                return {"success": False, "message": "标识图片保存路径异常"}
+            shutil.copy2(source, target)
+
+        item = self._quick_edit_frame_asset_item(target)
+        read_res = self.read_quick_edit_frame_asset(item["id"])
+        if not read_res.get("success"):
+            return read_res
+        return {
+            "success": True,
+            "item": item,
+            "data_url": read_res.get("data_url", ""),
+            "duplicate": duplicate,
+            "message": ("标识图片已在素材库：" if duplicate else "已导入标识图片：") + str(item.get("name") or ""),
+        }
+
+    def read_quick_edit_frame_asset(self, asset_id):
+        path = self._quick_edit_frame_asset_path(asset_id)
+        if path is None:
+            return {"success": False, "message": "标识图片引用无效"}
+        if not path.exists() or not path.is_file():
+            return {"success": False, "message": "标识图片不存在或已被移动"}
+        size = int(path.stat().st_size)
+        if size <= 0:
+            return {"success": False, "message": "标识图片为空"}
+        if size > QUICK_EDIT_FRAME_ASSET_MAX_BYTES:
+            return {"success": False, "message": "标识图片超过当前读取上限"}
+        mime = self._quick_edit_frame_asset_mime(path)
+        if not mime:
+            return {"success": False, "message": "标识图片格式不支持"}
+        try:
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError as exc:
+            return {"success": False, "message": f"标识图片读取失败: {exc}"}
+        return {
+            "success": True,
+            "item": self._quick_edit_frame_asset_item(path),
+            "data_url": f"data:{mime};base64,{encoded}",
+        }
+
+    def delete_quick_edit_frame_asset(self, asset_id):
+        path = self._quick_edit_frame_asset_path(asset_id)
+        if path is None:
+            return {"success": False, "message": "标识图片引用无效", "items": self._quick_edit_list_frame_assets()}
+        if not path.exists() or not path.is_file():
+            return {"success": False, "message": "标识图片不存在或已被移动", "items": self._quick_edit_list_frame_assets()}
+        usage = self._quick_edit_frame_asset_usage().get(path.name, [])
+        if usage:
+            names = "、".join(usage[:3])
+            more = f" 等 {len(usage)} 个相框预设" if len(usage) > 3 else ""
+            return {
+                "success": False,
+                "message": f"不能删除，已被 {names}{more} 使用",
+                "items": self._quick_edit_list_frame_assets(),
+            }
+        try:
+            path.unlink()
+        except OSError as exc:
+            return {"success": False, "message": f"标识图片删除失败: {exc}", "items": self._quick_edit_list_frame_assets()}
+        return {"success": True, "items": self._quick_edit_list_frame_assets(), "message": "已删除图片素材"}
+
+    def save_quick_edit_frame_preset(self, name, frame):
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return {"success": False, "message": "相框预设名称不能为空"}
+        clean_frame = self._quick_edit_clean_frame_payload(frame)
+        if clean_frame["preset"] == "none" and not clean_frame["textLayers"] and not clean_frame["imageLayers"]:
+            return {"success": False, "message": "请选择相框或添加文字后再保存预设"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        now = int(datetime.now().timestamp())
+        preset = {
+            "id": self._quick_edit_preset_clean_id(),
+            "name": clean_name,
+            "frame": clean_frame,
+            "favorite": False,
+            "order": float(now),
+            "created_at": now,
+            "updated_at": now,
+        }
+        presets = [preset] + [item for item in presets if str(item.get("name") or "").casefold() != clean_name.casefold()]
+        self._write_quick_edit_frame_presets(presets)
+        return {"success": True, "preset": preset, "items": self._read_quick_edit_frame_presets(), "message": f"已保存相框预设：{preset['name']}"}
+
+    def delete_quick_edit_frame_preset(self, preset_id):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "相框预设标识为空"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        next_presets = [item for item in presets if str(item.get("id") or "") != clean_id]
+        if len(next_presets) == len(presets):
+            return {"success": False, "message": "相框预设不存在，请刷新列表"}
+        self._write_quick_edit_frame_presets(next_presets)
+        return {"success": True, "items": self._read_quick_edit_frame_presets(), "message": "已删除相框预设"}
+
+    def update_quick_edit_frame_preset(self, preset_id, frame):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "相框预设标识为空"}
+        clean_frame = self._quick_edit_clean_frame_payload(frame)
+        if clean_frame["preset"] == "none" and not clean_frame["textLayers"] and not clean_frame["imageLayers"]:
+            return {"success": False, "message": "请选择相框或添加文字后再覆盖预设"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = None
+        now = int(datetime.now().timestamp())
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["frame"] = clean_frame
+            preset["updated_at"] = now
+            found = preset
+            break
+        if not found:
+            return {"success": False, "message": "相框预设不存在，请刷新列表"}
+        self._write_quick_edit_frame_presets(presets)
+        return {"success": True, "preset": found, "items": self._read_quick_edit_frame_presets(), "message": f"已覆盖相框预设：{found['name']}"}
+
+    def rename_quick_edit_frame_preset(self, preset_id, name):
+        clean_id = str(preset_id or "").strip()
+        clean_name = str(name or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "相框预设标识为空"}
+        if not clean_name:
+            return {"success": False, "message": "相框预设名称不能为空"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = False
+        now = int(datetime.now().timestamp())
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["name"] = clean_name[:80]
+            preset["updated_at"] = now
+            found = True
+            break
+        if not found:
+            return {"success": False, "message": "相框预设不存在，请刷新列表"}
+        self._write_quick_edit_frame_presets(presets)
+        return {"success": True, "items": self._read_quick_edit_frame_presets(), "message": "已重命名相框预设"}
+
+    def set_quick_edit_frame_preset_favorite(self, preset_id, favorite):
+        clean_id = str(preset_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "相框预设标识为空"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        found = False
+        now = int(datetime.now().timestamp())
+        for preset in presets:
+            if str(preset.get("id") or "") != clean_id:
+                continue
+            preset["favorite"] = bool(favorite)
+            preset["updated_at"] = now
+            if preset["favorite"]:
+                preset["order"] = max([float(item.get("order") or 0) for item in presets] + [0]) + 1
+            found = True
+            break
+        if not found:
+            return {"success": False, "message": "相框预设不存在，请刷新列表"}
+        self._write_quick_edit_frame_presets(presets)
+        return {"success": True, "items": self._read_quick_edit_frame_presets(), "message": "已更新相框预设收藏"}
+
+    def move_quick_edit_frame_preset(self, preset_id, direction):
+        clean_id = str(preset_id or "").strip()
+        step = -1 if str(direction or "").lower() in {"down", "next", "1"} else 1
+        if not clean_id:
+            return {"success": False, "message": "相框预设标识为空"}
+        try:
+            presets = self._read_quick_edit_frame_presets()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
+        ordered = self._sort_quick_edit_presets(presets)
+        index = next((i for i, item in enumerate(ordered) if str(item.get("id") or "") == clean_id), -1)
+        if index < 0:
+            return {"success": False, "message": "相框预设不存在，请刷新列表"}
+        favorite_group = bool(ordered[index].get("favorite"))
+        target_index = -1
+        cursor = index - step
+        while 0 <= cursor < len(ordered):
+            if bool(ordered[cursor].get("favorite")) == favorite_group:
+                target_index = cursor
+                break
+            cursor -= step
+        if target_index < 0:
+            return {"success": True, "items": ordered, "message": "相框预设顺序未变化"}
+        ordered[index], ordered[target_index] = ordered[target_index], ordered[index]
+        base = float(int(datetime.now().timestamp()) + len(ordered) + 1)
+        for position, preset in enumerate(ordered):
+            preset["order"] = base - position
+        self._write_quick_edit_frame_presets(ordered)
+        return {"success": True, "items": self._read_quick_edit_frame_presets(), "message": "已调整相框预设顺序"}
 
     def _normalize_export_preset(self, preset=None) -> dict:
         raw = preset if isinstance(preset, dict) else config_store.get("export_preset", {})
@@ -1614,7 +2206,7 @@ class PicScannerApi(WindowApi):
             return {"success": False, "message": error}
         return {"success": True, "path": str(target), "filename": target.name}
 
-    def save_quick_edit_image(self, data_url, destination, source_path, format_key="jpg", quality=92):
+    def save_quick_edit_image(self, data_url, destination, source_path, format_key="jpg", quality=92, preserve_exif=False):
         target, error = self._quick_edit_save_target(destination, source_path, format_key)
         if error:
             return {"success": False, "message": error}
@@ -1638,6 +2230,10 @@ class PicScannerApi(WindowApi):
         if not binary:
             return {"success": False, "message": "图片数据为空"}
 
+        exif_saved = False
+        if preserve_exif and fmt["mime"] != "image/jpeg":
+            return {"success": False, "message": "完整复制原始 EXIF 目前只支持 JPEG 导出"}
+
         try:
             with target.open("xb") as fh:
                 fh.write(binary)
@@ -1646,6 +2242,17 @@ class PicScannerApi(WindowApi):
         except Exception as exc:
             return {"success": False, "message": f"保存失败: {exc}"}
 
+        if preserve_exif:
+            try:
+                copy_complete_metadata(source_path, target)
+                exif_saved = True
+            except MetadataCopyError as exc:
+                try:
+                    target.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    print(f"[PicScannerMetadata] cleanup failed target={target} error={cleanup_exc}")
+                return {"success": False, "message": str(exc)}
+
         return {
             "success": True,
             "path": str(target),
@@ -1653,7 +2260,8 @@ class PicScannerApi(WindowApi):
             "format": fmt["label"],
             "quality": int(float(quality or 0)),
             "bytes": len(binary),
-            "message": f"已保存到 {target}",
+            "exif_saved": exif_saved,
+            "message": f"已保存到 {target}" + ("，已完整复制原始元数据" if exif_saved else ""),
         }
 
     def develop_quick_edit_raw_preview(self, photo_id, raw_params=None, max_side=2400, preview_profile=True):
@@ -1698,7 +2306,15 @@ class PicScannerApi(WindowApi):
             "photo": payload,
         }
 
-    def save_quick_edit_raw_tiff(self, photo_id, raw_params, destination, source_path=None, format_key="tif16"):
+    def save_quick_edit_raw_tiff(
+        self,
+        photo_id,
+        raw_params,
+        destination,
+        source_path=None,
+        format_key="tif16",
+        preserve_exif=False,
+    ):
         photo = storage.get_photo(int(photo_id))
         if not photo:
             return {"success": False, "message": "图片不存在"}
@@ -1725,6 +2341,24 @@ class PicScannerApi(WindowApi):
             print(f"[PicScannerRawDevelop] 16bit TIFF 保存异常 photo_id={photo_id} path={source} error={exc}", flush=True)
             return {"success": False, "message": f"16bit TIFF 保存失败: {exc}"}
 
+        exif_saved = False
+        if preserve_exif:
+            try:
+                copy_complete_metadata(
+                    source,
+                    result["path"],
+                    width=int(result["width"]),
+                    height=int(result["height"]),
+                )
+                exif_saved = True
+            except MetadataCopyError as exc:
+                target_path = Path(result["path"])
+                try:
+                    target_path.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    print(f"[PicScannerMetadata] cleanup failed target={target_path} error={cleanup_exc}")
+                return {"success": False, "message": str(exc)}
+
         return {
             "success": True,
             "path": str(result["path"]),
@@ -1732,7 +2366,8 @@ class PicScannerApi(WindowApi):
             "format": "TIFF 16-bit",
             "width": int(result["width"]),
             "height": int(result["height"]),
-            "message": f"已保存到 {result['path']}",
+            "exif_saved": exif_saved,
+            "message": f"已保存到 {result['path']}" + ("，已完整复制原始元数据" if exif_saved else ""),
         }
 
     def get_export_summary(self, source_id, export_type, category=None):

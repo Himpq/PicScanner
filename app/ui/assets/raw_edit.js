@@ -87,6 +87,18 @@
     ];
   }
 
+  function normalizeCurveStages(stages) {
+    return (Array.isArray(stages) ? stages : [])
+      .map((points) => normalizeCurvePoints(points, {}))
+      .filter((points) => !(
+        points.length === 2
+        && points[0].x === 0
+        && points[0].y === 0
+        && points[1].x === 100
+        && points[1].y === 100
+      ));
+  }
+
   function normalizeParams(input) {
     const raw = input && typeof input === 'object' ? input : {};
     return {
@@ -96,6 +108,7 @@
       rawHighlightRecovery: Math.round(clamp(finiteNumber(raw.rawHighlightRecovery, 0), 0, 100)),
       rawNoiseReduction: Math.round(clamp(finiteNumber(raw.rawNoiseReduction, 0), 0, 100)),
       curvePoints: normalizeCurvePoints(raw.curvePoints, raw),
+      curveStages: normalizeCurveStages(raw.curveStages),
     };
   }
 
@@ -108,6 +121,7 @@
       rawHighlightRecovery: clean.rawHighlightRecovery,
       rawNoiseReduction: clean.rawNoiseReduction,
       curvePoints: clean.curvePoints,
+      curveStages: clean.curveStages,
     });
   }
 

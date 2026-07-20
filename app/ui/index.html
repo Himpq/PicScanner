@@ -4,8 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=settings-alt-exif-20260703-1" />
+  <link rel="stylesheet" href="assets/style.css?v=frame-text-edge-20260718-17" />
   <link rel="stylesheet" href="assets/settings.css?v=settings-alt-exif-20260703-1" />
+  <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
+  <link rel="stylesheet" href="assets/batch_processing.css?v=batch-edit-tabs-20260717-1" />
 </head>
 <body>
   <div id="app">
@@ -15,39 +17,20 @@
           <div class="source-head">
             <div>
               <h1>来源首页</h1>
-              <p>在已连接设备和历史来源之间切换。</p>
+              <p>按 PicScanner 来源标记识别当前可用路径。</p>
             </div>
             <div class="source-head-actions">
               <button id="source-open-settings" class="icon-btn" title="设置">⚙</button>
               <button id="refresh-sources" class="icon-btn" title="刷新磁盘">↻</button>
             </div>
           </div>
-          <div id="source-page-tabs" class="source-page-tabs" role="tablist" aria-label="来源页面">
-            <button class="source-page-tab active" type="button" role="tab" aria-selected="true" data-source-page-tab="connected">
-              <span>已连接设备</span>
-              <b id="source-connected-count">0</b>
-            </button>
-            <button class="source-page-tab" type="button" role="tab" aria-selected="false" data-source-page-tab="history">
-              <span>历史记录</span>
-              <b id="source-history-count">0</b>
-            </button>
-          </div>
           <div class="source-pages">
             <section class="source-page" data-source-page="connected" role="tabpanel">
               <div class="source-page-head">
-                <div class="section-title">已连接设备</div>
-                <p>选择当前插入的 SD 卡、移动硬盘或本机磁盘。</p>
+                <div class="section-title">可用来源 <span id="source-connected-count">0</span></div>
+                <p>仅显示来源 ID 唯一且标记可访问的当前路径。</p>
               </div>
               <div id="drive-list" class="source-grid"></div>
-            </section>
-            <section class="source-page hidden" data-source-page="history" role="tabpanel">
-              <div class="source-page-head">
-                <div class="section-title">历史记录</div>
-                <p>快速回到曾经扫描过或记忆过的来源。</p>
-              </div>
-              <div id="folder-wrap" class="folder-wrap">
-                <div id="folder-list" class="source-grid compact"></div>
-              </div>
             </section>
           </div>
         </div>
@@ -333,9 +316,14 @@
     </div>
   </div>
 
-  <script src="assets/quick_edit_worker.js?v=quick-edit-presets-20260707-1"></script>
+  <script src="assets/quick_edit_worker.js?v=edit-stages-20260717-3"></script>
+  <script src="assets/quick_edit_geometry.js?v=frame-text-edge-20260718-17"></script>
   <script src="assets/pic_modification.js?v=settings-alt-exif-20260703-1"></script>
-  <script src="assets/raw_edit.js?v=raw-develop-20260704-1"></script>
-  <script src="assets/app.js?v=quick-edit-presets-20260707-1"></script>
+  <script src="assets/raw_edit.js?v=edit-stages-20260717-3"></script>
+  <script src="assets/source_conflicts.js?v=source-id-discovery-20260716-1"></script>
+  <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
+  <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
+  <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
+  <script src="assets/app.js?v=frame-text-edge-20260718-17"></script>
 </body>
 </html>

@@ -1,9 +1,9 @@
 (function () {
   const state = {
     selectedSource: null,
-    sourcePage: 'connected',
     dates: [],
     dateCounts: new Map(),
+    dateExifCounts: new Map(),
     dateNotes: new Map(),
     dateCovers: new Map(),
     dateCursor: null,
@@ -118,8 +118,7 @@
       photo: null,
       params: null,
       committedParams: null,
-      committedPanX: 0,
-      committedPanY: 0,
+      committedStages: [],
       panX: 0,
       panY: 0,
       cropFrame: null,
@@ -133,9 +132,32 @@
       histogramRenderToken: 0,
       hslColor: 'red',
       hslPickerActive: false,
+      panelTab: 'adjust',
+      framePreset: 'none',
+      frameInsets: { top: 5, right: 5, bottom: 5, left: 5 },
+      frameTextLayers: [],
+      frameTextDrag: null,
+      frameImageLayers: [],
+      frameImageDrag: null,
+      framePresets: [],
+      framePresetsLoaded: false,
+      framePresetsLoading: false,
+      framePresetsMessage: '',
+      framePresetModal: null,
+      framePresetDeleteConfirm: null,
+      framePresetOverwriteConfirm: null,
+      framePresetOverwritingId: '',
+      framePresetSelectedId: '',
+      framePresetHoverId: '',
+      frameAssetModal: null,
+      frameAssets: [],
+      frameAssetsLoaded: false,
+      frameAssetsLoading: false,
+      frameAssetsMessage: '',
+      frameAssetSelectedId: '',
       lut: null,
       luts: [],
-      collapsedSections: { tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false },
+      collapsedSections: { tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false, framePresets: false, frameAdjust: false, frameText: false },
       lutLibrary: [],
       lutLibraryLoaded: false,
       lutLibraryLoading: false,
@@ -179,19 +201,26 @@
       rawPreviewInFlightSignature: '',
       rawPreviewQueuedSignature: '',
       rawPreviewQueuedOptions: null,
+      rawPreviewCache: new Map(),
       presets: [],
       presetsLoaded: false,
       presetsLoading: false,
       presetsMessage: '',
       presetModal: null,
       presetApplyConfirm: null,
+      presetOverwriteConfirm: null,
       presetApplyingId: '',
+      presetOverwritingId: '',
       presetSelectedId: '',
+      presetHoverId: '',
       compareOriginalActive: false,
       previewObjectUrl: '',
       zoomTimer: null,
       history: [],
       viewZoom: 1,
+      displayBasisReady: false,
+      displayBasisWidth: 0,
+      displayBasisHeight: 0,
       shadeTimer: null,
       histogramRenderTimer: null,
       loadToken: 0,
@@ -200,10 +229,16 @@
       pairChoiceToken: 0,
       exitConfirm: null,
       saveConfirm: null,
-      saveOptions: { path: '', quality: 100, format: 'jpg', sizeMode: 'original', sizePreset: 'original', sizeWidth: 2048, sizeHeight: 1365, sizeLongEdge: 2048 },
+      saveOptions: { path: '', quality: 100, format: 'jpg', sizeMode: 'original', sizePreset: 'original', sizeWidth: 2048, sizeHeight: 1365, sizeLongEdge: 2048, includeFrame: false, preserveExif: false },
       saveProgress: null,
       saveToken: 0,
       saveSaving: false,
+      batchMode: false,
+      batchPhotos: [],
+      batchIndex: 0,
+      batchSessions: new Map(),
+      batchSwitching: false,
+      bakedSource: false,
     },
     lightbox: {
       photo: null,
@@ -232,9 +267,13 @@
       infoResizeStartLeft: 18,
       infoResizeStartTop: 18,
       navHoverSide: '',
+      embedded: false,
       loadToken: 0,
     },
   };
+
+  let batchProcessingController = null;
+  let batchSelectionController = null;
 
   const LIGHTBOX_MIN_ZOOM = 0.25;
   const LIGHTBOX_MAX_ZOOM = 12;
@@ -247,17 +286,18 @@
   const PREVIEW_CONCURRENCY = 4;
   const MORE_SCAN_COOLDOWN_MS = 650;
   const RENDER_AHEAD_PHOTOS = 20;
-  const APP_BUILD = 'quick-edit-effects-20260708-1';
+  const APP_BUILD = 'frame-text-edge-20260718-17';
   const FAVORITE_CATEGORY = '__picscanner_favorite_filter__';
   const DATE_RAIL_LOAD_LIMIT = 5000;
   const INITIAL_PHOTO_LIMIT = 40;
   const PHOTO_LOAD_BATCH = 20;
   const GALLERY_ITEM_SIZE_WHEEL_SCALE = 0.12;
   const SEARCH_DEBOUNCE_MS = 180;
-  const QUICK_EDIT_CROP_MIN_SIZE = 12;
-  const QUICK_EDIT_MIN_ZOOM = 1;
+  const QUICK_EDIT_CROP_MIN_SIZE = 0.001;
+  const QUICK_EDIT_CROP_MIN_FRAME_PX = 48;
+  const QUICK_EDIT_CROP_STAGE_MARGIN = 24;
+  const QUICK_EDIT_MIN_ZOOM = 0.5;
   const QUICK_EDIT_MAX_ZOOM = LIGHTBOX_MAX_ZOOM;
-  const QUICK_EDIT_ZOOM_STEP = LIGHTBOX_ZOOM_STEP;
   const QUICK_EDIT_SHADE_DELAY_MS = 500;
   const QUICK_EDIT_ROTATION_PX_PER_DEGREE = 8;
   const QUICK_EDIT_INTERACTIVE_PREVIEW_MAX_SIDE = 720;
@@ -350,6 +390,31 @@
     { key: 'webp', label: 'WebP', detail: '更高压缩率，适合网页交付' },
     { key: 'tif16', label: 'TIFF 16-bit', detail: '保留 RAW 显影位深，仅 RAW 可用', rawOnly: true },
   ];
+  const QUICK_EDIT_FRAME_TEXT_COLORS = [
+    { color: '#222222', label: '深灰' },
+    { color: '#f5f5f2', label: '米白' },
+    { color: '#ffffff', label: '白色' },
+    { color: '#ffb817', label: '暖黄' },
+    { color: '#d94f45', label: '红色' },
+    { color: '#4fa3ff', label: '蓝色' },
+  ];
+  const QUICK_EDIT_FRAME_TEXT_TOKENS = [
+    { token: '{filename}', label: '文件名' },
+    { token: '{origin_name}', label: '原始文件名' },
+    { token: '{date}', label: '拍摄日期' },
+    { token: '{Y}', label: '年份' },
+    { token: '{M}', label: '月份' },
+    { token: '{D}', label: '日期' },
+    { token: '{camera}', label: '相机' },
+    { token: '{model}', label: '机身型号' },
+    { token: '{lens}', label: '镜头' },
+    { token: '{shutter_speed}', label: '快门' },
+    { token: '{aperture}', label: '光圈' },
+    { token: '{iso}', label: 'ISO' },
+    { token: '{focal_length}', label: '焦距' },
+    { token: '{focal_length_35mm}', label: '等效焦距' },
+    { token: '{format}', label: '格式' },
+  ];
   const QUICK_EDIT_DEFAULT_SAVE_QUALITY = 100;
   const QUICK_EDIT_SAVE_QUALITY_PRESETS = [
     { key: 'draft', label: '预览', value: 70 },
@@ -436,12 +501,8 @@
   const els = {
     sourceScreen: document.getElementById('source-screen'),
     workspace: document.getElementById('workspace'),
-    sourcePageTabs: document.getElementById('source-page-tabs'),
     sourceConnectedCount: document.getElementById('source-connected-count'),
-    sourceHistoryCount: document.getElementById('source-history-count'),
     driveList: document.getElementById('drive-list'),
-    folderList: document.getElementById('folder-list'),
-    folderWrap: document.getElementById('folder-wrap'),
     sourceOpenSettings: document.getElementById('source-open-settings'),
     refreshSources: document.getElementById('refresh-sources'),
     confirmModal: document.getElementById('confirm-modal'),
@@ -537,6 +598,8 @@
     isoChart: document.getElementById('iso-chart'),
     shutterChart: document.getElementById('shutter-chart'),
   };
+  const lightboxHomeParent = els.lightbox.parentNode;
+  const lightboxHomeNextSibling = els.lightbox.nextSibling;
 
   function api() {
     return (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
@@ -548,6 +611,23 @@
       return Promise.reject(new Error('pywebview bridge not ready: ' + name));
     }
     return a[name](...args);
+  }
+
+  function quickEditGeometryApi() {
+    const geometry = window.PicScannerQuickEditGeometry;
+    if (!geometry) throw new Error('快速修图几何模块未加载');
+    return geometry;
+  }
+
+  const STARTUP_API_METHODS = ['get_startup_state', 'get_sources', 'get_scan_state'];
+
+  function missingStartupApiMethods() {
+    const bridge = api();
+    return STARTUP_API_METHODS.filter((name) => !bridge || typeof bridge[name] !== 'function');
+  }
+
+  function startupApiReady() {
+    return missingStartupApiMethods().length === 0;
   }
 
   function show(el) { el.classList.remove('hidden'); }
@@ -632,10 +712,16 @@
   }
 
   function showSourceChooser() {
+    if (batchProcessingController && batchProcessingController.isRunning()) {
+      showToast('批量处理正在运行，完成或取消后才能切换来源', 'error');
+      return;
+    }
     if (state.quickEdit.saveSaving) {
       showQuickEditSaveConfirm();
       return;
     }
+    if (batchProcessingController) batchProcessingController.close();
+    if (batchSelectionController) batchSelectionController.clear();
     closeQuickEdit({ silent: true });
     closeSearchPanel();
     closeSettingsPage({ animate: false });
@@ -675,21 +761,6 @@
     els.sourceScreen.classList.add('entering');
   }
 
-  function setSourcePage(page) {
-    const next = page === 'history' ? 'history' : 'connected';
-    state.sourcePage = next;
-    if (els.sourcePageTabs) {
-      els.sourcePageTabs.querySelectorAll('[data-source-page-tab]').forEach((btn) => {
-        const active = btn.dataset.sourcePageTab === next;
-        btn.classList.toggle('active', active);
-        btn.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-    }
-    els.sourceScreen.querySelectorAll('[data-source-page]').forEach((panel) => {
-      panel.classList.toggle('hidden', panel.dataset.sourcePage !== next);
-    });
-  }
-
   function sourceEmpty(textValue) {
     const item = document.createElement('div');
     item.className = 'source-empty';
@@ -697,9 +768,8 @@
     return item;
   }
 
-  function updateSourcePageCounts(connectedCount, historyCount) {
+  function updateSourcePageCounts(connectedCount) {
     if (els.sourceConnectedCount) els.sourceConnectedCount.textContent = String(Math.max(0, Number(connectedCount || 0)));
-    if (els.sourceHistoryCount) els.sourceHistoryCount.textContent = String(Math.max(0, Number(historyCount || 0)));
   }
 
   function sourceSummaryText(item) {
@@ -742,7 +812,7 @@
       '</div>',
     ].join('');
     if (coverUrl) btn.querySelector('.source-cover').style.backgroundImage = 'url("' + coverUrl + '")';
-    btn.querySelector('.source-kicker').textContent = item.kind === 'drive' ? '磁盘' : (item.kind === 'history' ? '历史' : '目录');
+    btn.querySelector('.source-kicker').textContent = item.kind === 'source' ? '来源' : '目录';
     btn.querySelector('.source-title').textContent = item.title || item.path;
     btn.querySelector('.source-sub').textContent = sourceSummaryText(item);
     if (!item.unavailable) btn.addEventListener('click', () => selectSource(item));
@@ -750,23 +820,34 @@
   }
 
   function renderSources(data) {
-    const drives = data && Array.isArray(data.drives) ? data.drives : [];
-    const folders = data && Array.isArray(data.remembered_folders) ? data.remembered_folders : [];
-    updateSourcePageCounts(drives.length, folders.length);
+    if (!data || !Array.isArray(data.sources)) throw new Error('来源响应缺少 sources 列表');
+    const sources = data.sources;
+    updateSourcePageCounts(sources.length);
 
     els.driveList.innerHTML = '';
-    if (!drives.length) els.driveList.appendChild(sourceEmpty('没有检测到已连接设备'));
-    drives.forEach((item) => els.driveList.appendChild(sourceCard(item)));
+    if (!sources.length) els.driveList.appendChild(sourceEmpty('没有发现可用来源'));
+    sources.forEach((item) => els.driveList.appendChild(sourceCard(item)));
     els.driveList.appendChild(sourceCard({ kind: 'add' }, 'add'));
-
-    els.folderList.innerHTML = '';
-    els.folderWrap.style.display = '';
-    if (!folders.length) {
-      els.folderList.appendChild(sourceEmpty('还没有历史记录'));
-    } else {
-      folders.forEach((item) => els.folderList.appendChild(sourceCard(item)));
+    if (window.PicScannerSourceConflicts) {
+      window.PicScannerSourceConflicts.show(
+        (data && data.source_conflicts) || [],
+        (data && data.source_discovery_errors) || []
+      );
     }
-    setSourcePage(state.sourcePage);
+  }
+
+  function showSourceStartupError(error, context) {
+    const prefix = String(context || '来源加载失败');
+    const message = error instanceof Error ? error.message : String(error || '未知错误');
+    console.error('[PicScannerStartup] ' + prefix, error);
+    updateSourcePageCounts(0);
+    els.driveList.innerHTML = '';
+    const item = document.createElement('div');
+    item.className = 'source-item unavailable';
+    item.textContent = prefix + ': ' + message;
+    els.driveList.appendChild(item);
+    if (window.PicScannerSourceConflicts) window.PicScannerSourceConflicts.close();
+    show(els.sourceScreen);
   }
 
   function loadSources() {
@@ -774,15 +855,7 @@
       applyAppConfig(data && data.config);
       renderSources(data);
     }).catch((err) => {
-      updateSourcePageCounts(0, 0);
-      els.driveList.innerHTML = '';
-      const item = document.createElement('div');
-      item.className = 'source-item';
-      item.textContent = String(err);
-      els.driveList.appendChild(item);
-      els.folderList.innerHTML = '';
-      els.folderList.appendChild(sourceEmpty('来源读取失败'));
-      setSourcePage(state.sourcePage);
+      showSourceStartupError(err, '来源加载失败');
     });
   }
 
@@ -806,6 +879,7 @@
   function resetGallery() {
     state.dates = [];
     state.dateCounts = new Map();
+    state.dateExifCounts = new Map();
     state.dateNotes = new Map();
     state.dateCovers = new Map();
     state.dateCursor = null;
@@ -845,6 +919,10 @@
     els.dateRail.innerHTML = '';
   }
 
+  function syncBatchSelectionSource() {
+    if (batchSelectionController) batchSelectionController.setSource(state.currentSourceId || '');
+  }
+
   function beginScan() {
     if (!state.selectedSource) return;
     hide(els.confirmModal);
@@ -854,6 +932,7 @@
     els.currentSource.textContent = state.selectedSource.path;
     state.currentRootPath = state.selectedSource.path;
     state.currentSourceId = state.selectedSource.source_id || (state.selectedSource.summary && state.selectedSource.summary.source_id) || '';
+    syncBatchSelectionSource();
     state.scanRunning = true;
     state.scanStoppedByUser = false;
     resetSourceFilterContext();
@@ -861,6 +940,7 @@
     call('start_scan', state.selectedSource.path).then((res) => {
       if (res && res.source_id) {
         state.currentSourceId = res.source_id;
+        syncBatchSelectionSource();
         loadCategories();
       }
       if (!res.success) {
@@ -948,6 +1028,7 @@
     }
     state.galleryItemSize = Math.round(state.galleryItemSizeRaw);
     document.documentElement.style.setProperty('--photo-min-size', state.galleryItemSizeRaw.toFixed(2) + 'px');
+    if (state.dates && state.dates.length) updateAllDateReserves();
     if (!options || options.save !== false) {
       scheduleGalleryItemSizeSave();
     }
@@ -2716,7 +2797,10 @@
       const stats = data.statistics || {};
       const scanStatus = st.scan_status || st.status || 'idle';
       const exifStatus = st.exif_status || 'idle';
-      if (Object.prototype.hasOwnProperty.call(st, 'source_id')) state.currentSourceId = st.source_id || '';
+      if (Object.prototype.hasOwnProperty.call(st, 'source_id')) {
+        state.currentSourceId = st.source_id || '';
+        syncBatchSelectionSource();
+      }
       state.scanRunning = !!st.scan_running || scanStatus === 'discovering' || scanStatus === 'stopping';
       state.exifRunning = !!st.exif_running || exifStatus === 'reading_exif' || exifStatus === 'stopping';
       state.scanComplete = !!st.scan_complete || scanStatus === 'done';
@@ -2785,6 +2869,7 @@
     resetGallery();
     state.currentRootPath = session.root_path || '';
     state.currentSourceId = session.source_id || (scanData.state && scanData.state.source_id) || '';
+    syncBatchSelectionSource();
     state.scanStoppedByUser = session.status === 'stopped';
     els.currentSource.textContent = state.currentRootPath;
     applyScanData(scanData);
@@ -2798,6 +2883,7 @@
   function enterSourceWorkspace(source) {
     state.currentRootPath = source.path || '';
     state.currentSourceId = source.source_id || (source.summary && source.summary.source_id) || '';
+    syncBatchSelectionSource();
     if (state.currentRootPath) call('set_last_source', state.currentRootPath).catch(console.warn);
     state.scanComplete = false;
     state.scanStoppedByUser = false;
@@ -2811,13 +2897,19 @@
     const rootPath = state.currentRootPath;
     call('get_scan_state', rootPath, state.currentSourceId || null).then((scanData) => {
       if (rootPath !== state.currentRootPath) return;
-      if (scanData.state && scanData.state.source_id) state.currentSourceId = scanData.state.source_id;
+      if (scanData.state && scanData.state.source_id) {
+        state.currentSourceId = scanData.state.source_id;
+        syncBatchSelectionSource();
+      }
       applyScanData(scanData);
       loadCategories();
       loadOlderDates();
       const sourceState = scanData.source_state || {};
       if (!sourceState.last_viewed_date && source.summary && source.summary.last_viewed_date) {
         sourceState.last_viewed_date = source.summary.last_viewed_date;
+      }
+      if (!Number(sourceState.last_viewed_offset) && source.summary && source.summary.last_viewed_offset) {
+        sourceState.last_viewed_offset = source.summary.last_viewed_offset;
       }
       applySourceViewedDates(sourceState);
       restoreLastViewedPosition(viewedPositionForCategory(state.activeCategory, sourceState));
@@ -2852,6 +2944,7 @@
     return call('start_scan', state.currentRootPath, 10).then((res) => {
       if (res && res.source_id) {
         state.currentSourceId = res.source_id;
+        syncBatchSelectionSource();
         loadCategories();
       }
       if (!res || !res.success) {
@@ -2996,6 +3089,7 @@
     call('scan_all', state.currentRootPath).then((res) => {
       if (res && res.source_id) {
         state.currentSourceId = res.source_id;
+        syncBatchSelectionSource();
         loadCategories();
       }
       if (!res || !res.success) {
@@ -3059,22 +3153,51 @@
       const hadCount = state.dateCounts.has(dateKey);
       const previousCount = state.dateCounts.get(dateKey) || 0;
       const nextCount = Number(d.count || 0);
+      const previousExifCount = state.dateExifCounts.get(dateKey) || 0;
+      const nextExifCount = Object.prototype.hasOwnProperty.call(d, 'exif_count')
+        ? Number(d.exif_count || 0)
+        : previousExifCount;
       if (Object.prototype.hasOwnProperty.call(d, 'cover_url')) {
         setDateCover(dateKey, d.cover_url || '');
       }
       state.dateCounts.set(dateKey, nextCount);
+      state.dateExifCounts.set(dateKey, nextExifCount);
       const header = els.gallery.querySelector('[data-date-header="' + dateKey + '"] > span');
-      if (header) header.textContent = nextCount + ' 张 · EXIF ' + (d.exif_count || 0);
+      if (header) header.textContent = nextCount + ' 张 · EXIF ' + nextExifCount;
       const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
       if (pill) {
         renderDateLabel(pill, dateKey);
         applyDateCover(pill, dateKey);
       }
       const section = document.getElementById('date-' + dateKey);
-      if (section) renderPhotoPlaceholders(section, dateKey, nextCount);
+      const countChanged = hadCount && nextCount !== previousCount;
+      const timeOrderChanged = hadCount &&
+        (state.sortKey === 'datetime_desc' || state.sortKey === 'datetime_asc') &&
+        nextExifCount !== previousExifCount;
+      if (section && (countChanged || timeOrderChanged)) invalidateDatePhotoOrder(dateKey);
+      else if (section) renderPhotoPlaceholders(section, dateKey, nextCount);
       updateDateReserve(dateKey);
       if (hadCount && nextCount > previousCount) refreshDateMoreAvailability(dateKey, nextCount);
     });
+  }
+
+  function invalidateDatePhotoOrder(dateKey) {
+    const section = document.getElementById('date-' + dateKey);
+    if (!section) return;
+    section.dataset.photoOrderVersion = String(Number(section.dataset.photoOrderVersion || 0) + 1);
+    section.dataset.photoOrderDirty = '1';
+    if (section.dataset.loadingPhotos === '1') return;
+
+    const grid = section.querySelector('.photo-grid');
+    if (!grid) return;
+    grid.replaceChildren();
+    state.photoOffsets.set(dateKey, 0);
+    section.dataset.photoOrderDirty = '0';
+    renderPhotoPlaceholders(section, dateKey, state.dateCounts.get(dateKey) || 0);
+    updateDateReserve(dateKey);
+    schedulePlaceholderPhotoFill();
+    scheduleVisiblePreviewCheck();
+    updateLightboxNavButtons();
   }
 
   function renderDateLabel(target, dateKey) {
@@ -3210,6 +3333,7 @@
       showDateContextMenu(ev.clientX, ev.clientY, date.date_key);
     });
     state.dateCounts.set(date.date_key, Number(date.count || 0));
+    state.dateExifCounts.set(date.date_key, Number(date.exif_count || 0));
     renderPhotoPlaceholders(section, date.date_key, Number(date.count || 0));
     const beforeSection = Array.from(els.gallery.querySelectorAll('.date-section'))
       .find((node) => compareDatesForCurrentSort(node.dataset.date || '', date.date_key) > 0);
@@ -3263,16 +3387,71 @@
     grid.appendChild(fragment);
   }
 
+  function numericCssPx(value, fallback) {
+    const n = Number.parseFloat(String(value || ''));
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function galleryContentWidth() {
+    const rawWidth = Math.max(1, Number(els.gallery && els.gallery.clientWidth || 0));
+    if (!els.gallery) return rawWidth;
+    const style = window.getComputedStyle(els.gallery);
+    const left = numericCssPx(style.paddingLeft, 0);
+    const right = numericCssPx(style.paddingRight, 0);
+    return Math.max(1, rawWidth - left - right);
+  }
+
+  function dateSectionIntrinsicHeight(section, dateKey) {
+    const grid = section ? section.querySelector('.photo-grid') : null;
+    const header = section ? section.querySelector('.date-header') : null;
+    const more = section ? section.querySelector('.date-more') : null;
+    const total = Math.max(
+      0,
+      Number(state.dateCounts.get(dateKey) || 0),
+      grid ? grid.children.length : 0,
+    );
+    const itemSize = Math.max(1, Number(state.galleryItemSizeRaw || state.galleryItemSize || 168));
+    const gridStyle = grid ? window.getComputedStyle(grid) : null;
+    const columnGap = numericCssPx(gridStyle && gridStyle.columnGap, 10);
+    const rowGap = numericCssPx(gridStyle && gridStyle.rowGap, columnGap);
+    const gridWidth = Math.max(1, Number(grid && grid.clientWidth || section && section.clientWidth || galleryContentWidth()));
+    const columns = Math.max(1, Math.floor((gridWidth + columnGap) / (itemSize + columnGap)));
+    const rows = total > 0 ? Math.ceil(total / columns) : 0;
+    const gridHeight = rows > 0 ? rows * itemSize + Math.max(0, rows - 1) * rowGap : 0;
+    const headerStyle = header ? window.getComputedStyle(header) : null;
+    const headerHeight = numericCssPx(headerStyle && headerStyle.height, header ? header.offsetHeight : 36);
+    const moreStyle = more ? window.getComputedStyle(more) : null;
+    const moreHeight = numericCssPx(moreStyle && moreStyle.height, more ? more.offsetHeight : 34)
+      + numericCssPx(moreStyle && moreStyle.marginTop, 12)
+      + numericCssPx(moreStyle && moreStyle.marginBottom, 0);
+    return Math.max(80, Math.ceil(headerHeight + gridHeight + moreHeight));
+  }
+
   function updateDateReserve(dateKey) {
     const section = document.getElementById('date-' + dateKey);
     if (!section) return;
     const more = section.querySelector('.date-more');
     section.style.paddingBottom = '';
+    section.style.setProperty('--date-section-intrinsic-size', dateSectionIntrinsicHeight(section, dateKey) + 'px');
     if (more) more.dataset.reserve = '0';
   }
 
   function updateAllDateReserves() {
     state.dates.forEach((date) => updateDateReserve(date.date_key));
+  }
+
+  function holdDateSectionLayout(section) {
+    if (!section) return () => {};
+    section.classList.add('restoring-layout');
+    void section.offsetHeight;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      setTimeout(() => {
+        section.classList.remove('restoring-layout');
+      }, 900);
+    };
   }
 
   function schedulePlaceholderPhotoFill() {
@@ -3319,7 +3498,12 @@
     updateAllDateReserves();
     setActiveDate(dateKey);
     const cleanOffset = Math.max(0, Number(offset || 0));
+    const releaseLayout = cleanOffset > 0 ? holdDateSectionLayout(section) : null;
     const scrollToSection = () => {
+      if (cleanOffset > 0) {
+        section.classList.add('restoring-layout');
+        void section.offsetHeight;
+      }
       els.galleryScroll.scrollTo({ top: Math.max(0, section.offsetTop + cleanOffset), behavior: 'auto' });
       scheduleDateHighlight();
       schedulePlaceholderPhotoFill();
@@ -3327,7 +3511,13 @@
     };
     scrollToSection();
     loadPhotosForDate(dateKey).finally(() => {
-      requestAnimationFrame(scrollToSection);
+      requestAnimationFrame(() => {
+        scrollToSection();
+        requestAnimationFrame(() => {
+          scrollToSection();
+          if (releaseLayout) releaseLayout();
+        });
+      });
     });
   }
 
@@ -3339,41 +3529,47 @@
     const total = state.dateCounts.get(dateKey) || 0;
     if (total > 0 && offset >= total) return Promise.resolve(false);
     section.dataset.loadingPhotos = '1';
+    const photoOrderVersion = Number(section.dataset.photoOrderVersion || 0);
     const more = section.querySelector('.date-more');
     more.textContent = '加载中...';
     const requestedLimit = Math.max(1, Number(options && options.limit) || (offset === 0 ? INITIAL_PHOTO_LIMIT : PHOTO_LOAD_BATCH));
     return call('list_photos', dateKey, offset, requestedLimit, state.currentRootPath || null, state.currentSourceId || null, state.sortKey, filterPayload()).then((data) => {
       const photos = data.photos || [];
       const grid = section.querySelector('.photo-grid');
-      requestAnimationFrame(() => {
-        photos.forEach((photo, index) => {
-          const card = photoCard(photo);
-          const target = grid.children[offset + index];
-          if (target) grid.replaceChild(card, target);
-          else grid.appendChild(card);
+      return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          if (Number(section.dataset.photoOrderVersion || 0) !== photoOrderVersion) {
+            resolve(false);
+            return;
+          }
+          photos.forEach((photo, index) => {
+            const card = photoCard(photo);
+            const target = grid.children[offset + index];
+            if (target) grid.replaceChild(card, target);
+            else grid.appendChild(card);
+          });
+          state.photoOffsets.set(dateKey, offset + photos.length);
+          updateDateReserve(dateKey);
+          schedulePlaceholderPhotoFill();
+          const nextOffset = offset + photos.length;
+          const knownTotal = state.dateCounts.get(dateKey) || total;
+          const complete = !photos.length || (knownTotal > 0 && nextOffset >= knownTotal) || photos.length < requestedLimit;
+          more.textContent = complete ? '这一天已加载完' : '滚动到这里会继续加载';
+          if (!complete) observeDateMore(more, dateKey);
+          observeImages();
+          scheduleRenderBufferCheck();
+          scheduleVisiblePreviewCheck();
+          scheduleDateHighlight();
+          updateLightboxNavButtons();
+          resolve(photos.length > 0);
         });
-        updateDateReserve(dateKey);
-        observeImages();
-        scheduleRenderBufferCheck();
-        schedulePlaceholderPhotoFill();
-        scheduleVisiblePreviewCheck();
-        scheduleDateHighlight();
-        updateLightboxNavButtons();
       });
-      state.photoOffsets.set(dateKey, offset + photos.length);
-      updateDateReserve(dateKey);
-      schedulePlaceholderPhotoFill();
-      const nextOffset = offset + photos.length;
-      const knownTotal = state.dateCounts.get(dateKey) || total;
-      const complete = !photos.length || (knownTotal > 0 && nextOffset >= knownTotal) || photos.length < requestedLimit;
-      more.textContent = complete ? '这一天已加载完' : '滚动到这里会继续加载';
-      if (!complete) observeDateMore(more, dateKey);
-      return photos.length > 0;
     }).catch((err) => {
       more.textContent = String(err);
       return false;
     }).finally(() => {
       section.dataset.loadingPhotos = '0';
+      if (section.dataset.photoOrderDirty === '1') invalidateDatePhotoOrder(dateKey);
     });
   }
 
@@ -3381,6 +3577,9 @@
   let dateSectionObserver = null;
   let quickEditPanController = null;
   let quickEditCurvePanel = null;
+  let quickEditFrameTextColorPanel = null;
+  let quickEditFrameTextTokenPanel = null;
+  const quickEditFrameAssetCache = new Map();
   let quickEditPreviewWorker = null;
   let quickEditPreviewWorkerObjectUrl = '';
   function observeDateSection(section, dateKey) {
@@ -3873,19 +4072,23 @@
       card.classList.add('openable');
       card.addEventListener('click', (ev) => {
         if (Date.now() < suppressPhotoClickUntil) return;
+        const currentPhoto = state.photoCache.get(Number(photo.id)) || photo;
         if (state.quickEdit.picking) {
           ev.preventDefault();
           ev.stopPropagation();
-          openQuickEdit(state.photoCache.get(Number(photo.id)) || photo);
+          openQuickEdit(currentPhoto);
+          return;
+        }
+        if (batchSelectionController && batchSelectionController.handlePhotoClick(ev, currentPhoto)) {
           return;
         }
         if (state.compare.open) {
           ev.preventDefault();
           ev.stopPropagation();
-          toggleComparePhoto(state.photoCache.get(Number(photo.id)) || photo);
+          toggleComparePhoto(currentPhoto);
           return;
         }
-        openLightbox(photo);
+        openLightbox(currentPhoto);
       });
     }
     if (canPreview) {
@@ -3931,6 +4134,7 @@
       showPhotoContextMenu(ev.clientX, ev.clientY, card);
     });
     updateCompareCardState(card);
+    if (batchSelectionController) batchSelectionController.decorateCard(card);
     return card;
   }
 
@@ -4146,6 +4350,14 @@
         category: String(mark.category || ''),
       });
       state.photoCache.set(id, next);
+    });
+    state.exifCache.forEach((photo, id) => {
+      if (String(photo.filename || '') !== cleanName) return;
+      state.exifCache.set(id, Object.assign({}, photo, {
+        favorite: !!mark.favorite,
+        note: String(mark.note || ''),
+        category: String(mark.category || ''),
+      }));
     });
     if (state.lightbox.photo && String(state.lightbox.photo.filename || '') === cleanName) {
       state.lightbox.photo = Object.assign({}, state.lightbox.photo, {
@@ -4581,6 +4793,7 @@
   }
 
   function favoriteHoveredPhoto() {
+    if (state.quickEdit.picking) return false;
     const card = activePointerCard();
     if (!card || !els.lightbox.classList.contains('hidden')) return false;
     const photo = state.photoCache.get(Number(card.dataset.photoId || 0));
@@ -5248,15 +5461,12 @@
   function quickEditParamsFromCropRect(base, extra) {
     const baseRect = quickEditCropRect(base);
     const extraRect = quickEditCropRect(extra);
-    const x = baseRect.x + extraRect.x * baseRect.w / 100;
-    const y = baseRect.y + extraRect.y * baseRect.h / 100;
-    const w = baseRect.w * extraRect.w / 100;
-    const h = baseRect.h * extraRect.h / 100;
+    const composed = quickEditGeometryApi().composeCrop(baseRect, extraRect, QUICK_EDIT_CROP_MIN_SIZE);
     return {
-      cropLeft: x,
-      cropTop: y,
-      cropRight: 100 - x - w,
-      cropBottom: 100 - y - h,
+      cropLeft: composed.x,
+      cropTop: composed.y,
+      cropRight: 100 - composed.x - composed.w,
+      cropBottom: 100 - composed.y - composed.h,
     };
   }
 
@@ -5321,8 +5531,8 @@
 
   function quickEditEffectivePan() {
     return {
-      x: Number(state.quickEdit.committedPanX || 0) + Number(state.quickEdit.panX || 0),
-      y: Number(state.quickEdit.committedPanY || 0) + Number(state.quickEdit.panY || 0),
+      x: Number(state.quickEdit.panX || 0),
+      y: Number(state.quickEdit.panY || 0),
     };
   }
 
@@ -5698,8 +5908,9 @@
     return quickEditActiveHslAdjustments(normalizeQuickEditParams(params)).length > 0;
   }
 
-  function quickEditActiveLuts() {
-    return (state.quickEdit.luts || [])
+  function quickEditActiveLuts(luts) {
+    const source = arguments.length ? luts : state.quickEdit.luts;
+    return (source || [])
       .map((lut) => normalizeQuickEditLut(lut))
       .filter((lut) => lut && lut.data && lut.size && Number(lut.strength || 0) > 0)
       .map((lut) => ({
@@ -6099,7 +6310,9 @@
     const useToneControls = !!(highlights || shadows);
     const useVibrance = !!vibrance;
     const curveMap = curveNeutral ? null : quickEditCurveMap(clean);
-    const activeLuts = quickEditActiveLuts();
+    const activeLuts = quickEditActiveLuts(
+      params && Array.isArray(params.luts) ? params.luts : state.quickEdit.luts,
+    );
     if (
       !hslActive
       && !splitToneActive
@@ -6206,6 +6419,13 @@
     applyQuickEditDetailEffects(pixels, width, height, clean);
   }
 
+  function applyQuickEditPixelStages(pixels, params, width, height) {
+    const stages = params && Array.isArray(params.stages) && params.stages.length
+      ? params.stages
+      : [params || {}];
+    stages.forEach((stage) => applyQuickEditPixelAdjustments(pixels, stage, width, height));
+  }
+
   function quickEditSourceUrl(photo, cachedPhoto) {
     return lightboxSourceUrl(photo, cachedPhoto);
   }
@@ -6261,27 +6481,98 @@
     }
     const maxWidth = Math.max(1, rect.width - 44);
     const maxHeight = Math.max(1, rect.height - 44);
-    const scale = Math.min(1, maxWidth / rawWidth, maxHeight / rawHeight);
+    const scale = Math.min(maxWidth / rawWidth, maxHeight / rawHeight);
     return {
       width: Math.max(1, rawWidth * scale),
       height: Math.max(1, rawHeight * scale),
     };
   }
 
+  function quickEditFramePreviewSpaceRatio(width, height) {
+    const imageWidth = Math.max(1, Number(width || 1));
+    const imageHeight = Math.max(1, Number(height || 1));
+    const preset = quickEditFramePresetKey(state.quickEdit.framePreset);
+    if (preset === 'none') return { width: 1, height: 1 };
+    const config = quickEditFrameExportConfig(preset);
+    const insets = quickEditNormalizeFrameInsets(config ? config.insets : null);
+    const basis = Math.max(1, Math.min(imageWidth, imageHeight));
+    return {
+      width: (imageWidth + basis * (insets.left + insets.right) / 100) / imageWidth,
+      height: (imageHeight + basis * (insets.top + insets.bottom) / 100) / imageHeight,
+    };
+  }
+
   function setQuickEditImageDisplayBasis(img, width, height) {
     if (!img) return;
+    const el = state.quickEdit.el;
     const w = Number(width || 0);
     const h = Number(height || 0);
     if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 1 || h <= 1) {
       img.style.removeProperty('width');
       img.style.removeProperty('height');
       img.style.removeProperty('aspect-ratio');
+      const compareImg = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
+      const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+      [compareImg, framePreview].forEach((node) => {
+        if (!node) return;
+        node.style.removeProperty('width');
+        node.style.removeProperty('height');
+        node.style.removeProperty('aspect-ratio');
+      });
       return;
     }
-    const fit = quickEditDisplayFitSize(w, h);
-    img.style.width = fit.width.toFixed(2) + 'px';
-    img.style.height = fit.height.toFixed(2) + 'px';
+    const frameRatio = quickEditFramePreviewSpaceRatio(w, h);
+    const fit = quickEditDisplayFitSize(w * frameRatio.width, h * frameRatio.height);
+    const imageScale = Math.min(
+      fit.width / Math.max(1, w * frameRatio.width),
+      fit.height / Math.max(1, h * frameRatio.height),
+    );
+    img.style.width = Math.max(1, w * imageScale).toFixed(2) + 'px';
+    img.style.height = Math.max(1, h * imageScale).toFixed(2) + 'px';
     img.style.aspectRatio = Math.round(w) + ' / ' + Math.round(h);
+    state.quickEdit.displayBasisReady = true;
+    state.quickEdit.displayBasisWidth = Number.parseFloat(img.style.width);
+    state.quickEdit.displayBasisHeight = Number.parseFloat(img.style.height);
+    const compareImg = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
+    if (compareImg) {
+      compareImg.style.width = img.style.width;
+      compareImg.style.height = img.style.height;
+      compareImg.style.aspectRatio = img.style.aspectRatio;
+    }
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    if (framePreview) {
+      framePreview.style.width = img.style.width;
+      framePreview.style.height = img.style.height;
+      framePreview.style.aspectRatio = img.style.aspectRatio;
+    }
+  }
+
+  function quickEditDisplayBasisSize(img) {
+    const storedWidth = Number(state.quickEdit.displayBasisWidth || 0);
+    const storedHeight = Number(state.quickEdit.displayBasisHeight || 0);
+    if (state.quickEdit.displayBasisReady && storedWidth > 1 && storedHeight > 1) {
+      return { width: storedWidth, height: storedHeight };
+    }
+    return {
+      width: Math.max(1, Number.parseFloat(img && img.style.width || '') || Number(img && img.offsetWidth || 1)),
+      height: Math.max(1, Number.parseFloat(img && img.style.height || '') || Number(img && img.offsetHeight || 1)),
+    };
+  }
+
+  function enforceQuickEditDisplayBasis(img) {
+    if (!img || !state.quickEdit.displayBasisReady) return quickEditDisplayBasisSize(img);
+    const basis = quickEditDisplayBasisSize(img);
+    const actualWidth = Number(img.offsetWidth || 0);
+    const actualHeight = Number(img.offsetHeight || 0);
+    if (Math.abs(actualWidth - basis.width) > 0.5 || Math.abs(actualHeight - basis.height) > 0.5) {
+      console.warn('[PicScannerFrameGeometry] corrected divergent image display basis', {
+        actual: { width: actualWidth, height: actualHeight },
+        expected: basis,
+        source: String(img.currentSrc || img.src || '').slice(0, 160),
+      });
+    }
+    img.style.width = basis.width.toFixed(2) + 'px';
+    img.style.height = basis.height.toFixed(2) + 'px';
     const el = state.quickEdit.el;
     const compareImg = el ? el.querySelector('[data-quick-edit-compare-img]') : null;
     if (compareImg) {
@@ -6289,6 +6580,7 @@
       compareImg.style.height = img.style.height;
       compareImg.style.aspectRatio = img.style.aspectRatio;
     }
+    return basis;
   }
 
   function refreshQuickEditImageDisplayBasis() {
@@ -6297,7 +6589,12 @@
     if (!img || !imageHasSource(img)) return;
     const basis = quickEditImageBasis(img.naturalWidth || img.width, img.naturalHeight || img.height);
     setQuickEditImageDisplayBasis(img, basis.width, basis.height);
+    if (!isQuickEditCropToolActive()) {
+      fitQuickEditCommittedOutput({ force: true, silent: true });
+      applyQuickEditPreview({ skipOverlay: true, skipColorRender: true });
+    }
     refreshQuickEditPanController();
+    syncQuickEditFramePreview();
   }
 
   function resetQuickEditRenderedPreview() {
@@ -6347,7 +6644,7 @@
     state.quickEdit.sourceImage = null;
     state.quickEdit.sourceImagePromise = null;
     if (img) {
-      if (!opts.preserveDisplayBasis) setQuickEditImageDisplayBasis(img, 0, 0);
+      if (!opts.preserveDisplayBasis && !state.quickEdit.displayBasisReady) setQuickEditImageDisplayBasis(img, 0, 0);
       if (!deferDisplay) img.src = state.quickEdit.sourceSrc;
     }
   }
@@ -6418,6 +6715,57 @@
     if (!opts.keepToken) state.quickEdit.rawPreviewToken += 1;
   }
 
+  function quickEditRawPreviewCacheKey(photoId, rawSignature) {
+    return Number(photoId || 0) + '|' + String(rawSignature || '');
+  }
+
+  function rememberQuickEditRawPreview(photoId, rawSignature, signature, maxSide, response) {
+    const url = String(response && response.url || '');
+    if (!photoId || !rawSignature || !url) return null;
+    const cache = state.quickEdit.rawPreviewCache;
+    const key = quickEditRawPreviewCacheKey(photoId, rawSignature);
+    const next = {
+      photoId: Number(photoId),
+      rawSignature: String(rawSignature),
+      signature: String(signature),
+      maxSide: Number(maxSide || 0),
+      url,
+      width: Math.max(0, Number(response.width || 0)),
+      height: Math.max(0, Number(response.height || 0)),
+    };
+    const current = cache.get(key);
+    const rank = (entry) => (entry && Number(entry.maxSide || 0) <= 0 ? Number.MAX_SAFE_INTEGER : Number(entry && entry.maxSide || 0));
+    if (!current || rank(next) >= rank(current)) cache.set(key, next);
+    while (cache.size > 64) cache.delete(cache.keys().next().value);
+    return cache.get(key) || next;
+  }
+
+  function cachedQuickEditRawPreview(photoId, rawSignature, requestedMaxSide) {
+    const entry = state.quickEdit.rawPreviewCache.get(quickEditRawPreviewCacheKey(photoId, rawSignature));
+    if (!entry || !entry.url) return null;
+    const cachedSide = Number(entry.maxSide || 0);
+    const requestedSide = Number(requestedMaxSide || 0);
+    if (requestedSide <= 0 && cachedSide > 0) return null;
+    if (requestedSide > 0 && cachedSide > 0 && cachedSide < requestedSide) return null;
+    return entry;
+  }
+
+  function displayCachedQuickEditRawPreview(entry, img) {
+    if (!entry || !img) return false;
+    state.quickEdit.rawPreviewSignature = String(entry.signature || '');
+    state.quickEdit.rawPreviewUrl = String(entry.url || '');
+    state.quickEdit.rawPreviewWidth = Math.max(0, Number(entry.width || 0));
+    state.quickEdit.rawPreviewHeight = Math.max(0, Number(entry.height || 0));
+    state.quickEdit.rawPreviewPendingMaxSide = 0;
+    state.quickEdit.rawPreviewRenderedMaxSide = Number(entry.maxSide || 0);
+    setQuickEditRawPreviewLoading(false);
+    setQuickEditImageSource(img, entry.url, { preserveDisplayBasis: true });
+    renderQuickEditMeta(state.quickEdit.photo, 'ready');
+    applyQuickEditPreview();
+    scheduleQuickEditHistogramRender(120);
+    return true;
+  }
+
   function setQuickEditRawPreviewLoading(loading) {
     state.quickEdit.rawPreviewLoading = !!loading;
     setQuickEditLoading(loading);
@@ -6425,7 +6773,7 @@
   }
 
   function scheduleQuickEditRawDevelopPreview(options) {
-    if (!state.quickEdit.open || !quickEditIsRawPhoto()) return;
+    if (!state.quickEdit.open || !quickEditIsRawPhoto() || state.quickEdit.bakedSource) return;
     const opts = options || {};
     const request = quickEditRawPreviewRequest(opts);
     if (!request) return;
@@ -6545,6 +6893,14 @@
       }
       return Promise.resolve(true);
     }
+    const cachedPreview = cachedQuickEditRawPreview(photoId, rawSignature, maxSide);
+    const cachedImg = state.quickEdit.el ? state.quickEdit.el.querySelector('[data-quick-edit-img]') : null;
+    if (cachedPreview && cachedImg && displayCachedQuickEditRawPreview(cachedPreview, cachedImg)) {
+      if (maxSide > 0 && Number(cachedPreview.maxSide || 0) > 0) {
+        scheduleQuickEditRawOriginalDevelopPreview(rawSignature);
+      }
+      return Promise.resolve(true);
+    }
     state.quickEdit.rawPreviewDesiredSignature = requestSignature;
     if (state.quickEdit.rawPreviewInFlight) {
       if (!opts.force && state.quickEdit.rawPreviewInFlightSignature === requestSignature) {
@@ -6585,6 +6941,7 @@
       state.quickEdit.rawPreviewHeight = Math.max(0, Number(res.height || 0));
       state.quickEdit.rawPreviewPendingMaxSide = 0;
       state.quickEdit.rawPreviewRenderedMaxSide = maxSide;
+      rememberQuickEditRawPreview(photoId, rawSignature, signature, maxSide, res);
       setQuickEditRawPreviewLoading(false);
       if (img) {
         const keepAdjustedPreview = /^blob:/i.test(String(img.src || ''))
@@ -6632,47 +6989,16 @@
   }
 
   function quickEditPixelSignature(params) {
-    const clean = quickEditPixelParamsForCurrentSource(params);
-    const signature = {
-      contrast: clean.contrast,
-      highlights: clean.highlights,
-      shadows: clean.shadows,
-      whites: clean.whites,
-      blacks: clean.blacks,
-      dehaze: clean.dehaze,
-      vibrance: clean.vibrance,
-      clarity: clean.clarity,
-      sharpening: clean.sharpening,
-      grain: clean.grain,
-      vignette: clean.vignette,
-      vignetteFeather: clean.vignetteFeather,
-      blackWhite: clean.blackWhite,
-      bwRed: clean.bwRed,
-      bwYellow: clean.bwYellow,
-      bwGreen: clean.bwGreen,
-      bwAqua: clean.bwAqua,
-      bwBlue: clean.bwBlue,
-      bwMagenta: clean.bwMagenta,
-      temperature: clean.temperature,
-      tint: clean.tint,
-      splitToneShadowsHue: clean.splitToneShadowsHue,
-      splitToneShadowsStrength: clean.splitToneShadowsStrength,
-      splitToneMidtonesHue: clean.splitToneMidtonesHue,
-      splitToneMidtonesStrength: clean.splitToneMidtonesStrength,
-      splitToneHighlightsHue: clean.splitToneHighlightsHue,
-      splitToneHighlightsStrength: clean.splitToneHighlightsStrength,
-      splitToneBalance: clean.splitToneBalance,
-      luts: quickEditEnabledLuts().map((lut) => ({
-        id: quickEditLutKey(lut),
-        strength: quickEditNormalizeLutStrength(lut.strength, lut),
+    return JSON.stringify(quickEditWorkerPixelStages(params).map((stage) => ({
+      params: normalizeQuickEditParams(stage),
+      luts: (stage.luts || []).map((lut) => ({
+        id: String(lut && lut.id || ''),
+        size: Number(lut && lut.size || 0),
+        strength: Number(lut && lut.strength || 0),
+        domainMin: Array.isArray(lut && lut.domainMin) ? lut.domainMin.slice(0, 3) : [0, 0, 0],
+        domainMax: Array.isArray(lut && lut.domainMax) ? lut.domainMax.slice(0, 3) : [1, 1, 1],
       })),
-    };
-    QUICK_EDIT_HSL_COLORS.forEach((color) => {
-      signature['hsl_' + color.key + '_hue'] = clean['hsl_' + color.key + '_hue'];
-      signature['hsl_' + color.key + '_saturation'] = clean['hsl_' + color.key + '_saturation'];
-      signature['hsl_' + color.key + '_luminance'] = clean['hsl_' + color.key + '_luminance'];
-    });
-    return JSON.stringify(signature);
+    })));
   }
 
   function quickEditAdvancedPixelParams(params) {
@@ -6809,9 +7135,11 @@
       export: '<svg ' + attrs + '><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>',
       refresh: '<svg ' + attrs + '><path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"/><path d="M20 20v-4h-4"/></svg>',
       plus: '<svg ' + attrs + '><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
+      save: '<svg ' + attrs + '><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>',
       trash: '<svg ' + attrs + '><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>',
       pipette: '<svg ' + attrs + '><path d="m14.5 5.5 4 4"/><path d="M12 8 5 15v4h4l7-7"/><path d="m14 4 6 6"/><path d="m5 19-2 2"/></svg>',
       library: '<svg ' + attrs + '><path d="M4 19.5V5a2 2 0 0 1 2-2h11"/><path d="M8 7h12v14H8z"/><path d="M12 11h4"/></svg>',
+      copy: '<svg ' + attrs + '><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     };
     return icons[name] || '';
   }
@@ -7308,15 +7636,17 @@
     }
     list.innerHTML = presets.map((preset) => {
       const loading = state.quickEdit.presetApplyingId === preset.id;
+      const overwriting = state.quickEdit.presetOverwritingId === preset.id;
       const selected = state.quickEdit.presetSelectedId === preset.id;
       const detail = [
         preset.favorite ? '已收藏' : '',
         preset.luts.length ? preset.luts.length + ' 个 LUT' : '',
         preset.updatedAt ? new Date(preset.updatedAt * 1000).toLocaleString() : '',
       ].filter(Boolean).join(' · ') || '样式参数';
-      return '<div class="quick-edit-preset-modal-item' + (loading ? ' loading' : '') + (selected ? ' selected' : '') + '" data-quick-edit-preset-modal-id="' + escapeHtml(preset.id) + '">' +
+      return '<div class="quick-edit-preset-modal-item' + (loading ? ' loading' : '') + (overwriting ? ' overwriting' : '') + (selected ? ' selected' : '') + '" data-quick-edit-preset-modal-id="' + escapeHtml(preset.id) + '">' +
         '<button class="icon-btn quick-edit-preset-apply-btn" type="button" data-quick-edit-preset-modal-apply="' + escapeHtml(preset.id) + '" title="应用预设" aria-label="应用预设">' + quickEditIconSvg(loading ? 'refresh' : 'check') + '</button>' +
         '<span><b>' + escapeHtml(preset.name) + '</b><em>' + escapeHtml(detail) + '</em></span>' +
+        '<button class="icon-btn quick-edit-preset-overwrite-btn" type="button" data-quick-edit-preset-modal-overwrite="' + escapeHtml(preset.id) + '" title="用当前调整覆盖此预设" aria-label="用当前调整覆盖此预设">' + quickEditIconSvg(overwriting ? 'refresh' : 'save') + '</button>' +
         '<button class="icon-btn quick-edit-preset-favorite-btn' + (preset.favorite ? ' active' : '') + '" type="button" data-quick-edit-preset-modal-favorite="' + escapeHtml(preset.id) + '" title="收藏置顶" aria-label="收藏置顶">★</button>' +
         '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-preset-modal-move="up" data-quick-edit-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="上移" aria-label="上移">↑</button>' +
         '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-preset-modal-move="down" data-quick-edit-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="下移" aria-label="下移">↓</button>' +
@@ -7471,12 +7801,13 @@
       const hydrated = await quickEditHydratePresetLuts(preset);
       state.quickEdit.params = quickEditPresetStyleParams(preset.params);
       state.quickEdit.committedParams = quickEditDefaultParams();
+      state.quickEdit.committedStages = [];
       quickEditSetLuts(hydrated.loaded);
       invalidateQuickEditRenderedPreview({ clearTimers: true });
       syncQuickEditControls();
       applyQuickEditPreview({ interactive: true });
       scheduleQuickEditHistogramRender(180);
-      if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ interactive: true });
+      if (quickEditUsesRawDevelopPipeline()) scheduleQuickEditRawDevelopPreview({ interactive: true });
       showToast(hydrated.missing.length ? ('已应用预设，' + hydrated.missing.length + ' 个 LUT 缺失') : ('已应用预设：' + preset.name));
     } catch (err) {
       console.warn('[PicScanner] 预设应用失败', err);
@@ -7504,6 +7835,80 @@
     }
   }
 
+  function ensureQuickEditPresetOverwriteConfirm() {
+    if (state.quickEdit.presetOverwriteConfirm && state.quickEdit.presetOverwriteConfirm.isConnected) return state.quickEdit.presetOverwriteConfirm;
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-apply-confirm hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '覆盖预设确认');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-exit-card">',
+      '<h2>覆盖预设？</h2>',
+      '<p data-quick-edit-preset-overwrite-message>当前调整会写入这个预设。</p>',
+      '<div class="modal-actions">',
+      '<button class="ghost-btn" type="button" data-quick-edit-preset-overwrite-cancel>取消</button>',
+      '<button class="primary-btn" type="button" data-quick-edit-preset-overwrite-confirm>覆盖保存</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-preset-overwrite-cancel]').addEventListener('click', () => hideQuickEditPresetOverwriteConfirm());
+    modal.querySelector('[data-quick-edit-preset-overwrite-confirm]').addEventListener('click', () => {
+      const presetId = String(modal.dataset.quickEditPresetOverwriteId || '');
+      hideQuickEditPresetOverwriteConfirm();
+      overwriteQuickEditPresetNow(presetId);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.presetOverwriteConfirm = modal;
+    return modal;
+  }
+
+  function hideQuickEditPresetOverwriteConfirm() {
+    const modal = state.quickEdit.presetOverwriteConfirm;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.dataset.quickEditPresetOverwriteId = '';
+  }
+
+  function overwriteQuickEditPreset(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset || state.quickEdit.presetOverwritingId) return;
+    const modal = ensureQuickEditPresetOverwriteConfirm();
+    const message = modal.querySelector('[data-quick-edit-preset-overwrite-message]');
+    if (message) {
+      message.textContent = '将用当前影调、色彩、细节、色调分离、HSL 和 LUT 覆盖“' + preset.name + '”；名称、收藏和排序会保留。';
+    }
+    modal.dataset.quickEditPresetOverwriteId = preset.id;
+    modal.classList.remove('hidden');
+    const confirm = modal.querySelector('[data-quick-edit-preset-overwrite-confirm]');
+    if (confirm) requestAnimationFrame(() => confirm.focus({ preventScroll: true }));
+  }
+
+  async function overwriteQuickEditPresetNow(presetId) {
+    const preset = quickEditPresetById(presetId);
+    if (!preset || state.quickEdit.presetOverwritingId) return;
+    state.quickEdit.presetOverwritingId = preset.id;
+    state.quickEdit.presetSelectedId = preset.id;
+    syncQuickEditPresetUi();
+    try {
+      const res = await call('update_quick_edit_preset', preset.id, quickEditPresetPayloadParams(), quickEditEnabledLuts());
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '预设覆盖失败', 'error');
+        return;
+      }
+      state.quickEdit.presetsMessage = '';
+      state.quickEdit.presetSelectedId = preset.id;
+      setQuickEditPresetsFromResponse(res);
+      showToast(res.message || '已覆盖预设');
+    } catch (err) {
+      console.warn('[PicScanner] 预设覆盖失败', err);
+      showToast(String((err && err.message) || '预设覆盖失败'), 'error');
+    } finally {
+      state.quickEdit.presetOverwritingId = '';
+      syncQuickEditPresetUi();
+    }
+  }
+
   function setQuickEditPresetsFromResponse(res) {
     state.quickEdit.presets = (Array.isArray(res && res.items) ? res.items : [])
       .map(normalizeQuickEditPresetItem)
@@ -7511,6 +7916,9 @@
     state.quickEdit.presetsLoaded = true;
     if (state.quickEdit.presetSelectedId && !quickEditPresetById(state.quickEdit.presetSelectedId)) {
       state.quickEdit.presetSelectedId = '';
+    }
+    if (state.quickEdit.presetHoverId && !quickEditPresetById(state.quickEdit.presetHoverId)) {
+      state.quickEdit.presetHoverId = '';
     }
     syncQuickEditPresetUi();
   }
@@ -7610,6 +8018,7 @@
   function hideQuickEditPresetModal() {
     const modal = state.quickEdit.presetModal;
     if (!modal) return;
+    hideQuickEditPresetOverwriteConfirm();
     modal.classList.add('hidden');
     state.quickEdit.presetApplyingId = '';
   }
@@ -7658,6 +8067,11 @@
         applyQuickEditPreset(String(apply.dataset.quickEditPresetModalApply || ''));
         return;
       }
+      const overwrite = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-overwrite]') : null;
+      if (overwrite) {
+        overwriteQuickEditPreset(String(overwrite.dataset.quickEditPresetModalOverwrite || ''));
+        return;
+      }
       const favorite = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-modal-favorite]') : null;
       if (favorite) {
         toggleQuickEditPresetFavorite(String(favorite.dataset.quickEditPresetModalFavorite || ''));
@@ -7690,7 +8104,7 @@
     modal.addEventListener('keydown', (ev) => {
       if (ev.key !== 'f' && ev.key !== 'F') return;
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-      const preset = quickEditPresetById(state.quickEdit.presetSelectedId) || (state.quickEdit.presets || [])[0];
+      const preset = quickEditPresetById(state.quickEdit.presetSelectedId);
       if (!preset) return;
       ev.preventDefault();
       ev.stopPropagation();
@@ -7704,9 +8118,6 @@
   function showQuickEditPresetModal() {
     const modal = ensureQuickEditPresetModal();
     modal.classList.remove('hidden');
-    if (!state.quickEdit.presetSelectedId && (state.quickEdit.presets || []).length) {
-      state.quickEdit.presetSelectedId = state.quickEdit.presets[0].id;
-    }
     syncQuickEditPresetUi();
     if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
       refreshQuickEditPresets({ silent: true });
@@ -7756,12 +8167,17 @@
   function quickEditImagePointFromEvent(img, ev) {
     if (!img || !ev) return null;
     const rect = img.getBoundingClientRect();
-    const width = Math.max(1, Number(img.offsetWidth || img.width || rect.width || 1));
-    const height = Math.max(1, Number(img.offsetHeight || img.height || rect.height || 1));
+    const basis = quickEditDisplayBasisSize(img);
+    const width = Math.max(1, Number(basis.width || img.width || rect.width || 1));
+    const height = Math.max(1, Number(basis.height || img.height || rect.height || 1));
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
     const matrix = new DOMMatrixReadOnly(window.getComputedStyle(img).transform || 'none');
-    const local = matrix.inverse().transformPoint(new DOMPoint(ev.clientX - cx, ev.clientY - cy));
+    const viewZoom = Math.max(0.0001, Number(state.quickEdit.viewZoom || 1));
+    const local = matrix.inverse().transformPoint(new DOMPoint(
+      (ev.clientX - cx) / viewZoom,
+      (ev.clientY - cy) / viewZoom,
+    ));
     const x = local.x + width / 2;
     const y = local.y + height / 2;
     if (x < 0 || y < 0 || x > width || y > height) return null;
@@ -7788,19 +8204,105 @@
     return quickEditRgbToHsl(data[0], data[1], data[2]);
   }
 
-  function quickEditWorkerParams(params, options) {
-    const opts = options || {};
-    const clean = opts.prepared ? normalizeQuickEditParams(params) : quickEditPixelParamsForCurrentSource(params);
-    const luts = quickEditEnabledLuts()
+  function quickEditWorkerLutPayload(luts) {
+    return (Array.isArray(luts) ? luts : [])
       .filter((lut) => lut && lut.data && lut.size && Number(lut.strength || 0) > 0)
       .map((lut) => ({
+        id: quickEditLutKey(lut),
         size: Number(lut.size || 0),
         strength: quickEditNormalizeLutStrength(lut.strength, lut),
         domainMin: Array.isArray(lut.domainMin) ? lut.domainMin.slice(0, 3) : [0, 0, 0],
         domainMax: Array.isArray(lut.domainMax) ? lut.domainMax.slice(0, 3) : [1, 1, 1],
         data: lut.data,
       }));
-    return Object.assign({}, clean, { luts });
+  }
+
+  function cloneQuickEditWorkerLutPayload(luts) {
+    return (Array.isArray(luts) ? luts : []).map((lut) => ({
+      id: String(lut && lut.id || ''),
+      size: Number(lut && lut.size || 0),
+      strength: Number(lut && lut.strength || 0),
+      domainMin: Array.isArray(lut && lut.domainMin) ? lut.domainMin.slice(0, 3) : [0, 0, 0],
+      domainMax: Array.isArray(lut && lut.domainMax) ? lut.domainMax.slice(0, 3) : [1, 1, 1],
+      data: lut && lut.data ? lut.data : null,
+    }));
+  }
+
+  function cloneQuickEditPixelStage(stage) {
+    const clean = normalizeQuickEditParams(stage || quickEditDefaultParams());
+    return Object.assign({}, clean, {
+      luts: cloneQuickEditWorkerLutPayload(stage && stage.luts),
+      _signature: String(stage && stage._signature || ''),
+    });
+  }
+
+  function quickEditPixelStageSignature(params, luts) {
+    const clean = normalizeQuickEditParams(params || quickEditDefaultParams());
+    return JSON.stringify({
+      params: clean,
+      luts: (Array.isArray(luts) ? luts : []).map((lut) => ({
+        id: String(lut && (lut.id || lut.name || lut.filename) || ''),
+        size: Number(lut && lut.size || 0),
+        strength: Number(lut && lut.strength || 0),
+      })),
+    });
+  }
+
+  function captureQuickEditPixelStage(params, luts) {
+    const sourceLuts = Array.isArray(luts) ? luts : quickEditEnabledLuts();
+    return Object.assign({}, normalizeQuickEditParams(params || quickEditDefaultParams()), {
+      luts: quickEditWorkerLutPayload(sourceLuts),
+      _signature: quickEditPixelStageSignature(params, sourceLuts),
+    });
+  }
+
+  function quickEditWorkerPixelStages(params, options) {
+    const opts = options || {};
+    const committed = (state.quickEdit.committedStages || []).map(cloneQuickEditPixelStage);
+    const current = captureQuickEditPixelStage(state.quickEdit.params || params, quickEditEnabledLuts());
+    const stages = committed.concat([current]);
+    return stages.map((stage) => {
+      const clean = opts.rawDeveloped
+        ? quickEditPixelParamsForRawDevelopedSource(stage)
+        : quickEditPixelParamsForCurrentSource(stage);
+      return Object.assign({}, clean, { luts: cloneQuickEditWorkerLutPayload(stage.luts) });
+    });
+  }
+
+  function quickEditWorkerPixelStagesNeutral(params) {
+    const ignoredKeys = new Set([
+      'rotation',
+      'straighten',
+      'cropLeft',
+      'cropTop',
+      'cropRight',
+      'cropBottom',
+      'rawHighlightRecovery',
+      'rawNoiseReduction',
+      'lutStrength',
+    ]);
+    const comparable = (stage) => {
+      const clean = normalizeQuickEditParams(stage || quickEditDefaultParams());
+      return Object.keys(clean).reduce((result, key) => {
+        if (!ignoredKeys.has(key)) result[key] = clean[key];
+        return result;
+      }, {});
+    };
+    const neutral = JSON.stringify(comparable(quickEditPixelParamsForCurrentSource(quickEditDefaultParams())));
+    return quickEditWorkerPixelStages(params).every((stage) => (
+      (!Array.isArray(stage.luts) || stage.luts.length === 0)
+      && JSON.stringify(comparable(stage)) === neutral
+    ));
+  }
+
+  function quickEditWorkerParams(params, options) {
+    const opts = options || {};
+    if (opts.prepared) {
+      const clean = normalizeQuickEditParams(params);
+      const luts = Array.isArray(opts.luts) ? opts.luts : quickEditWorkerLutPayload(quickEditEnabledLuts());
+      return Object.assign({}, clean, { luts: cloneQuickEditWorkerLutPayload(luts) });
+    }
+    return { stages: quickEditWorkerPixelStages(params, opts) };
   }
 
   function quickEditPreviewWorkerUrl() {
@@ -7934,7 +8436,6 @@
     if (state.quickEdit.previewRenderPendingKey === state.quickEdit.previewRenderKey) {
       clearQuickEditPendingPreviewRender();
     }
-    setQuickEditPreviewRendering(false);
     quickEditPerfLog('worker:done', {
       key: state.quickEdit.previewRenderKey,
       maxSide,
@@ -7969,6 +8470,7 @@
     state.quickEdit.previewObjectUrl = nextUrl;
     state.quickEdit.previewRenderedSignature = renderSignature;
     state.quickEdit.previewRenderedMaxSide = maxSide;
+    setQuickEditPreviewRendering(false);
     const scheduledOriginal = !flushedQueuedRender
       && !messageKey.includes('|original|')
       && scheduleQuickEditOriginalPreviewRender(renderSignature, originalTargetMaxSide);
@@ -7976,11 +8478,13 @@
       clearTimeout(state.quickEdit.previewSettleTimer);
       state.quickEdit.previewSettleTimer = null;
     }
-    setQuickEditImageDisplayBasis(
-      img,
-      message.displayWidth || message.sourceWidth,
-      message.displayHeight || message.sourceHeight,
-    );
+    if (!state.quickEdit.displayBasisReady) {
+      setQuickEditImageDisplayBasis(
+        img,
+        message.displayWidth || message.sourceWidth,
+        message.displayHeight || message.sourceHeight,
+      );
+    }
     img.src = nextUrl;
   }
 
@@ -8208,11 +8712,11 @@
     const img = el ? el.querySelector('[data-quick-edit-img]') : null;
     const sourceSrc = state.quickEdit.sourceSrc;
     if (!img || !sourceSrc || !state.quickEdit.open) return;
-    const params = quickEditAdvancedPixelParams(quickEditEffectiveParams());
+    const params = quickEditEffectiveParams();
     const signature = quickEditPixelSignature(params);
     const renderSignature = quickEditRenderSignature(sourceSrc, signature);
     state.quickEdit.previewRenderRequestSignature = renderSignature;
-    if (isQuickEditAdvancedPixelNeutral(params)) {
+    if (quickEditWorkerPixelStagesNeutral(params)) {
       const key = renderSignature + '|source';
       if (state.quickEdit.previewRenderKey === key) return;
       state.quickEdit.previewRenderKey = key;
@@ -8544,11 +9048,15 @@
     return !!current.is_raw;
   }
 
-  function quickEditRawDevelopParams(params) {
+  function quickEditUsesRawDevelopPipeline() {
+    return quickEditIsRawPhoto() && !state.quickEdit.bakedSource;
+  }
+
+  function quickEditRawDevelopParams(params, options) {
+    const opts = options || {};
     const clean = normalizeQuickEditParams(params || quickEditEffectiveParams());
     const mod = quickEditRawModule();
-    if (mod && typeof mod.normalizeParams === 'function') return mod.normalizeParams(clean);
-    return {
+    const normalized = mod && typeof mod.normalizeParams === 'function' ? mod.normalizeParams(clean) : {
       exposure: clamp(Number(clean.exposure || 0), QUICK_EDIT_EXPOSURE_MIN_EV, QUICK_EDIT_EXPOSURE_MAX_EV),
       temperature: normalizeQuickEditTemperature(clean.temperature),
       tint: clamp(Number(clean.tint || 0), -100, 100),
@@ -8556,6 +9064,15 @@
       rawNoiseReduction: clamp(Number(clean.rawNoiseReduction || 0), 0, 100),
       curvePoints: quickEditCurvePoints(clean),
     };
+    const stageSource = Array.isArray(opts.stages)
+      ? opts.stages
+      : (state.quickEdit.committedStages || []).concat([state.quickEdit.params || quickEditDefaultParams()]);
+    const curveStages = stageSource
+      .map((stage) => quickEditCurvePoints(stage))
+      .filter((points) => !isQuickEditCurveNeutral({ curvePoints: points }));
+    normalized.curvePoints = QUICK_EDIT_DEFAULT_CURVE_POINTS.map((point) => Object.assign({}, point));
+    normalized.curveStages = curveStages;
+    return normalized;
   }
 
   function quickEditRawDevelopSignature(params) {
@@ -8592,6 +9109,7 @@
 
   function quickEditPixelParamsForCurrentSource(params) {
     const clean = normalizeQuickEditParams(params);
+    if (state.quickEdit.bakedSource) return clean;
     if (!quickEditIsRawPhoto()) return clean;
     clean.exposure = 0;
     clean.temperature = QUICK_EDIT_TEMPERATURE_NEUTRAL_K;
@@ -8618,6 +9136,10 @@
     if (key === 'png') return 'image/png';
     if (key === 'webp') return 'image/webp';
     return 'image/jpeg';
+  }
+
+  function quickEditSaveSupportsExif(format) {
+    return ['jpg', 'tif16'].includes(quickEditSaveFormatConfig(format).key);
   }
 
   function quickEditSaveQualityRatio(quality) {
@@ -8698,16 +9220,17 @@
       && Number(img.offsetWidth || 0) > 1
       && Number(img.offsetHeight || 0) > 1
     ) {
-      const frame = quickEditBakeFrame(stage, img);
+      const frame = quickEditBakeFrame(stage, img, { canonical: true });
       if (frame && frame.w > 1 && frame.h > 1) {
+        const renderView = quickEditRenderView({ canonical: true });
         const basis = quickEditImageBasis(img.naturalWidth || img.width, img.naturalHeight || img.height);
         const sourceScale = Math.max(
           Number(basis.width || img.naturalWidth || img.width || 1) / Math.max(1, Number(img.offsetWidth || 1)),
           Number(basis.height || img.naturalHeight || img.height || 1) / Math.max(1, Number(img.offsetHeight || 1)),
         );
         return quickEditPositiveSaveDimensions(
-          Math.round(frame.w * sourceScale),
-          Math.round(frame.h * sourceScale),
+          Math.round(frame.w * sourceScale / renderView.zoom),
+          Math.round(frame.h * sourceScale / renderView.zoom),
         );
       }
     }
@@ -8748,7 +9271,9 @@
   function quickEditSaveSizeDescription(options, formatConfig) {
     const opts = quickEditSaveOptions(options);
     if (formatConfig && formatConfig.key === 'tif16') return '导出 ' + quickEditSaveOutputDetail(opts.currentWidth, opts.currentHeight);
-    return '导出 ' + quickEditSaveOutputDetail(opts.sizeWidth, opts.sizeHeight);
+    const frameConfig = quickEditActiveExportFrame(opts);
+    const framedSize = frameConfig ? quickEditFramedOutputSize(opts.sizeWidth, opts.sizeHeight, frameConfig) : null;
+    return '导出 ' + quickEditSaveOutputDetail(framedSize ? framedSize.width : opts.sizeWidth, framedSize ? framedSize.height : opts.sizeHeight);
   }
 
   function quickEditSaveProgressState(stage, percent, detail) {
@@ -8837,6 +9362,686 @@
       sizeWidth,
       sizeHeight,
       sizeLongEdge,
+      includeFrame: !!current.includeFrame,
+      preserveExif: quickEditSaveSupportsExif(format) && !!current.preserveExif,
+    };
+  }
+
+  function quickEditFrameDefaultInsets(preset) {
+    const key = quickEditFramePresetKey(preset);
+    if (key === 'paper') return { top: 5, right: 5, bottom: 13, left: 5 };
+    if (key === 'white' || key === 'black') return { top: 5, right: 5, bottom: 5, left: 5 };
+    return { top: 5, right: 5, bottom: 5, left: 5 };
+  }
+
+  function quickEditNormalizeFrameInsets(source) {
+    const src = source && typeof source === 'object' ? source : {};
+    return {
+      top: clamp(Number(src.top || 0), 0, 40),
+      right: clamp(Number(src.right || 0), 0, 40),
+      bottom: clamp(Number(src.bottom || 0), 0, 40),
+      left: clamp(Number(src.left || 0), 0, 40),
+    };
+  }
+
+  function quickEditDefaultFrameTextColor() {
+    return quickEditFramePresetKey(state.quickEdit.framePreset) === 'black' ? '#f5f5f2' : '#222222';
+  }
+
+  function quickEditNormalizeFrameTextOffset(value) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? Math.round(clamp(n, -100, 100) * 1000) / 1000 : 0;
+  }
+
+  const QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE = 'short-edge-anchor-v1';
+
+  function quickEditNormalizeFrameTextWeight(value) {
+    const n = Number(value || 560);
+    return Number.isFinite(n) ? clamp(Math.round(n), 100, 900) : 560;
+  }
+
+  function quickEditCanvasFrameTextWeight(value) {
+    return Math.max(100, Math.min(900, Math.round(quickEditNormalizeFrameTextWeight(value) / 100) * 100));
+  }
+
+  function quickEditFrameTextBasisScale(contentBasis, displayBasis) {
+    const content = Math.max(1, Number(contentBasis || 1));
+    const display = Math.max(1, Number(displayBasis || 1));
+    return content / display;
+  }
+
+  function quickEditPreviewFrameTextSize(layer, contentBasis) {
+    const rawSize = clamp(Number(layer && layer.size || 18), 8, 72);
+    const basis = Math.max(1, Number(contentBasis || 1));
+    return Math.max(1, Math.round(rawSize * basis / 600 * 100) / 100);
+  }
+
+  function quickEditScaledFrameTextSize(layer, contentBasis, displayBasis) {
+    const rawSize = clamp(Number(layer && layer.size || 18), 8, 72);
+    return Math.max(1, Math.round(rawSize * quickEditFrameTextBasisScale(contentBasis, displayBasis) * 100) / 100);
+  }
+
+  function quickEditNormalizeFrameTextFamily(value) {
+    const clean = String(value || 'system-ui')
+      .replace(/[;\r\n]/g, '')
+      .trim()
+      .slice(0, 80);
+    return clean || 'system-ui';
+  }
+
+  function quickEditCanvasFrameTextFamily(value) {
+    const generic = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-sans-serif|ui-serif|ui-monospace)$/i;
+    const families = quickEditNormalizeFrameTextFamily(value)
+      .split(',')
+      .map((item) => {
+        const family = String(item || '').trim().replace(/^['"]|['"]$/g, '').replace(/["\\]/g, '');
+        if (!family) return '';
+        if (/^(system-ui|ui-sans-serif)$/i.test(family)) return 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif';
+        return generic.test(family) ? family : '"' + family + '"';
+      })
+      .filter(Boolean);
+    return families.length ? families.join(', ') : 'system-ui';
+  }
+
+  function quickEditCanvasFrameTextFont(layer, contentBasis, displayBasis) {
+    return quickEditCanvasFrameTextWeight(layer && layer.weight) + ' '
+      + quickEditScaledFrameTextSize(layer, contentBasis, displayBasis) + 'px '
+      + quickEditCanvasFrameTextFamily(layer && layer.fontFamily);
+  }
+
+  function quickEditNewFrameTextLayer() {
+    return {
+      id: 'frame-text-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+      text: '{filename}  {shutter_speed}  f/{aperture}  ISO {iso}',
+      position: 'bottom-center',
+      coordinateSpace: QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE,
+      x: 0,
+      y: 0,
+      fontFamily: 'system-ui',
+      size: 18,
+      weight: 560,
+      color: quickEditDefaultFrameTextColor(),
+      enabled: true,
+    };
+  }
+
+  function quickEditNormalizeFrameTextLayer(layer, index) {
+    const raw = layer && typeof layer === 'object' ? layer : {};
+    const position = ['top-center', 'bottom-center', 'bottom-left', 'bottom-right'].includes(String(raw.position || ''))
+      ? String(raw.position)
+      : 'bottom-center';
+    return {
+      id: String(raw.id || ('frame-text-' + index + '-' + Date.now().toString(36))),
+      text: String(raw.text || ''),
+      position,
+      coordinateSpace: QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE,
+      x: quickEditNormalizeFrameTextOffset(raw.x !== undefined ? raw.x : raw.offsetX),
+      y: quickEditNormalizeFrameTextOffset(raw.y !== undefined ? raw.y : raw.offsetY),
+      fontFamily: quickEditNormalizeFrameTextFamily(raw.fontFamily || raw.font_family),
+      size: clamp(Number(raw.size || 18), 8, 72),
+      weight: quickEditNormalizeFrameTextWeight(raw.weight),
+      color: /^#[0-9a-f]{6}$/i.test(String(raw.color || '')) ? String(raw.color).toLowerCase() : quickEditDefaultFrameTextColor(),
+      enabled: raw.enabled !== false,
+    };
+  }
+
+  function quickEditFrameTextLayers() {
+    const layers = Array.isArray(state.quickEdit.frameTextLayers) ? state.quickEdit.frameTextLayers : [];
+    const normalized = layers.map((layer, index) => quickEditNormalizeFrameTextLayer(layer, index));
+    state.quickEdit.frameTextLayers = normalized;
+    return normalized;
+  }
+
+  function quickEditNormalizeFrameImageOffset(value) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? Math.round(clamp(n, -160, 160) * 1000) / 1000 : 0;
+  }
+
+  function quickEditNormalizeFrameImageSize(value) {
+    const n = Number(value || 18);
+    return Number.isFinite(n) ? Math.round(clamp(n, 2, 90) * 10) / 10 : 18;
+  }
+
+  function quickEditNormalizeFrameImageRotation(value) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? Math.round(clamp(n, -180, 180) * 10) / 10 : 0;
+  }
+
+  function quickEditNormalizeFrameImageOpacity(value) {
+    const n = Number(value === undefined || value === null || value === '' ? 100 : value);
+    return Number.isFinite(n) ? Math.round(clamp(n, 0, 100)) : 100;
+  }
+
+  const QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE = 'short-edge-anchor-v1';
+
+  function quickEditNormalizeFrameImageAnchor(value) {
+    return quickEditGeometryApi().normalizeImageLayerAnchor(value);
+  }
+
+  function quickEditNormalizeFrameAssetId(value) {
+    const text = String(value || '').trim();
+    if (!text || text === '.' || text === '..' || /[\\/]/.test(text)) return '';
+    return /\.(png|jpe?g|webp|svg)$/i.test(text) ? text : '';
+  }
+
+  function quickEditFrameAssetName(assetId, fallback) {
+    const source = String(fallback || assetId || '').trim();
+    const base = source.replace(/\.[^.]+$/, '').replace(/--[0-9a-f]{12}$/i, '').trim();
+    return base || '图片标识';
+  }
+
+  function quickEditCacheFrameAsset(item, dataUrl) {
+    const assetId = quickEditNormalizeFrameAssetId(item && item.id);
+    const url = String(dataUrl || '');
+    if (!assetId || !url) return;
+    const current = quickEditFrameAssetCache.get(assetId) || {};
+    quickEditFrameAssetCache.set(assetId, Object.assign({}, current, { dataUrl: url, item: item || null }));
+  }
+
+  function quickEditCachedFrameAssetUrl(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return '';
+    const entry = quickEditFrameAssetCache.get(id);
+    return entry && entry.dataUrl ? entry.dataUrl : '';
+  }
+
+  function quickEditCachedFrameAssetAspectRatio(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return 0;
+    const entry = quickEditFrameAssetCache.get(id);
+    const ratio = Number(entry && entry.aspectRatio || 0);
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 0;
+  }
+
+  function quickEditEnsureFrameAssetMetrics(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return Promise.reject(new Error('标识图片引用无效'));
+    const cachedRatio = quickEditCachedFrameAssetAspectRatio(id);
+    if (cachedRatio > 0) return Promise.resolve(cachedRatio);
+    const current = quickEditFrameAssetCache.get(id) || {};
+    if (current.metricsPromise) return current.metricsPromise;
+    const metricsPromise = quickEditLoadFrameAssetUrl(id, { silent: true })
+      .then((url) => quickEditLoadFrameImageElement(url))
+      .then((image) => {
+        const width = Number(image.naturalWidth || image.width || 0);
+        const height = Number(image.naturalHeight || image.height || 0);
+        if (!(width > 0) || !(height > 0)) throw new Error('标识图片没有可用的宽高信息');
+        const ratio = width / height;
+        const latest = quickEditFrameAssetCache.get(id) || {};
+        quickEditFrameAssetCache.set(id, Object.assign({}, latest, { aspectRatio: ratio, metricsPromise: null }));
+        return ratio;
+      })
+      .catch((err) => {
+        const latest = quickEditFrameAssetCache.get(id) || {};
+        quickEditFrameAssetCache.set(id, Object.assign({}, latest, { metricsPromise: null }));
+        throw err;
+      });
+    const latest = quickEditFrameAssetCache.get(id) || current;
+    quickEditFrameAssetCache.set(id, Object.assign({}, latest, { metricsPromise }));
+    return metricsPromise;
+  }
+
+  function quickEditLoadFrameAssetUrl(assetId, options) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    const opts = options || {};
+    if (!id) return Promise.reject(new Error('标识图片引用无效'));
+    const current = quickEditFrameAssetCache.get(id);
+    if (current && current.dataUrl) return Promise.resolve(current.dataUrl);
+    if (current && current.promise) return current.promise;
+    if (current && current.error) return Promise.reject(new Error(current.error));
+    const promise = call('read_quick_edit_frame_asset', id)
+      .then((res) => {
+        if (!res || !res.success || !res.data_url) {
+          throw new Error(res && res.message ? res.message : '标识图片读取失败');
+        }
+        quickEditCacheFrameAsset(res.item || { id }, res.data_url);
+        return res.data_url;
+      })
+      .catch((err) => {
+        const message = String((err && err.message) || err || '标识图片读取失败');
+        quickEditFrameAssetCache.set(id, { error: message });
+        if (!opts.silent) showToast(message, 'error');
+        throw err;
+      });
+    quickEditFrameAssetCache.set(id, Object.assign({}, current || {}, { promise }));
+    return promise;
+  }
+
+  function quickEditEnsureFrameAssetUrl(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return '';
+    const url = quickEditCachedFrameAssetUrl(id);
+    if (url) return url;
+    const current = quickEditFrameAssetCache.get(id);
+    if (!current || (!current.promise && !current.error)) {
+      quickEditLoadFrameAssetUrl(id, { silent: true })
+        .then(() => {
+          renderQuickEditFrameImageLayers();
+          syncQuickEditFrameAssetModal();
+          syncQuickEditFramePreview();
+        })
+        .catch((err) => console.warn('[PicScanner] frame asset preview load failed', err));
+    }
+    return '';
+  }
+
+  function quickEditNewFrameImageLayer(asset, dataUrl) {
+    const assetId = quickEditNormalizeFrameAssetId(asset && asset.id);
+    return {
+      id: 'frame-image-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+      assetId,
+      name: quickEditFrameAssetName(assetId, asset && asset.name),
+      mime: String(asset && asset.mime || ''),
+      src: String(dataUrl || ''),
+      coordinateSpace: QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE,
+      anchor: 'center',
+      x: 0,
+      y: 0,
+      size: 18,
+      rotation: 0,
+      opacity: 100,
+      enabled: true,
+    };
+  }
+
+  function quickEditNormalizeFrameImageLayer(layer, index) {
+    const raw = layer && typeof layer === 'object' ? layer : {};
+    const assetId = quickEditNormalizeFrameAssetId(raw.assetId || raw.asset_id);
+    const name = quickEditFrameAssetName(assetId, raw.name);
+    let coordinateSpace = String(raw.coordinateSpace || raw.coordinate_space || '') === QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE
+      ? QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE
+      : '';
+    let anchor = coordinateSpace ? (quickEditNormalizeFrameImageAnchor(raw.anchor) || 'center') : '';
+    let x = quickEditNormalizeFrameImageOffset(raw.x);
+    let y = quickEditNormalizeFrameImageOffset(raw.y);
+    if (!coordinateSpace) {
+      const legacyX = 0.5 + x / 100;
+      const legacyY = 0.5 + y / 100;
+      anchor = quickEditGeometryApi().closestImageLayerAnchor(legacyX, legacyY, 1, 1);
+      const migrated = quickEditGeometryApi().imageLayerOffsetsForPoint({
+        x: legacyX,
+        y: legacyY,
+        contentWidth: 1,
+        contentHeight: 1,
+        anchor,
+      });
+      coordinateSpace = QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE;
+      x = quickEditNormalizeFrameImageOffset(migrated.offsetXPercent);
+      y = quickEditNormalizeFrameImageOffset(migrated.offsetYPercent);
+    }
+    if (assetId && raw.src) quickEditCacheFrameAsset({ id: assetId, name, mime: raw.mime }, raw.src);
+    return {
+      id: String(raw.id || ('frame-image-' + index + '-' + Date.now().toString(36))),
+      assetId,
+      name,
+      mime: String(raw.mime || ''),
+      src: quickEditCachedFrameAssetUrl(assetId) || String(raw.src || ''),
+      coordinateSpace,
+      anchor,
+      x,
+      y,
+      size: quickEditNormalizeFrameImageSize(raw.size),
+      rotation: quickEditNormalizeFrameImageRotation(raw.rotation),
+      opacity: quickEditNormalizeFrameImageOpacity(raw.opacity),
+      enabled: raw.enabled !== false,
+    };
+  }
+
+  function quickEditFrameImageLayers() {
+    const layers = Array.isArray(state.quickEdit.frameImageLayers) ? state.quickEdit.frameImageLayers : [];
+    const normalized = layers
+      .map((layer, index) => quickEditNormalizeFrameImageLayer(layer, index))
+      .filter((layer) => layer.assetId);
+    state.quickEdit.frameImageLayers = normalized;
+    return normalized;
+  }
+
+  function quickEditFrameImageLayerById(id) {
+    const layerId = String(id || '');
+    return quickEditFrameImageLayers().find((layer) => layer.id === layerId) || null;
+  }
+
+  function quickEditFrameAssetById(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return null;
+    return (state.quickEdit.frameAssets || []).find((item) => item && item.id === id) || null;
+  }
+
+  function quickEditCurrentFrameUsesAsset(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return false;
+    return quickEditFrameImageLayers().some((layer) => quickEditNormalizeFrameAssetId(layer.assetId) === id);
+  }
+
+  function addQuickEditFrameAssetLayer(asset, options) {
+    const opts = options || {};
+    const item = asset && typeof asset === 'object' ? asset : quickEditFrameAssetById(asset);
+    const assetId = quickEditNormalizeFrameAssetId(item && item.id);
+    if (!assetId) {
+      showToast('标识图片引用无效', 'error');
+      return false;
+    }
+    const layers = quickEditFrameImageLayers();
+    const layer = quickEditNewFrameImageLayer(
+      Object.assign({}, item, { id: assetId }),
+      quickEditCachedFrameAssetUrl(assetId),
+    );
+    if (!layer.assetId) {
+      showToast('标识图片引用无效', 'error');
+      return false;
+    }
+    layers.push(layer);
+    state.quickEdit.frameImageLayers = layers;
+    renderQuickEditFrameImageLayers();
+    syncQuickEditFramePreview();
+    syncQuickEditFramePresetUi();
+    syncQuickEditSaveConfirm();
+    if (!opts.silent) showToast('已添加图片标识：' + (layer.name || assetId));
+    return true;
+  }
+
+  async function refreshQuickEditFrameAssets(options) {
+    const opts = options || {};
+    if (state.quickEdit.frameAssetsLoading) return;
+    state.quickEdit.frameAssetsLoading = true;
+    if (!opts.silent) state.quickEdit.frameAssetsMessage = '正在读取图片库';
+    syncQuickEditFrameAssetModal();
+    try {
+      const res = await call('list_quick_edit_frame_assets');
+      if (!res || !res.success) throw new Error(res && res.message ? res.message : '图片库读取失败');
+      state.quickEdit.frameAssets = Array.isArray(res.items) ? res.items : [];
+      state.quickEdit.frameAssetsLoaded = true;
+      state.quickEdit.frameAssetsMessage = '';
+    } catch (err) {
+      console.warn('[PicScanner] 图片库读取失败', err);
+      state.quickEdit.frameAssetsMessage = String((err && err.message) || '图片库读取失败');
+      if (!opts.silent) showToast(state.quickEdit.frameAssetsMessage, 'error');
+    } finally {
+      state.quickEdit.frameAssetsLoading = false;
+      syncQuickEditFrameAssetModal();
+    }
+  }
+
+  async function importQuickEditFrameAssetToLibrary(options) {
+    if (!state.quickEdit.open) return;
+    const opts = options || {};
+    try {
+      const res = await call('import_quick_edit_frame_asset');
+      if (!res || !res.success) {
+        if (res && res.cancelled) return;
+        showToast(res && res.message ? res.message : '标识图片导入失败', 'error');
+        return;
+      }
+      quickEditCacheFrameAsset(res.item, res.data_url);
+      if (res.item && res.item.id) {
+        const current = (state.quickEdit.frameAssets || []).filter((item) => item && item.id !== res.item.id);
+        state.quickEdit.frameAssets = [res.item].concat(current);
+        state.quickEdit.frameAssetsLoaded = true;
+        state.quickEdit.frameAssetSelectedId = res.item.id;
+      }
+      syncQuickEditFrameAssetModal();
+      if (opts.addToFrame !== false) addQuickEditFrameAssetLayer(res.item, { silent: true });
+      showToast(res.message || '已添加图片标识');
+      refreshQuickEditFrameAssets({ silent: true });
+    } catch (err) {
+      console.warn('[PicScanner] 标识图片导入失败', err);
+      showToast(String((err && err.message) || '标识图片导入失败'), 'error');
+    }
+  }
+
+  function quickEditFrameAssetCountText() {
+    const count = (state.quickEdit.frameAssets || []).length;
+    if (state.quickEdit.frameAssetsLoading) return '读取中';
+    return count ? ('库中 ' + count + ' 张') : '库为空';
+  }
+
+  function quickEditFrameAssetUsageText(item) {
+    const presetCount = Number(item && item.used_count || 0);
+    const current = quickEditCurrentFrameUsesAsset(item && item.id);
+    if (current && presetCount) return '当前相框 / ' + presetCount + ' 个预设使用';
+    if (current) return '当前相框使用中';
+    if (presetCount) return presetCount + ' 个预设使用';
+    return '未被预设使用';
+  }
+
+  function syncQuickEditFrameAssetModal() {
+    const modal = state.quickEdit.frameAssetModal;
+    if (!modal || !modal.isConnected) return;
+    const list = modal.querySelector('[data-quick-edit-frame-asset-list]');
+    const count = modal.querySelector('[data-quick-edit-frame-asset-count]');
+    const message = modal.querySelector('[data-quick-edit-frame-asset-message]');
+    if (count) count.textContent = quickEditFrameAssetCountText();
+    if (message) {
+      message.textContent = state.quickEdit.frameAssetsMessage || '导入后的图片会保存在本地素材库';
+      message.title = message.textContent;
+    }
+    if (!list) return;
+    const items = Array.isArray(state.quickEdit.frameAssets) ? state.quickEdit.frameAssets : [];
+    if (state.quickEdit.frameAssetsLoading && !items.length) {
+      list.innerHTML = '<div class="quick-edit-frame-asset-empty">正在读取图片库</div>';
+      return;
+    }
+    if (!items.length) {
+      list.innerHTML = '<div class="quick-edit-frame-asset-empty">还没有图片素材，点击导入添加</div>';
+      return;
+    }
+    list.innerHTML = items.map((item) => {
+      const id = quickEditNormalizeFrameAssetId(item && item.id);
+      const url = quickEditEnsureFrameAssetUrl(id);
+      const selected = state.quickEdit.frameAssetSelectedId === id;
+      const usedCurrent = quickEditCurrentFrameUsesAsset(id);
+      const usedCount = Number(item && item.used_count || 0);
+      const canDelete = !usedCurrent && !usedCount;
+      const thumb = url
+        ? '<img alt="" src="' + escapeHtml(url) + '" />'
+        : '<span>读取中</span>';
+      return '<div class="quick-edit-frame-asset-item' + (selected ? ' selected' : '') + '" data-quick-edit-frame-asset-id="' + escapeHtml(id) + '">'
+        + '<button class="quick-edit-frame-asset-thumb" type="button" data-quick-edit-frame-asset-add="' + escapeHtml(id) + '" title="添加到当前相框" aria-label="添加到当前相框">' + thumb + '</button>'
+        + '<span><b>' + escapeHtml(item && item.name || id) + '</b><em>' + escapeHtml(quickEditFrameAssetUsageText(item)) + ' · ' + escapeHtml(quickEditFormatBytes(item && item.size)) + '</em></span>'
+        + '<button class="icon-btn quick-edit-preset-apply-btn" type="button" data-quick-edit-frame-asset-add="' + escapeHtml(id) + '" title="添加到当前相框" aria-label="添加到当前相框">' + quickEditIconSvg('plus') + '</button>'
+        + '<button class="icon-btn quick-edit-preset-delete-btn" type="button" data-quick-edit-frame-asset-delete="' + escapeHtml(id) + '"' + (canDelete ? '' : ' disabled') + ' title="' + (canDelete ? '删除素材' : '使用中的素材不能删除') + '" aria-label="删除素材">' + quickEditIconSvg('trash') + '</button>'
+        + '</div>';
+    }).join('');
+  }
+
+  function hideQuickEditFrameAssetModal() {
+    const modal = state.quickEdit.frameAssetModal;
+    if (!modal) return;
+    modal.classList.add('hidden');
+  }
+
+  function ensureQuickEditFrameAssetModal() {
+    if (state.quickEdit.frameAssetModal && state.quickEdit.frameAssetModal.isConnected) return state.quickEdit.frameAssetModal;
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-modal quick-edit-frame-asset-modal hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '图片素材库');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-frame-asset-card">',
+      '<div class="quick-edit-save-head">',
+      '<h2>图片素材库</h2>',
+      '<div class="quick-edit-lut-head-actions">',
+      '<button class="icon-btn" type="button" data-quick-edit-frame-asset-import title="导入图片素材" aria-label="导入图片素材">' + quickEditIconSvg('import') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-frame-asset-refresh title="刷新图片库" aria-label="刷新图片库">' + quickEditIconSvg('refresh') + '</button>',
+      '<button class="icon-btn quick-edit-save-close" type="button" data-quick-edit-frame-asset-cancel title="关闭" aria-label="关闭">' + quickEditIconSvg('close') + '</button>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-preset-modal-head"><span data-quick-edit-frame-asset-message></span><em data-quick-edit-frame-asset-count>库为空</em></div>',
+      '<div class="quick-edit-frame-asset-list" data-quick-edit-frame-asset-list></div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-frame-asset-cancel]').addEventListener('click', () => hideQuickEditFrameAssetModal());
+    modal.querySelector('[data-quick-edit-frame-asset-import]').addEventListener('click', () => {
+      importQuickEditFrameAssetToLibrary({ addToFrame: true });
+    });
+    modal.querySelector('[data-quick-edit-frame-asset-refresh]').addEventListener('click', () => {
+      refreshQuickEditFrameAssets();
+    });
+    modal.querySelector('[data-quick-edit-frame-asset-list]').addEventListener('click', (ev) => {
+      const add = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-asset-add]') : null;
+      if (add) {
+        const assetId = String(add.dataset.quickEditFrameAssetAdd || '');
+        state.quickEdit.frameAssetSelectedId = assetId;
+        addQuickEditFrameAssetLayer(assetId);
+        syncQuickEditFrameAssetModal();
+        return;
+      }
+      const del = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-asset-delete]') : null;
+      if (del) {
+        deleteQuickEditFrameAsset(String(del.dataset.quickEditFrameAssetDelete || ''));
+        return;
+      }
+      const row = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-asset-id]') : null;
+      if (row) {
+        state.quickEdit.frameAssetSelectedId = String(row.dataset.quickEditFrameAssetId || '');
+        syncQuickEditFrameAssetModal();
+      }
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.frameAssetModal = modal;
+    return modal;
+  }
+
+  function showQuickEditFrameAssetModal() {
+    const modal = ensureQuickEditFrameAssetModal();
+    modal.classList.remove('hidden');
+    syncQuickEditFrameAssetModal();
+    if (!state.quickEdit.frameAssetsLoaded && !state.quickEdit.frameAssetsLoading) {
+      refreshQuickEditFrameAssets({ silent: true });
+    }
+    const first = modal.querySelector('[data-quick-edit-frame-asset-import]');
+    if (first) requestAnimationFrame(() => first.focus({ preventScroll: true }));
+  }
+
+  async function deleteQuickEditFrameAsset(assetId) {
+    const id = quickEditNormalizeFrameAssetId(assetId);
+    if (!id) return;
+    if (quickEditCurrentFrameUsesAsset(id)) {
+      showToast('当前相框正在使用这个素材，请先删除对应图片层', 'error');
+      return;
+    }
+    try {
+      const res = await call('delete_quick_edit_frame_asset', id);
+      if (!res || !res.success) {
+        state.quickEdit.frameAssets = Array.isArray(res && res.items) ? res.items : state.quickEdit.frameAssets;
+        syncQuickEditFrameAssetModal();
+        showToast(res && res.message ? res.message : '图片素材删除失败', 'error');
+        return;
+      }
+      quickEditFrameAssetCache.delete(id);
+      state.quickEdit.frameAssets = Array.isArray(res.items) ? res.items : [];
+      state.quickEdit.frameAssetsLoaded = true;
+      if (state.quickEdit.frameAssetSelectedId === id) state.quickEdit.frameAssetSelectedId = '';
+      syncQuickEditFrameAssetModal();
+      showToast(res.message || '已删除图片素材');
+    } catch (err) {
+      console.warn('[PicScanner] 图片素材删除失败', err);
+      showToast(String((err && err.message) || '图片素材删除失败'), 'error');
+    }
+  }
+
+  function quickEditPhotoTokenMap(photoOverride) {
+    const basePhoto = photoOverride || state.quickEdit.photo || {};
+    const photo = Object.assign({}, basePhoto, state.photoCache.get(Number(basePhoto && basePhoto.id || 0)) || {});
+    const dateKey = String(photo.date_key || photo.datetime_original || '').slice(0, 10);
+    const dateParts = dateKey ? dateKey.split('-') : [];
+    const focal = Number(photo.focal_length || 0);
+    const focal35 = Number(photo.focal_length_35mm || 0);
+    const aperture = photo.f_number ? String(Number(photo.f_number)).replace(/\.0$/, '') : String(photo.aperture_bucket || '').replace(/^f\//i, '');
+    const lensName = String(photo.lens_model || photo.focal_bucket || '').trim();
+    const camera = [photo.make, photo.model].map((item) => String(item || '').trim()).filter(Boolean).join(' ');
+    return {
+      filename: String(photo.filename || '').replace(/\.[^.]+$/, ''),
+      origin_name: String(photo.filename || '').replace(/\.[^.]+$/, ''),
+      date: dateKey,
+      Y: dateParts[0] || '',
+      M: dateParts[1] || '',
+      D: dateParts[2] || '',
+      camera,
+      model: String(photo.model || '').trim(),
+      lens: lensName,
+      lens_name: lensName,
+      len_name: lensName,
+      shutter: String(photo.exposure_time || '').trim(),
+      shutter_speed: String(photo.exposure_time || '').trim(),
+      aperture,
+      iso: String(photo.iso || photo.iso_bucket || '').trim(),
+      focal_length: focal > 0 ? formatMmValue(focal) + 'mm' : '',
+      focal_length_35mm: focal35 > 0 ? formatMmValue(focal35) + 'mm' : '',
+      format: String(photo.format || '').trim(),
+    };
+  }
+
+  function quickEditResolveFrameTextTemplate(text, photoOverride) {
+    const tokens = quickEditPhotoTokenMap(photoOverride);
+    return String(text || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => (
+      Object.prototype.hasOwnProperty.call(tokens, key) ? String(tokens[key] || '') : match
+    ));
+  }
+
+  function quickEditFrameExportConfigFromPayload(frame) {
+    const source = frame && typeof frame === 'object' ? frame : {};
+    const key = quickEditFramePresetKey(source.preset || source.framePreset || source.key);
+    const textLayers = Array.isArray(source.textLayers)
+      ? source.textLayers.map((layer, index) => quickEditNormalizeFrameTextLayer(layer, index))
+      : [];
+    const imageLayers = Array.isArray(source.imageLayers)
+      ? source.imageLayers.map((layer, index) => quickEditNormalizeFrameImageLayer(layer, index)).filter((layer) => layer.assetId)
+      : [];
+    if (key === 'none') {
+      const hasText = textLayers.some((layer) => layer.enabled && String(layer.text || '').trim());
+      const hasImage = imageLayers.some((layer) => layer.enabled && layer.assetId);
+      return hasText ? {
+        key,
+        color: '',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        textLayers,
+        imageLayers,
+      } : (hasImage ? {
+        key,
+        color: '',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        textLayers,
+        imageLayers,
+      } : null);
+    }
+    const insets = quickEditNormalizeFrameInsets(source.insets || quickEditFrameDefaultInsets(key));
+    if (key === 'white') return { key, color: '#f5f5f2', insets, textLayers, imageLayers };
+    if (key === 'black') return { key, color: '#08080a', insets, textLayers, imageLayers };
+    if (key === 'paper') return { key, color: '#f2eee5', insets, textLayers, imageLayers };
+    return null;
+  }
+
+  function quickEditFrameExportConfig(preset) {
+    return quickEditFrameExportConfigFromPayload({
+      preset,
+      insets: state.quickEdit.frameInsets,
+      textLayers: quickEditFrameTextLayers(),
+      imageLayers: quickEditFrameImageLayers(),
+    });
+  }
+
+  function quickEditActiveExportFrame(options) {
+    const opts = options || {};
+    if (!opts.includeFrame) return null;
+    return quickEditFrameExportConfig(state.quickEdit.framePreset);
+  }
+
+  function quickEditFramedOutputSize(width, height, frameConfig) {
+    const w = Math.max(1, Math.round(Number(width || 1)));
+    const h = Math.max(1, Math.round(Number(height || 1)));
+    if (!frameConfig) return { width: w, height: h, frame: { left: 0, right: 0, top: 0, bottom: 0 } };
+    const basis = Math.max(1, Math.min(w, h));
+    const insets = quickEditNormalizeFrameInsets(frameConfig.insets);
+    const left = Math.max(0, Math.round(basis * insets.left / 100));
+    const right = Math.max(0, Math.round(basis * insets.right / 100));
+    const top = Math.max(0, Math.round(basis * insets.top / 100));
+    const bottom = Math.max(0, Math.round(basis * insets.bottom / 100));
+    return {
+      width: w + left + right,
+      height: h + top + bottom,
+      frame: { left, right, top, bottom },
     };
   }
 
@@ -8871,6 +10076,8 @@
     const sizeDetail = modal.querySelector('[data-quick-edit-save-size-detail]');
     const sizeWidthInput = modal.querySelector('[data-quick-edit-save-size-width]');
     const sizeHeightInput = modal.querySelector('[data-quick-edit-save-size-height]');
+    const includeFrame = modal.querySelector('[data-quick-edit-save-include-frame]');
+    const preserveExif = modal.querySelector('[data-quick-edit-save-preserve-exif]');
     modal.classList.toggle('saving', saving);
     modal.querySelectorAll('[data-quick-edit-save-format]').forEach((btn) => {
       const formatKey = String(btn.dataset.quickEditSaveFormat || '');
@@ -8910,6 +10117,20 @@
     if (sizeHeightInput && String(sizeHeightInput.value) !== String(options.sizeHeight)) {
       sizeHeightInput.value = String(options.sizeHeight);
     }
+    if (includeFrame) {
+      const hasFrameOutput = !!quickEditFrameExportConfig(state.quickEdit.framePreset);
+      includeFrame.checked = hasFrameOutput && !!options.includeFrame;
+      includeFrame.disabled = saving || !hasFrameOutput || tiff16;
+      const includeFrameWrap = includeFrame.closest('.quick-edit-save-toggle');
+      if (includeFrameWrap) includeFrameWrap.classList.toggle('disabled', !hasFrameOutput || tiff16);
+    }
+    if (preserveExif) {
+      const exifSupported = quickEditSaveSupportsExif(options.format);
+      preserveExif.checked = exifSupported && !!options.preserveExif;
+      preserveExif.disabled = saving || !exifSupported;
+      const preserveExifWrap = preserveExif.closest('.quick-edit-save-toggle');
+      if (preserveExifWrap) preserveExifWrap.classList.toggle('disabled', !exifSupported);
+    }
     modal.querySelectorAll('[data-quick-edit-save-size-preset]').forEach((btn) => {
       const preset = String(btn.dataset.quickEditSaveSizePreset || '');
       const active = (
@@ -8929,7 +10150,9 @@
       + '[data-quick-edit-save-quality-preset], '
       + '[data-quick-edit-save-size-preset], '
       + '[data-quick-edit-save-size-width], '
-      + '[data-quick-edit-save-size-height]',
+      + '[data-quick-edit-save-size-height], '
+      + '[data-quick-edit-save-include-frame], '
+      + '[data-quick-edit-save-preserve-exif]',
     ).forEach((control) => {
       if (control.matches && control.matches('[data-quick-edit-save-format]')) {
         control.disabled = saving || !quickEditSaveSupportsFormat(control.dataset.quickEditSaveFormat || '');
@@ -8937,6 +10160,10 @@
         control.disabled = saving || tiff16;
       } else if (control.matches && control.matches('[data-quick-edit-save-size-preset], [data-quick-edit-save-size-width], [data-quick-edit-save-size-height]')) {
         control.disabled = saving || tiff16;
+      } else if (control.matches && control.matches('[data-quick-edit-save-include-frame]')) {
+        control.disabled = saving || tiff16 || !quickEditFrameExportConfig(state.quickEdit.framePreset);
+      } else if (control.matches && control.matches('[data-quick-edit-save-preserve-exif]')) {
+        control.disabled = saving || !quickEditSaveSupportsExif(options.format);
       } else {
         control.disabled = saving;
       }
@@ -9056,7 +10283,7 @@
       '<button class="quick-edit-save-format-trigger" type="button" data-quick-edit-save-format-trigger aria-expanded="false">',
       '<span data-quick-edit-save-format-label>JPEG</span>',
       '<small data-quick-edit-save-format-detail>体积小，适合分享和通用查看</small>',
-      '<b aria-hidden="true">⌄</b>',
+      '<b aria-hidden="true">' + quickEditIconSvg('chevron') + '</b>',
       '</button>',
       '<div class="quick-edit-save-format-menu hidden" data-quick-edit-save-format-menu role="menu">',
       QUICK_EDIT_SAVE_FORMATS.map((format) => (
@@ -9085,6 +10312,16 @@
       '</div>',
       '</div>',
       '</div>',
+      '<label class="quick-edit-save-toggle">',
+      '<input type="checkbox" data-quick-edit-save-include-frame />',
+      '<span aria-hidden="true"></span>',
+      '<b>包含相框/文字</b>',
+      '</label>',
+      '<label class="quick-edit-save-toggle">',
+      '<input type="checkbox" data-quick-edit-save-preserve-exif />',
+      '<span aria-hidden="true"></span>',
+      '<b>完整复制原始 EXIF</b>',
+      '</label>',
       '<label class="quick-edit-save-field quick-edit-save-quality">',
       '<span class="quick-edit-save-label">保存画质</span>',
       '<div class="quick-edit-save-quality-readout"><b data-quick-edit-save-quality-value>100</b><span data-quick-edit-save-quality-detail>最高保真，文件体积最大</span></div>',
@@ -9239,6 +10476,37 @@
     };
     bindQuickEditSaveSizeInput(sizeWidthInput, 'width');
     bindQuickEditSaveSizeInput(sizeHeightInput, 'height');
+    const includeFrame = modal.querySelector('[data-quick-edit-save-include-frame]');
+    if (includeFrame) {
+      includeFrame.addEventListener('change', () => {
+        if (state.quickEdit.saveSaving) {
+          showToast('正在保存，完成前不能更改相框导出选项', 'error');
+          return;
+        }
+        rememberQuickEditSaveOptions(Object.assign(quickEditSaveOptions(), {
+          includeFrame: !!includeFrame.checked,
+        }));
+        syncQuickEditSaveConfirm();
+      });
+    }
+    const preserveExif = modal.querySelector('[data-quick-edit-save-preserve-exif]');
+    if (preserveExif) {
+      preserveExif.addEventListener('change', () => {
+        if (state.quickEdit.saveSaving) {
+          showToast('正在保存，完成前不能更改 EXIF 选项', 'error');
+          return;
+        }
+        if (!quickEditSaveSupportsExif(quickEditSaveOptions().format)) {
+          showToast('保存 EXIF 目前只支持 JPEG 导出', 'error');
+          syncQuickEditSaveConfirm();
+          return;
+        }
+        rememberQuickEditSaveOptions(Object.assign(quickEditSaveOptions(), {
+          preserveExif: !!preserveExif.checked,
+        }));
+        syncQuickEditSaveConfirm();
+      });
+    }
     const quality = modal.querySelector('[data-quick-edit-save-quality]');
     if (quality) {
       quality.addEventListener('input', () => {
@@ -9275,8 +10543,10 @@
     }
     const memory = readQuickEditSaveOptionsMemory();
     const current = state.quickEdit.saveOptions || {};
+    const hasFrameOutput = !!quickEditFrameExportConfig(state.quickEdit.framePreset);
     state.quickEdit.saveOptions = quickEditSaveOptions(Object.assign({}, memory, current, {
       path: current.path || memory.path || quickEditDefaultSavePath(),
+      includeFrame: hasFrameOutput,
     }));
     const modal = ensureQuickEditSaveConfirm();
     syncQuickEditSaveConfirm();
@@ -9319,6 +10589,277 @@
     });
   }
 
+  function quickEditFrameTextDisplayBasis(sourceWidth, sourceHeight, frameConfig) {
+    const el = state.quickEdit.el;
+    const img = el ? el.querySelector('[data-quick-edit-img]') : null;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    const previewBasis = framePreview
+      ? Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-image-basis') || '')
+      : 0;
+    if (Number.isFinite(previewBasis) && previewBasis > 1) return previewBasis;
+    const imageWidth = img ? (Number.parseFloat(img.style.width || '') || img.offsetWidth || 0) : 0;
+    const imageHeight = img ? (Number.parseFloat(img.style.height || '') || img.offsetHeight || 0) : 0;
+    if (Number.isFinite(imageWidth) && Number.isFinite(imageHeight) && imageWidth > 1 && imageHeight > 1) {
+      return Math.min(imageWidth, imageHeight);
+    }
+    const sourceBasis = Math.max(1, Math.min(sourceWidth, sourceHeight));
+    const insets = quickEditNormalizeFrameInsets(frameConfig ? frameConfig.insets : null);
+    const outputWidth = sourceWidth + sourceBasis * (insets.left + insets.right) / 100;
+    const outputHeight = sourceHeight + sourceBasis * (insets.top + insets.bottom) / 100;
+    const fit = quickEditDisplayFitSize(outputWidth, outputHeight);
+    const scale = Math.min(
+      fit.width / Math.max(1, outputWidth),
+      fit.height / Math.max(1, outputHeight),
+    );
+    const computedBasis = sourceBasis * scale;
+    if (Number.isFinite(computedBasis) && computedBasis > 1) return computedBasis;
+    throw new Error('无法读取相框文字预览尺寸，已停止导出以避免导出与预览不一致');
+  }
+
+  function quickEditCanvasFrameTextPlacement(layer, canvasWidth, canvasHeight, frameBox, displayBasis) {
+    const position = String(layer && layer.position || 'bottom-center');
+    const left = Number(frameBox.left || 0);
+    const right = Number(frameBox.right || 0);
+    const top = Number(frameBox.top || 0);
+    const bottom = Number(frameBox.bottom || 0);
+    const contentWidth = Math.max(1, canvasWidth - left - right);
+    const contentHeight = Math.max(1, canvasHeight - top - bottom);
+    const contentBasis = Math.max(1, Math.min(contentWidth, contentHeight));
+    const size = quickEditScaledFrameTextSize(layer, contentBasis, displayBasis);
+    const defaultInset = Math.max(1, 12 * quickEditFrameTextBasisScale(contentBasis, displayBasis));
+    const offsetX = contentBasis * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
+    const offsetY = contentBasis * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
+    const constrain = (placement) => Object.assign({}, placement, {
+      x: clamp(Number(placement.x || 0), 0, canvasWidth),
+      y: clamp(Number(placement.y || 0), size / 2, canvasHeight - size / 2),
+    });
+    if (position === 'top-center') {
+      return constrain({
+        x: canvasWidth / 2 + offsetX,
+        y: (top > 0 ? top / 2 : defaultInset + size / 2) + offsetY,
+        align: 'center',
+        maxWidth: Math.max(1, canvasWidth),
+        contentBasis,
+        contentWidth,
+        contentHeight,
+      });
+    }
+    if (position === 'bottom-left') {
+      return constrain({
+        x: left + offsetX,
+        y: (bottom > 0 ? canvasHeight - bottom / 2 : canvasHeight - defaultInset - size / 2) + offsetY,
+        align: 'left',
+        maxWidth: Math.max(1, canvasWidth),
+        contentBasis,
+        contentWidth,
+        contentHeight,
+      });
+    }
+    if (position === 'bottom-right') {
+      return constrain({
+        x: canvasWidth - right + offsetX,
+        y: (bottom > 0 ? canvasHeight - bottom / 2 : canvasHeight - defaultInset - size / 2) + offsetY,
+        align: 'right',
+        maxWidth: Math.max(1, canvasWidth),
+        contentBasis,
+        contentWidth,
+        contentHeight,
+      });
+    }
+    return constrain({
+      x: canvasWidth / 2 + offsetX,
+      y: (bottom > 0 ? canvasHeight - bottom / 2 : canvasHeight - defaultInset - size / 2) + offsetY,
+      align: 'center',
+      maxWidth: Math.max(1, canvasWidth),
+      contentBasis,
+      contentWidth,
+      contentHeight,
+    });
+  }
+
+  function quickEditCanvasFrameImagePlacement(layer, canvasWidth, canvasHeight, frameBox, imageWidth, imageHeight) {
+    const left = Number(frameBox.left || 0);
+    const right = Number(frameBox.right || 0);
+    const top = Number(frameBox.top || 0);
+    const bottom = Number(frameBox.bottom || 0);
+    const contentWidth = Math.max(1, canvasWidth - left - right);
+    const contentHeight = Math.max(1, canvasHeight - top - bottom);
+    const assetWidth = Number(imageWidth || 0);
+    const assetHeight = Number(imageHeight || 0);
+    if (!(assetWidth > 0) || !(assetHeight > 0)) throw new Error('标识图片没有可用的宽高信息');
+    const aspectRatio = assetWidth / assetHeight;
+    const geometry = quickEditGeometryApi().imageLayerPlacement({
+      contentWidth,
+      contentHeight,
+      outerLeft: -left,
+      outerTop: -top,
+      outerRight: contentWidth + right,
+      outerBottom: contentHeight + bottom,
+      sizePercent: quickEditNormalizeFrameImageSize(layer && layer.size),
+      aspectRatio,
+      rotationDegrees: quickEditNormalizeFrameImageRotation(layer && layer.rotation),
+      anchor: quickEditNormalizeFrameImageAnchor(layer && layer.anchor) || 'center',
+      offsetXPercent: quickEditNormalizeFrameImageOffset(layer && layer.x),
+      offsetYPercent: quickEditNormalizeFrameImageOffset(layer && layer.y),
+    });
+    return {
+      x: left + geometry.x,
+      y: top + geometry.y,
+      width: geometry.width,
+      height: geometry.height,
+      rotation: geometry.rotation,
+      opacity: quickEditNormalizeFrameImageOpacity(layer && layer.opacity) / 100,
+      contentWidth,
+      contentHeight,
+      offsetXPercent: geometry.offsetXPercent,
+      offsetYPercent: geometry.offsetYPercent,
+    };
+  }
+
+  function quickEditLoadFrameImageElement(src) {
+    const url = String(src || '');
+    if (!url) return Promise.reject(new Error('标识图片为空'));
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('标识图片解码失败'));
+      img.src = url;
+    });
+  }
+
+  async function quickEditDrawFrameImageLayers(ctx, frameConfig, canvasWidth, canvasHeight, frameBox) {
+    const layers = (frameConfig && frameConfig.imageLayers || []).filter((layer) => layer.enabled && layer.assetId);
+    const rendered = [];
+    for (const layer of layers) {
+      const url = await quickEditLoadFrameAssetUrl(layer.assetId);
+      const image = await quickEditLoadFrameImageElement(url);
+      const placement = quickEditCanvasFrameImagePlacement(layer, canvasWidth, canvasHeight, frameBox, image.naturalWidth || image.width, image.naturalHeight || image.height);
+      ctx.save();
+      ctx.globalAlpha = placement.opacity;
+      ctx.translate(placement.x, placement.y);
+      ctx.rotate(placement.rotation);
+      ctx.drawImage(image, -placement.width / 2, -placement.height / 2, placement.width, placement.height);
+      ctx.restore();
+      rendered.push({
+        name: layer.name,
+        x: Math.round(placement.x),
+        y: Math.round(placement.y),
+        width: Math.round(placement.width),
+        height: Math.round(placement.height),
+        opacity: Math.round(placement.opacity * 100),
+        contentWidth: Math.round(placement.contentWidth),
+        contentHeight: Math.round(placement.contentHeight),
+        offsetXPercent: placement.offsetXPercent,
+        offsetYPercent: placement.offsetYPercent,
+      });
+    }
+    return rendered;
+  }
+
+  async function quickEditApplyFrameToRenderedBlob(rendered, options, frameConfig, context) {
+    if (!rendered || !rendered.blob || !frameConfig) return rendered;
+    const ctxOptions = context || {};
+    const reportProgress = typeof ctxOptions.onProgress === 'function'
+      ? ctxOptions.onProgress
+      : (stage, percent, detail) => setQuickEditSaveProgress(stage, percent, detail);
+    const sourceWidth = Math.max(1, Math.round(Number(rendered.outputWidth || 1)));
+    const sourceHeight = Math.max(1, Math.round(Number(rendered.outputHeight || 1)));
+    const framedSize = quickEditFramedOutputSize(sourceWidth, sourceHeight, frameConfig);
+    const displayBasis = 600;
+    const canvas = document.createElement('canvas');
+    canvas.width = framedSize.width;
+    canvas.height = framedSize.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('无法创建相框导出画布');
+    reportProgress('渲染相框', 86, quickEditSaveOutputDetail(framedSize.width, framedSize.height));
+    const bitmap = await createImageBitmap(rendered.blob);
+    try {
+      if (frameConfig.color) {
+        ctx.fillStyle = frameConfig.color;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.drawImage(bitmap, framedSize.frame.left, framedSize.frame.top, sourceWidth, sourceHeight);
+      const renderedImageLayers = await quickEditDrawFrameImageLayers(ctx, frameConfig, canvas.width, canvas.height, framedSize.frame);
+      const renderedTextLayers = [];
+      (frameConfig.textLayers || []).filter((layer) => layer.enabled && String(layer.text || '').trim()).forEach((layer) => {
+        const text = quickEditResolveFrameTextTemplate(layer.text, ctxOptions.photo);
+        if (!String(text || '').trim()) return;
+        const placement = quickEditCanvasFrameTextPlacement(layer, canvas.width, canvas.height, framedSize.frame, displayBasis);
+        const font = quickEditCanvasFrameTextFont(layer, placement.contentBasis, displayBasis);
+        const textColor = quickEditNormalizeHexColor(layer.color) || quickEditDefaultFrameTextColor();
+        ctx.save();
+        ctx.fillStyle = textColor;
+        ctx.font = font;
+        ctx.textAlign = placement.align;
+        ctx.textBaseline = 'middle';
+        const measuredWidth = Math.min(Math.max(1, ctx.measureText(text).width), placement.maxWidth);
+        const textX = placement.align === 'right'
+          ? clamp(placement.x, measuredWidth, canvas.width)
+          : (placement.align === 'left'
+            ? clamp(placement.x, 0, canvas.width - measuredWidth)
+            : clamp(placement.x, measuredWidth / 2, canvas.width - measuredWidth / 2));
+        ctx.fillText(text, textX, placement.y, placement.maxWidth);
+        ctx.restore();
+        renderedTextLayers.push({
+          position: layer.position,
+          textLength: String(text).length,
+          textSample: String(text).slice(0, 32),
+          x: Math.round(textX),
+          y: Math.round(placement.y),
+          maxWidth: Math.round(placement.maxWidth),
+          font,
+          color: textColor,
+          contentWidth: Math.round(placement.contentWidth),
+          contentHeight: Math.round(placement.contentHeight),
+          offsetXPercent: quickEditNormalizeFrameTextOffset(layer.x),
+          offsetYPercent: quickEditNormalizeFrameTextOffset(layer.y),
+        });
+      });
+      if (renderedTextLayers.length) {
+        console.info('[PicScanner] quick edit frame text export', {
+          canvas: { width: canvas.width, height: canvas.height },
+          frame: framedSize.frame,
+          displayBasis,
+          layers: renderedTextLayers,
+        });
+      } else if ((frameConfig.textLayers || []).some((layer) => layer.enabled && String(layer.text || '').trim())) {
+        console.warn('[PicScanner] quick edit frame text export skipped all resolved text layers', {
+          canvas: { width: canvas.width, height: canvas.height },
+          frame: framedSize.frame,
+          displayBasis,
+          sourceLayers: (frameConfig.textLayers || []).map((layer) => ({
+            position: layer && layer.position,
+            textLength: String(layer && layer.text || '').length,
+          })),
+        });
+      }
+      if (renderedImageLayers.length) {
+        console.info('[PicScanner] quick edit frame image export', {
+          canvas: { width: canvas.width, height: canvas.height },
+          frame: framedSize.frame,
+          layers: renderedImageLayers,
+        });
+      }
+    } finally {
+      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+    }
+    const mime = String(ctxOptions.mime || quickEditSaveMime(options && options.format));
+    const quality = quickEditSaveQualityRatio(options && options.quality);
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) resolve(nextBlob);
+        else reject(new Error('相框导出编码失败'));
+      }, mime, quality);
+    });
+    return {
+      blob,
+      mime,
+      outputWidth: framedSize.width,
+      outputHeight: framedSize.height,
+    };
+  }
+
   async function renderQuickEditFinalBlobInWorker(saveOptions) {
     if (typeof createImageBitmap !== 'function') {
       throw new Error('当前 WebView 不支持异步图像解码 createImageBitmap');
@@ -9338,17 +10879,19 @@
 
     setQuickEditSaveProgress('加载原图', 6, '正在读取原始图片');
     const sourceImg = await loadQuickEditImage(sourceSrc);
-    const frame = quickEditBakeFrame(stage, img);
-    if (!frame || frame.w <= 1 || frame.h <= 1) {
+    const frame = quickEditBakeFrame(stage, img, { canonical: true });
+    if (!frame || frame.w <= 0.0001 || frame.h <= 0.0001) {
       throw new Error('当前取景框尺寸无效');
     }
 
     const params = options.pixelParams ? normalizeQuickEditParams(options.pixelParams) : quickEditEffectiveParams();
-    const pan = quickEditEffectivePan();
+    const renderView = quickEditRenderView({ canonical: true });
+    const pan = renderView.pan;
     const angleRadians = (params.rotation + params.straighten) * Math.PI / 180;
     const stageRect = stage.getBoundingClientRect();
-    const baseWidth = img.offsetWidth;
-    const baseHeight = img.offsetHeight;
+    const displayBasis = quickEditDisplayBasisSize(img);
+    const baseWidth = displayBasis.width;
+    const baseHeight = displayBasis.height;
     const sourceBasis = Number(options.sourceBasisWidth || 0) > 0 && Number(options.sourceBasisHeight || 0) > 0
       ? { width: Number(options.sourceBasisWidth || 0), height: Number(options.sourceBasisHeight || 0) }
       : quickEditImageBasis(sourceImg.naturalWidth || sourceImg.width, sourceImg.naturalHeight || sourceImg.height);
@@ -9356,7 +10899,7 @@
       Number(sourceBasis.width || sourceImg.naturalWidth || sourceImg.width || 1) / Math.max(1, baseWidth),
       Number(sourceBasis.height || sourceImg.naturalHeight || sourceImg.height || 1) / Math.max(1, baseHeight),
     );
-    const outputScale = quickEditSaveOutputScale(frame, sourceScale, options);
+    const outputScale = quickEditSaveOutputScale(frame, sourceScale / renderView.zoom, options);
     const outputWidth = Math.max(1, Math.round(frame.w * outputScale));
     const outputHeight = Math.max(1, Math.round(frame.h * outputScale));
     const outputDetail = quickEditSaveOutputDetail(outputWidth, outputHeight);
@@ -9441,7 +10984,7 @@
           baseLeft: (stageRect.width - baseWidth) / 2,
           baseTop: (stageRect.height - baseHeight) / 2,
           pan,
-          zoom: state.quickEdit.viewZoom,
+          zoom: renderView.zoom,
           angleRadians,
           orientation: options.orientation === undefined
             ? (quickEditUsesPhotoImageBasis() ? String(state.quickEdit.photo && state.quickEdit.photo.orientation || '') : '')
@@ -9450,7 +10993,9 @@
             ? quickEditSourceNeedsOrientationTransform(sourceImg, sourceBasis)
             : !!options.applyOrientation,
           perfEnabled: quickEditPerfEnabled(),
-          params: quickEditWorkerParams(params, { prepared: !!options.pixelParams }),
+          params: Array.isArray(options.pixelStages)
+            ? { stages: options.pixelStages.map(cloneQuickEditPixelStage) }
+            : quickEditWorkerParams(params, { prepared: !!options.pixelParams }),
           bitmap,
         }, [bitmap]);
       } catch (err) {
@@ -9483,7 +11028,7 @@
       sourceBasisHeight: Number(res.height || 0),
       orientation: '',
       applyOrientation: false,
-      pixelParams: quickEditPixelParamsForRawDevelopedSource(quickEditEffectiveParams()),
+      pixelStages: quickEditWorkerPixelStages(quickEditEffectiveParams(), { rawDeveloped: true }),
     }));
   }
 
@@ -9502,6 +11047,7 @@
       options.path,
       quickEditSourcePath(),
       options.format,
+      options.preserveExif,
     );
     if (!res || !res.success) {
       throw new Error(res && res.message ? res.message : '16bit TIFF 保存失败');
@@ -9534,10 +11080,12 @@
         return;
       }
 
-      const rendered = quickEditIsRawPhoto()
+      let rendered = quickEditIsRawPhoto()
         ? await renderQuickEditRawFinalBlobInWorker(options)
         : await renderQuickEditFinalBlobInWorker(options);
       if (!rendered || !rendered.blob) throw new Error('保存渲染没有返回图片数据');
+      const exportFrame = quickEditActiveExportFrame(options);
+      if (exportFrame) rendered = await quickEditApplyFrameToRenderedBlob(rendered, options, exportFrame);
       setQuickEditSaveProgress(
         '准备写入',
         90,
@@ -9557,6 +11105,7 @@
         quickEditSourcePath(),
         options.format,
         options.quality,
+        options.preserveExif,
       );
       if (!res || !res.success) {
         const message = res && res.message ? res.message : '保存失败';
@@ -9600,9 +11149,12 @@
       onChange: () => {
         invalidateQuickEditRenderedPreview({ clearTimers: true });
         syncQuickEditControls();
-        applyQuickEditPreview({ skipColorRender: true });
-        if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ interactive: true });
-        else applyQuickEditPreview({ interactive: true });
+        if (quickEditUsesRawDevelopPipeline()) {
+          applyQuickEditPreview({ skipColorRender: true });
+          scheduleQuickEditRawDevelopPreview({ interactive: true });
+        } else {
+          applyQuickEditPreview({ interactive: true });
+        }
         scheduleQuickEditHistogramRender(180);
       },
     });
@@ -9657,7 +11209,7 @@
   }
 
   function quickEditCollapsedSections() {
-    const sections = Object.assign({ tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false }, state.quickEdit.collapsedSections || {});
+    const sections = Object.assign({ tone: false, color: false, detail: false, effects: false, blackWhite: false, splitTone: false, hsl: false, lut: false, framePresets: false, frameAdjust: false, frameText: false }, state.quickEdit.collapsedSections || {});
     state.quickEdit.collapsedSections = sections;
     return sections;
   }
@@ -9673,6 +11225,9 @@
       splitTone: raw.splitTone === true,
       hsl: raw.hsl === true,
       lut: raw.lut === true,
+      framePresets: raw.framePresets === true,
+      frameAdjust: raw.frameAdjust === true,
+      frameText: raw.frameText === true,
     };
   }
 
@@ -9688,7 +11243,7 @@
 
   function toggleQuickEditSection(section) {
     const key = String(section || '').trim();
-    if (!['tone', 'color', 'detail', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut'].includes(key)) return;
+    if (!['tone', 'color', 'detail', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut', 'framePresets', 'frameAdjust', 'frameText'].includes(key)) return;
     const sections = quickEditCollapsedSections();
     sections[key] = !sections[key];
     if (key === 'lut' && sections[key]) hideQuickEditLutModal();
@@ -9721,6 +11276,1530 @@
       btn.setAttribute('aria-pressed', state.quickEdit.hslPickerActive ? 'true' : 'false');
     }
     if (status) status.textContent = state.quickEdit.hslPickerActive ? '在画面点击颜色' : '点击吸管后在画面取色';
+  }
+
+  function setQuickEditPanelTab(tab) {
+    const allowed = state.quickEdit.batchMode ? ['adjust', 'frame', 'sync', 'output'] : ['adjust', 'frame'];
+    state.quickEdit.panelTab = allowed.includes(tab) ? tab : 'adjust';
+    syncQuickEditPanelTabs();
+  }
+
+  function syncQuickEditPanelTabs() {
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const allowed = state.quickEdit.batchMode ? ['adjust', 'frame', 'sync', 'output'] : ['adjust', 'frame'];
+    const activeTab = allowed.includes(state.quickEdit.panelTab) ? state.quickEdit.panelTab : 'adjust';
+    el.querySelectorAll('[data-quick-edit-panel-tab]').forEach((btn) => {
+      const tab = String(btn.dataset.quickEditPanelTab || 'adjust');
+      const active = tab === activeTab;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    el.querySelectorAll('[data-quick-edit-panel-page]').forEach((page) => {
+      page.classList.toggle('hidden', String(page.dataset.quickEditPanelPage || 'adjust') !== activeTab);
+    });
+  }
+
+  function quickEditFramePresetKey(key) {
+    const value = String(key || 'none');
+    return ['none', 'white', 'black', 'paper'].includes(value) ? value : 'none';
+  }
+
+  function syncQuickEditFramePreview() {
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const stage = el.querySelector('[data-quick-edit-stage]');
+    const img = el.querySelector('[data-quick-edit-img]');
+    const framePreview = el.querySelector('[data-quick-edit-frame-preview]');
+    if (!framePreview || !stage || !img) return;
+    enforceQuickEditDisplayBasis(img);
+    const preset = quickEditFramePresetKey(state.quickEdit.framePreset);
+    const frameConfig = quickEditFrameExportConfig(preset);
+    const params = quickEditEffectiveParams();
+    const stageRect = stage.getBoundingClientRect();
+    const cropActive = isQuickEditCropToolActive();
+    const baseGeometry = imageHasSource(img) && stageRect.width > 1 && stageRect.height > 1
+      ? quickEditTransformedImageGeometry(params, {
+        stage,
+        img,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        recenter: false,
+      })
+      : null;
+    const outputFrame = baseGeometry ? quickEditCropFrameForParams(params, baseGeometry) : null;
+    framePreview.classList.toggle('hidden', !frameConfig || !outputFrame || cropActive);
+    ['white', 'black', 'paper'].forEach((item) => {
+      framePreview.classList.toggle('frame-' + item, preset === item);
+    });
+    if (!frameConfig || !outputFrame || cropActive) return;
+    framePreview.style.position = 'absolute';
+    framePreview.style.left = outputFrame.x.toFixed(2) + 'px';
+    framePreview.style.top = outputFrame.y.toFixed(2) + 'px';
+    framePreview.style.width = outputFrame.w.toFixed(2) + 'px';
+    framePreview.style.height = outputFrame.h.toFixed(2) + 'px';
+    framePreview.style.aspectRatio = outputFrame.w.toFixed(2) + ' / ' + outputFrame.h.toFixed(2);
+    framePreview.style.transformOrigin = 'center center';
+    framePreview.style.transform = 'none';
+    const insets = quickEditNormalizeFrameInsets(frameConfig ? frameConfig.insets : null);
+    const imageWidth = Math.max(1, outputFrame.w);
+    const imageHeight = Math.max(1, outputFrame.h);
+    const basis = Math.min(imageWidth, imageHeight);
+    const frameTop = basis * insets.top / 100;
+    const frameRight = basis * insets.right / 100;
+    const frameBottom = basis * insets.bottom / 100;
+    const frameLeft = basis * insets.left / 100;
+    framePreview.style.setProperty('--quick-edit-frame-image-basis', basis.toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-top', frameTop.toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-right', frameRight.toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-bottom', frameBottom.toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-left', frameLeft.toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-top-half', (frameTop / 2).toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-bottom-half', (frameBottom / 2).toFixed(2) + 'px');
+    framePreview.style.setProperty('--quick-edit-frame-x-shift', ((frameRight - frameLeft) / 2).toFixed(2) + 'px');
+    const hasVisibleFrame = frameConfig.key !== 'none';
+    framePreview.style.setProperty('--quick-edit-frame-color', hasVisibleFrame && frameConfig.color ? frameConfig.color : 'transparent');
+    framePreview.style.setProperty('--quick-edit-frame-overlap', hasVisibleFrame ? '1px' : '0px');
+    renderQuickEditFramePreviewImages(framePreview, frameConfig);
+    renderQuickEditFramePreviewText(framePreview, frameConfig);
+  }
+
+  function quickEditFramePreviewMetrics(framePreview) {
+    const basis = Math.max(1, Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-image-basis') || '') || framePreview.offsetWidth || 1);
+    return {
+      basis,
+      contentWidth: Math.max(1, Number.parseFloat(framePreview.style.width || '') || framePreview.offsetWidth || basis),
+      contentHeight: Math.max(1, Number.parseFloat(framePreview.style.height || '') || framePreview.offsetHeight || basis),
+      frameTop: Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-top') || '') || 0,
+      frameRight: Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-right') || '') || 0,
+      frameBottom: Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-bottom') || '') || 0,
+      frameLeft: Number.parseFloat(framePreview.style.getPropertyValue('--quick-edit-frame-left') || '') || 0,
+    };
+  }
+
+  function quickEditFrameLayerAnchor(position, layer, frameConfig, metrics) {
+    const pos = String(position || 'bottom-center');
+    const hasFrame = frameConfig && frameConfig.key !== 'none';
+    const size = clamp(Number(layer && layer.size || 18), 8, 72);
+    const box = metrics || {};
+    const contentWidth = Math.max(1, Number(box.contentWidth || 1));
+    const contentHeight = Math.max(1, Number(box.contentHeight || 1));
+    const frameTop = hasFrame ? Math.max(0, Number(box.frameTop || 0)) : 0;
+    const frameRight = hasFrame ? Math.max(0, Number(box.frameRight || 0)) : 0;
+    const frameBottom = hasFrame ? Math.max(0, Number(box.frameBottom || 0)) : 0;
+    const frameLeft = hasFrame ? Math.max(0, Number(box.frameLeft || 0)) : 0;
+    const outerLeft = -frameLeft;
+    const outerRight = contentWidth + frameRight;
+    const outerTop = -frameTop;
+    const outerBottom = contentHeight + frameBottom;
+    const centeredX = contentWidth / 2 + (frameRight - frameLeft) / 2;
+    let x = centeredX;
+    let y = contentHeight + (hasFrame ? frameBottom / 2 : -(12 + size / 2));
+    let align = 'center';
+    let anchor = 'bottom';
+    if (pos === 'top-center') {
+      y = hasFrame ? -frameTop / 2 : 12 + size / 2;
+      anchor = 'top';
+    } else if (pos === 'bottom-left') {
+      x = 0;
+      align = 'left';
+    } else if (pos === 'bottom-right') {
+      x = contentWidth;
+      align = 'right';
+    }
+    return {
+      x,
+      y,
+      align,
+      anchor,
+      size,
+      contentWidth,
+      contentHeight,
+      outerLeft,
+      outerRight,
+      outerTop,
+      outerBottom,
+    };
+  }
+
+  function quickEditFrameLayerPlacement(position, layer, frameConfig, metrics) {
+    const base = quickEditFrameLayerAnchor(position, layer, frameConfig, metrics);
+    const offsetX = Math.min(base.contentWidth, base.contentHeight) * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
+    const offsetY = Math.min(base.contentWidth, base.contentHeight) * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
+    return {
+      x: clamp(base.x + offsetX, base.outerLeft, base.outerRight).toFixed(2) + 'px',
+      y: clamp(base.y + offsetY, base.outerTop + base.size / 2, base.outerBottom - base.size / 2).toFixed(2) + 'px',
+      align: base.align,
+      anchor: base.anchor,
+      maxWidth: Math.max(1, base.outerRight - base.outerLeft).toFixed(2) + 'px',
+    };
+  }
+
+  function renderQuickEditFramePreviewText(framePreview, frameConfig) {
+    if (!framePreview) return;
+    let wrap = framePreview.querySelector('[data-quick-edit-frame-preview-text-list]');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'quick-edit-frame-preview-text-list';
+      wrap.setAttribute('data-quick-edit-frame-preview-text-list', '');
+      framePreview.appendChild(wrap);
+    }
+    wrap.innerHTML = '';
+    const layers = frameConfig ? quickEditFrameTextLayers().filter((layer) => layer.enabled && String(layer.text || '').trim()) : [];
+    const metrics = quickEditFramePreviewMetrics(framePreview);
+    const { basis, contentWidth, contentHeight, frameTop, frameRight, frameBottom, frameLeft } = metrics;
+    layers.forEach((layer) => {
+      const resolved = quickEditResolveFrameTextTemplate(layer.text);
+      if (!String(resolved || '').trim()) return;
+      const placement = quickEditFrameLayerPlacement(layer.position, layer, frameConfig, metrics);
+      const node = document.createElement('b');
+      node.textContent = resolved;
+      node.dataset.quickEditFrameTextPreview = layer.id;
+      node.dataset.quickEditFrameTextAnchor = placement.anchor;
+      node.title = '拖动文字层';
+      node.style.left = placement.x;
+      node.style.top = placement.y;
+      node.style.color = layer.color;
+      node.style.fontSize = quickEditPreviewFrameTextSize(layer, basis) + 'px';
+      node.style.fontFamily = quickEditNormalizeFrameTextFamily(layer.fontFamily);
+      node.style.fontWeight = String(quickEditNormalizeFrameTextWeight(layer.weight));
+      node.style.marginLeft = '0';
+      node.style.marginTop = '0';
+      node.style.maxWidth = placement.maxWidth;
+      node.style.textAlign = placement.align;
+      node.style.transform = placement.align === 'center'
+        ? 'translate(-50%, -50%)'
+        : (placement.align === 'right' ? 'translate(-100%, -50%)' : 'translate(0, -50%)');
+      wrap.appendChild(node);
+      const outerLeft = -frameLeft;
+      const outerRight = contentWidth + frameRight;
+      const outerTop = -frameTop;
+      const outerBottom = contentHeight + frameBottom;
+      const nodeWidth = Math.min(Math.max(1, node.offsetWidth || 1), Math.max(1, outerRight - outerLeft));
+      const nodeHeight = Math.max(1, node.offsetHeight || Number(layer.size || 18));
+      const currentX = Number.parseFloat(placement.x) || 0;
+      const currentY = Number.parseFloat(placement.y) || 0;
+      const minX = placement.align === 'right'
+        ? outerLeft + nodeWidth
+        : outerLeft + (placement.align === 'center' ? nodeWidth / 2 : 0);
+      const maxX = placement.align === 'left'
+        ? outerRight - nodeWidth
+        : outerRight - (placement.align === 'center' ? nodeWidth / 2 : 0);
+      node.style.left = clamp(currentX, Math.min(minX, maxX), Math.max(minX, maxX)).toFixed(2) + 'px';
+      node.style.top = clamp(currentY, outerTop + nodeHeight / 2, outerBottom - nodeHeight / 2).toFixed(2) + 'px';
+    });
+  }
+
+  function quickEditCanonicalizeFrameTextLayerOffset(layerId) {
+    const el = state.quickEdit.el;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    const node = framePreview
+      ? Array.from(framePreview.querySelectorAll('[data-quick-edit-frame-text-preview]')).find((item) => item.dataset.quickEditFrameTextPreview === String(layerId || ''))
+      : null;
+    const frameConfig = quickEditFrameExportConfig(state.quickEdit.framePreset);
+    const layer = quickEditFrameTextLayerById(layerId);
+    if (!framePreview || !node || !frameConfig || !layer) return false;
+    const metrics = quickEditFramePreviewMetrics(framePreview);
+    const base = quickEditFrameLayerAnchor(layer.position, layer, frameConfig, metrics);
+    const actualX = Number.parseFloat(node.style.left || '');
+    const actualY = Number.parseFloat(node.style.top || '');
+    if (!Number.isFinite(actualX) || !Number.isFinite(actualY)) return false;
+    const coordinateBasis = Math.min(base.contentWidth, base.contentHeight);
+    const x = quickEditNormalizeFrameTextOffset((actualX - base.x) / coordinateBasis * 100);
+    const y = quickEditNormalizeFrameTextOffset((actualY - base.y) / coordinateBasis * 100);
+    if (Math.abs(x - layer.x) < 0.0005 && Math.abs(y - layer.y) < 0.0005) return false;
+    const layers = quickEditFrameTextLayers();
+    const index = layers.findIndex((item) => item.id === layer.id);
+    if (index < 0) return false;
+    layers[index] = quickEditNormalizeFrameTextLayer(Object.assign({}, layers[index], { x, y }), index);
+    state.quickEdit.frameTextLayers = layers;
+    return true;
+  }
+
+  function startQuickEditFrameTextDrag(ev, layerId) {
+    if (!ev || ev.button !== 0) return false;
+    if (state.quickEdit.hslPickerActive) return false;
+    const el = state.quickEdit.el;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    let layer = quickEditFrameTextLayerById(layerId);
+    if (!layer || !framePreview) return false;
+    quickEditCanonicalizeFrameTextLayerOffset(layer.id);
+    layer = quickEditFrameTextLayerById(layer.id);
+    const screenRect = framePreview.getBoundingClientRect();
+    const basisX = Math.max(1, Number(screenRect.width || 0));
+    const basisY = Math.max(1, Number(screenRect.height || 0));
+    const coordinateBasis = Math.min(basisX, basisY);
+    state.quickEdit.frameTextDrag = {
+      layerId: layer.id,
+      lastClientX: ev.clientX,
+      lastClientY: ev.clientY,
+      basisX,
+      basisY,
+      coordinateBasis,
+      boundaryClampCount: 0,
+    };
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.addEventListener('pointermove', onQuickEditFrameTextDragMove, { passive: false });
+    window.addEventListener('pointerup', endQuickEditFrameTextDrag, { passive: false });
+    window.addEventListener('pointercancel', endQuickEditFrameTextDrag, { passive: false });
+    return true;
+  }
+
+  function onQuickEditFrameTextDragMove(ev) {
+    const drag = state.quickEdit.frameTextDrag;
+    if (!drag) return;
+    ev.preventDefault();
+    const layer = quickEditFrameTextLayerById(drag.layerId);
+    if (!layer) return;
+    const localX = Number(ev.clientX || 0) - Number(drag.lastClientX || 0);
+    const localY = Number(ev.clientY || 0) - Number(drag.lastClientY || 0);
+    const coordinateBasis = Math.max(1, Number(drag.coordinateBasis || 1));
+    updateQuickEditFrameTextLayer(drag.layerId, {
+      x: Number(layer.x || 0) + quickEditGeometryApi().screenDeltaToPercent(localX, coordinateBasis),
+      y: Number(layer.y || 0) + quickEditGeometryApi().screenDeltaToPercent(localY, coordinateBasis),
+    }, { skipRender: true });
+    if (quickEditCanonicalizeFrameTextLayerOffset(drag.layerId)) drag.boundaryClampCount += 1;
+    drag.lastClientX = ev.clientX;
+    drag.lastClientY = ev.clientY;
+  }
+
+  function endQuickEditFrameTextDrag(ev) {
+    if (ev) ev.preventDefault();
+    const drag = state.quickEdit.frameTextDrag;
+    if (!drag) return;
+    state.quickEdit.frameTextDrag = null;
+    window.removeEventListener('pointermove', onQuickEditFrameTextDragMove);
+    window.removeEventListener('pointerup', endQuickEditFrameTextDrag);
+    window.removeEventListener('pointercancel', endQuickEditFrameTextDrag);
+    renderQuickEditFrameTextLayers();
+    syncQuickEditFramePreview();
+    syncQuickEditSaveConfirm();
+    const layer = quickEditFrameTextLayerById(drag.layerId);
+    console.info('[PicScannerFrameGeometry] text layer positioned', {
+      layerId: drag.layerId,
+      anchor: layer ? layer.position : '',
+      offsetX: layer ? layer.x : null,
+      offsetY: layer ? layer.y : null,
+      basis: { width: drag.basisX, height: drag.basisY },
+      coordinateBasis: drag.coordinateBasis,
+      boundaryClampCount: drag.boundaryClampCount,
+    });
+  }
+
+  function quickEditFrameImagePreviewPlacement(layer, framePreview, aspectRatio) {
+    const metrics = quickEditFramePreviewMetrics(framePreview);
+    const geometry = quickEditGeometryApi().imageLayerPlacement({
+      contentWidth: metrics.contentWidth,
+      contentHeight: metrics.contentHeight,
+      outerLeft: -metrics.frameLeft,
+      outerTop: -metrics.frameTop,
+      outerRight: metrics.contentWidth + metrics.frameRight,
+      outerBottom: metrics.contentHeight + metrics.frameBottom,
+      sizePercent: quickEditNormalizeFrameImageSize(layer && layer.size),
+      aspectRatio,
+      rotationDegrees: quickEditNormalizeFrameImageRotation(layer && layer.rotation),
+      anchor: quickEditNormalizeFrameImageAnchor(layer && layer.anchor) || 'center',
+      offsetXPercent: quickEditNormalizeFrameImageOffset(layer && layer.x),
+      offsetYPercent: quickEditNormalizeFrameImageOffset(layer && layer.y),
+    });
+    return Object.assign({ metrics }, geometry);
+  }
+
+  function quickEditWriteFrameImageCanonicalOffset(layerId, placement) {
+    const layer = quickEditFrameImageLayerById(layerId);
+    if (!layer || !placement) return false;
+    const x = quickEditNormalizeFrameImageOffset(placement.offsetXPercent);
+    const y = quickEditNormalizeFrameImageOffset(placement.offsetYPercent);
+    const anchor = placement.anchor ? quickEditNormalizeFrameImageAnchor(placement.anchor) : layer.anchor;
+    const coordinateSpace = anchor ? QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE : layer.coordinateSpace;
+    if (
+      Math.abs(x - layer.x) < 0.0005
+      && Math.abs(y - layer.y) < 0.0005
+      && anchor === layer.anchor
+      && coordinateSpace === layer.coordinateSpace
+    ) return false;
+    const layers = quickEditFrameImageLayers();
+    const index = layers.findIndex((item) => item.id === layer.id);
+    if (index < 0) return false;
+    layers[index] = quickEditNormalizeFrameImageLayer(Object.assign({}, layers[index], {
+      coordinateSpace,
+      anchor,
+      x,
+      y,
+    }), index);
+    state.quickEdit.frameImageLayers = layers;
+    return true;
+  }
+
+  function quickEditReanchorFrameImageLayer(layerId, framePreview, aspectRatio) {
+    const layer = quickEditFrameImageLayerById(layerId);
+    if (!layer || !framePreview || !(aspectRatio > 0)) return layer;
+    const placement = quickEditFrameImagePreviewPlacement(layer, framePreview, aspectRatio);
+    const anchor = quickEditGeometryApi().closestImageLayerAnchor(
+      placement.x,
+      placement.y,
+      placement.metrics.contentWidth,
+      placement.metrics.contentHeight,
+    );
+    const offsets = quickEditGeometryApi().imageLayerOffsetsForPoint({
+      x: placement.x,
+      y: placement.y,
+      contentWidth: placement.metrics.contentWidth,
+      contentHeight: placement.metrics.contentHeight,
+      anchor,
+    });
+    quickEditWriteFrameImageCanonicalOffset(layer.id, offsets);
+    return quickEditFrameImageLayerById(layer.id) || layer;
+  }
+
+  function renderQuickEditFramePreviewImages(framePreview, frameConfig) {
+    if (!framePreview) return;
+    let wrap = framePreview.querySelector('[data-quick-edit-frame-preview-image-list]');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'quick-edit-frame-preview-image-list';
+      wrap.setAttribute('data-quick-edit-frame-preview-image-list', '');
+      framePreview.appendChild(wrap);
+    }
+    wrap.innerHTML = '';
+    const layers = frameConfig ? (frameConfig.imageLayers || []).filter((layer) => layer.enabled && layer.assetId) : [];
+    layers.forEach((configuredLayer) => {
+      const aspectRatio = quickEditCachedFrameAssetAspectRatio(configuredLayer.assetId);
+      if (!(aspectRatio > 0)) {
+        quickEditEnsureFrameAssetMetrics(configuredLayer.assetId)
+          .then(() => syncQuickEditFramePreview())
+          .catch((err) => console.warn('[PicScannerFrameGeometry] frame asset metrics failed', { assetId: configuredLayer.assetId, error: String((err && err.message) || err || '') }));
+        return;
+      }
+      const layer = quickEditFrameImageLayerById(configuredLayer.id) || configuredLayer;
+      const node = document.createElement('button');
+      const url = quickEditEnsureFrameAssetUrl(layer.assetId);
+      const placement = quickEditFrameImagePreviewPlacement(layer, framePreview, aspectRatio);
+      quickEditWriteFrameImageCanonicalOffset(layer.id, placement);
+      node.type = 'button';
+      node.className = 'quick-edit-frame-preview-image' + (url ? '' : ' loading');
+      node.dataset.quickEditFrameImagePreview = layer.id;
+      node.title = layer.name || '图片标识';
+      node.style.left = placement.x.toFixed(2) + 'px';
+      node.style.top = placement.y.toFixed(2) + 'px';
+      node.style.width = placement.width.toFixed(2) + 'px';
+      node.style.height = placement.height.toFixed(2) + 'px';
+      node.style.marginLeft = '0';
+      node.style.marginTop = '0';
+      node.style.opacity = String(quickEditNormalizeFrameImageOpacity(layer.opacity) / 100);
+      node.style.transform = 'translate(-50%, -50%) rotate(' + placement.rotationDegrees.toFixed(1) + 'deg)';
+      if (url) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.draggable = false;
+        img.src = url;
+        node.appendChild(img);
+      } else {
+        node.textContent = '读取中';
+      }
+      wrap.appendChild(node);
+    });
+  }
+
+  function startQuickEditFrameImageDrag(ev, layerId) {
+    if (!ev || ev.button !== 0) return false;
+    if (state.quickEdit.hslPickerActive) return false;
+    const el = state.quickEdit.el;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    let layer = quickEditFrameImageLayerById(layerId);
+    if (!layer || !framePreview) return false;
+    const aspectRatio = quickEditCachedFrameAssetAspectRatio(layer.assetId);
+    if (!(aspectRatio > 0)) return false;
+    quickEditWriteFrameImageCanonicalOffset(layer.id, quickEditFrameImagePreviewPlacement(layer, framePreview, aspectRatio));
+    layer = quickEditFrameImageLayerById(layer.id);
+    const screenRect = framePreview.getBoundingClientRect();
+    const basisX = Math.max(1, Number(screenRect.width || 0));
+    const basisY = Math.max(1, Number(screenRect.height || 0));
+    const coordinateBasis = Math.min(basisX, basisY);
+    state.quickEdit.frameImageDrag = {
+      layerId: layer.id,
+      lastClientX: ev.clientX,
+      lastClientY: ev.clientY,
+      basisX,
+      basisY,
+      coordinateBasis,
+      boundaryClampCount: 0,
+    };
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.addEventListener('pointermove', onQuickEditFrameImageDragMove, { passive: false });
+    window.addEventListener('pointerup', endQuickEditFrameImageDrag, { passive: false });
+    window.addEventListener('pointercancel', endQuickEditFrameImageDrag, { passive: false });
+    return true;
+  }
+
+  function onQuickEditFrameImageDragMove(ev) {
+    const drag = state.quickEdit.frameImageDrag;
+    if (!drag) return;
+    ev.preventDefault();
+    const layer = quickEditFrameImageLayerById(drag.layerId);
+    const el = state.quickEdit.el;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    const aspectRatio = layer ? quickEditCachedFrameAssetAspectRatio(layer.assetId) : 0;
+    if (!layer || !framePreview || !(aspectRatio > 0)) return;
+    const localX = Number(ev.clientX || 0) - Number(drag.lastClientX || 0);
+    const localY = Number(ev.clientY || 0) - Number(drag.lastClientY || 0);
+    const coordinateBasis = Math.max(1, Number(drag.coordinateBasis || 1));
+    const desired = Object.assign({}, layer, {
+      x: Number(layer.x || 0) + quickEditGeometryApi().screenDeltaToPercent(localX, coordinateBasis),
+      y: Number(layer.y || 0) + quickEditGeometryApi().screenDeltaToPercent(localY, coordinateBasis),
+    });
+    const placement = quickEditFrameImagePreviewPlacement(desired, framePreview, aspectRatio);
+    if (Math.abs(placement.offsetXPercent - desired.x) >= 0.0005 || Math.abs(placement.offsetYPercent - desired.y) >= 0.0005) {
+      drag.boundaryClampCount += 1;
+    }
+    updateQuickEditFrameImageLayer(drag.layerId, {
+      x: placement.offsetXPercent,
+      y: placement.offsetYPercent,
+    }, { skipRender: true });
+    drag.lastClientX = ev.clientX;
+    drag.lastClientY = ev.clientY;
+  }
+
+  function endQuickEditFrameImageDrag(ev) {
+    if (ev) ev.preventDefault();
+    const drag = state.quickEdit.frameImageDrag;
+    if (!drag) return;
+    state.quickEdit.frameImageDrag = null;
+    window.removeEventListener('pointermove', onQuickEditFrameImageDragMove);
+    window.removeEventListener('pointerup', endQuickEditFrameImageDrag);
+    window.removeEventListener('pointercancel', endQuickEditFrameImageDrag);
+    const el = state.quickEdit.el;
+    const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
+    const current = quickEditFrameImageLayerById(drag.layerId);
+    const aspectRatio = current ? quickEditCachedFrameAssetAspectRatio(current.assetId) : 0;
+    const layer = quickEditReanchorFrameImageLayer(drag.layerId, framePreview, aspectRatio);
+    renderQuickEditFrameImageLayers();
+    syncQuickEditFramePreview();
+    syncQuickEditSaveConfirm();
+    console.info('[PicScannerFrameGeometry] image layer positioned', {
+      layerId: drag.layerId,
+      anchor: layer ? layer.anchor : '',
+      offsetX: layer ? layer.x : null,
+      offsetY: layer ? layer.y : null,
+      basis: { width: drag.basisX, height: drag.basisY },
+      coordinateBasis: drag.coordinateBasis,
+      boundaryClampCount: drag.boundaryClampCount,
+    });
+  }
+
+  function onQuickEditFrameImageWheel(ev) {
+    if (!state.quickEdit.open || !ev) return;
+    const target = ev.target && ev.target.closest
+      ? ev.target.closest('[data-quick-edit-frame-image-preview]')
+      : null;
+    if (!target) return;
+    const layer = quickEditFrameImageLayerById(target.dataset.quickEditFrameImagePreview);
+    if (!layer) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const delta = Number(ev.deltaY || 0);
+    if (!delta) return;
+    const factor = delta < 0 ? LIGHTBOX_ZOOM_STEP : 1 / LIGHTBOX_ZOOM_STEP;
+    const size = quickEditNormalizeFrameImageSize(Number(layer.size || 18) * factor);
+    if (Math.abs(size - layer.size) < 0.0005) return;
+    updateQuickEditFrameImageLayer(layer.id, { size }, { skipRender: true });
+    renderQuickEditFrameImageLayers();
+  }
+
+  function syncQuickEditFrameUi() {
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const preset = quickEditFramePresetKey(state.quickEdit.framePreset);
+    state.quickEdit.framePreset = preset;
+    el.querySelectorAll('[data-quick-edit-frame-preset]').forEach((btn) => {
+      const active = quickEditFramePresetKey(btn.dataset.quickEditFramePreset) === preset;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const insets = quickEditNormalizeFrameInsets(state.quickEdit.frameInsets || quickEditFrameDefaultInsets(preset));
+    state.quickEdit.frameInsets = insets;
+    el.querySelectorAll('[data-quick-edit-frame-inset]').forEach((input) => {
+      const key = String(input.dataset.quickEditFrameInset || '');
+      if (Object.prototype.hasOwnProperty.call(insets, key) && String(input.value) !== String(insets[key])) {
+        input.value = String(insets[key]);
+      }
+      input.disabled = preset === 'none';
+    });
+    const textAdd = el.querySelector('[data-quick-edit-frame-text-add]');
+    if (textAdd) textAdd.disabled = false;
+    const imageAdd = el.querySelector('[data-quick-edit-frame-image-add]');
+    if (imageAdd) imageAdd.disabled = false;
+    renderQuickEditFrameTextLayers();
+    renderQuickEditFrameImageLayers();
+    syncQuickEditFramePresetUi();
+    syncQuickEditFramePreview();
+  }
+
+  function setQuickEditFramePreset(preset) {
+    const next = quickEditFramePresetKey(preset);
+    state.quickEdit.framePreset = next;
+    if (next !== 'none') state.quickEdit.frameInsets = quickEditFrameDefaultInsets(next);
+    refreshQuickEditImageDisplayBasis();
+    syncQuickEditFrameUi();
+    syncQuickEditSaveConfirm();
+  }
+
+  function quickEditFrameTextPositionLabel(position) {
+    if (position === 'top-center') return '上中';
+    if (position === 'bottom-left') return '左下';
+    if (position === 'bottom-right') return '右下';
+    return '下中';
+  }
+
+  function quickEditNormalizeHexColor(value) {
+    const raw = String(value || '').trim();
+    const body = raw.startsWith('#') ? raw.slice(1) : raw;
+    return /^[0-9a-f]{6}$/i.test(body) ? '#' + body.toLowerCase() : '';
+  }
+
+  function quickEditHslToHex(hue, saturation, lightness) {
+    const h = (((Number(hue || 0) % 360) + 360) % 360) / 360;
+    const s = clamp(Number(saturation || 0), 0, 100) / 100;
+    const l = clamp(Number(lightness || 0), 0, 100) / 100;
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const channel = (offset) => {
+      let t = h + offset;
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      let value = p;
+      if (t < 1 / 6) value = p + (q - p) * 6 * t;
+      else if (t < 1 / 2) value = q;
+      else if (t < 2 / 3) value = p + (q - p) * (2 / 3 - t) * 6;
+      return Math.round(clamp(value, 0, 1) * 255).toString(16).padStart(2, '0');
+    };
+    return '#' + channel(1 / 3) + channel(0) + channel(-1 / 3);
+  }
+
+  function quickEditFrameTextColorChoices() {
+    const colors = QUICK_EDIT_FRAME_TEXT_COLORS.map((item) => item.color);
+    [0, 28, 45, 130, 188, 215, 265, 330].forEach((hue) => {
+      colors.push(quickEditHslToHex(hue, 82, 56));
+      colors.push(quickEditHslToHex(hue, 64, 38));
+    });
+    colors.push('#111111', '#444444', '#888888', '#cccccc', '#ffffff');
+    return colors;
+  }
+
+  function quickEditFrameTextColorControl(layer) {
+    const layerId = escapeHtml(layer.id);
+    const color = quickEditNormalizeHexColor(layer.color) || quickEditDefaultFrameTextColor();
+    return '<div class="quick-edit-frame-text-color-row">'
+      + '<input type="text" maxlength="7" autocomplete="off" spellcheck="false" value="' + escapeHtml(color) + '" data-quick-edit-frame-text-color-input="' + layerId + '" />'
+      + '<button type="button" class="quick-edit-frame-text-color-trigger" style="--quick-edit-frame-text-color:' + color + '" data-quick-edit-frame-text-color-trigger="' + layerId + '" title="选择颜色" aria-label="选择颜色"><span></span></button>'
+      + '</div>';
+  }
+
+  function quickEditFrameTextLayerById(id) {
+    const layerId = String(id || '');
+    return quickEditFrameTextLayers().find((layer) => layer.id === layerId) || null;
+  }
+
+  function positionQuickEditFloatPanel(panel, anchor, width) {
+    if (!panel || !anchor) return;
+    panel.classList.remove('hidden');
+    const rect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const pad = 10;
+    const panelWidth = width || panelRect.width || 292;
+    const left = Math.max(pad, Math.min(rect.left, window.innerWidth - panelWidth - pad));
+    const top = Math.max(pad + 36, Math.min(rect.bottom + 8, window.innerHeight - (panelRect.height || 220) - pad));
+    panel.style.left = left + 'px';
+    panel.style.top = top + 'px';
+  }
+
+  function syncQuickEditFrameTextColorControl(layerId, color) {
+    const clean = quickEditNormalizeHexColor(color);
+    if (!clean || !state.quickEdit.el) return;
+    const input = Array.from(state.quickEdit.el.querySelectorAll('[data-quick-edit-frame-text-color-input]'))
+      .find((node) => node.dataset.quickEditFrameTextColorInput === layerId);
+    const trigger = Array.from(state.quickEdit.el.querySelectorAll('[data-quick-edit-frame-text-color-trigger]'))
+      .find((node) => node.dataset.quickEditFrameTextColorTrigger === layerId);
+    if (input && input.value !== clean) input.value = clean;
+    if (trigger) trigger.style.setProperty('--quick-edit-frame-text-color', clean);
+  }
+
+  function ensureQuickEditFrameTextColorPanel() {
+    if (quickEditFrameTextColorPanel && quickEditFrameTextColorPanel.isConnected) return quickEditFrameTextColorPanel;
+    const panel = document.createElement('div');
+    panel.className = 'quick-edit-curve-panel quick-edit-frame-text-pop quick-edit-frame-text-color-pop hidden';
+    document.body.appendChild(panel);
+    quickEditFrameTextColorPanel = panel;
+    return panel;
+  }
+
+  function hideQuickEditFrameTextColorPanel() {
+    if (quickEditFrameTextColorPanel) quickEditFrameTextColorPanel.classList.add('hidden');
+  }
+
+  function openQuickEditFrameTextColorPanel(layerId, anchor) {
+    const layer = quickEditFrameTextLayerById(layerId);
+    if (!layer || !anchor) return;
+    const color = quickEditNormalizeHexColor(layer.color) || quickEditDefaultFrameTextColor();
+    const panel = ensureQuickEditFrameTextColorPanel();
+    const choices = quickEditFrameTextColorChoices();
+    panel.dataset.layerId = layer.id;
+    panel.innerHTML = '<div class="quick-edit-curve-head">'
+      + '<span>文字颜色</span>'
+      + '<div class="quick-edit-curve-head-actions"><button class="icon-btn quick-edit-curve-close" type="button" data-quick-edit-frame-text-color-close title="关闭" aria-label="关闭">' + quickEditIconSvg('close') + '</button></div>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-color-current">'
+      + '<input type="text" readonly value="' + escapeHtml(color) + '" />'
+      + '<span style="--quick-edit-frame-text-color:' + color + '"></span>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-color-grid">'
+      + choices.map((item) => '<button type="button" style="--quick-edit-frame-text-color:' + item + '" data-quick-edit-frame-text-color-choice="' + escapeHtml(item) + '" aria-label="选择颜色"><span></span></button>').join('')
+      + '</div>';
+    positionQuickEditFloatPanel(panel, anchor, 292);
+  }
+
+  function ensureQuickEditFrameTextTokenPanel() {
+    if (quickEditFrameTextTokenPanel && quickEditFrameTextTokenPanel.isConnected) return quickEditFrameTextTokenPanel;
+    const panel = document.createElement('div');
+    panel.className = 'quick-edit-curve-panel quick-edit-frame-text-pop quick-edit-frame-text-token-pop hidden';
+    document.body.appendChild(panel);
+    quickEditFrameTextTokenPanel = panel;
+    return panel;
+  }
+
+  function hideQuickEditFrameTextTokenPanel() {
+    if (quickEditFrameTextTokenPanel) quickEditFrameTextTokenPanel.classList.add('hidden');
+  }
+
+  function hideQuickEditFrameTextPanels() {
+    hideQuickEditFrameTextColorPanel();
+    hideQuickEditFrameTextTokenPanel();
+  }
+
+  function openQuickEditFrameTextTokenPanel(anchor) {
+    if (!anchor) return;
+    const panel = ensureQuickEditFrameTextTokenPanel();
+    panel.innerHTML = '<div class="quick-edit-curve-head">'
+      + '<span>参数注入</span>'
+      + '<div class="quick-edit-curve-head-actions"><button class="icon-btn quick-edit-curve-close" type="button" data-quick-edit-frame-text-token-close title="关闭" aria-label="关闭">' + quickEditIconSvg('close') + '</button></div>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-token-list">'
+      + QUICK_EDIT_FRAME_TEXT_TOKENS.map((item) => '<div class="quick-edit-frame-text-token-row">'
+        + '<span>' + escapeHtml(item.label) + '</span>'
+        + '<input type="text" readonly value="' + escapeHtml(item.token) + '" data-quick-edit-frame-text-token-value />'
+        + '<button class="icon-btn" type="button" data-quick-edit-frame-text-token-copy="' + escapeHtml(item.token) + '" title="复制" aria-label="复制">' + quickEditIconSvg('copy') + '</button>'
+        + '</div>').join('')
+      + '</div>';
+    positionQuickEditFloatPanel(panel, anchor, 334);
+  }
+
+  function copyQuickEditFrameTextToken(token) {
+    const textValue = String(token || '').trim();
+    if (!textValue) return;
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      showToast('当前环境不能直接写入剪贴板，请选中后复制', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(textValue)
+      .then(() => showToast('已复制 ' + textValue))
+      .catch((err) => {
+        console.warn('[PicScanner] 参数复制失败', err);
+        showToast('复制失败，请选中后复制', 'error');
+      });
+  }
+
+  function quickEditFramePresetName(preset) {
+    const key = quickEditFramePresetKey(preset);
+    if (key === 'white') return '白边';
+    if (key === 'black') return '黑边';
+    if (key === 'paper') return '相纸';
+    return '无相框';
+  }
+
+  function renderQuickEditFrameTextLayers() {
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const list = el.querySelector('[data-quick-edit-frame-text-list]');
+    if (!list) return;
+    const layers = quickEditFrameTextLayers();
+    if (!layers.length) {
+      list.innerHTML = '<div class="quick-edit-frame-text-empty">暂无文字层</div>';
+      return;
+    }
+    list.innerHTML = layers.map((layer, index) => {
+      const layerId = escapeHtml(layer.id);
+      return '<div class="quick-edit-frame-text-layer" data-quick-edit-frame-text-layer="' + layerId + '">'
+      + '<div class="quick-edit-frame-text-layer-head">'
+      + '<input type="text" maxlength="120" autocomplete="off" value="' + escapeHtml(layer.text) + '" data-quick-edit-frame-text-template="' + layerId + '" />'
+      + '<button class="icon-btn quick-edit-frame-text-remove-btn" type="button" data-quick-edit-frame-text-remove="' + layerId + '" title="删除文字层" aria-label="删除文字层">' + quickEditIconSvg('trash') + '</button>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-controls">'
+      + '<div class="quick-edit-frame-text-positions">'
+      + ['top-center', 'bottom-left', 'bottom-center', 'bottom-right'].map((position) => (
+        '<button type="button" class="' + (layer.position === position ? 'active' : '') + '" data-quick-edit-frame-text-position-layer="' + layerId + '" data-quick-edit-frame-text-position="' + position + '">' + quickEditFrameTextPositionLabel(position) + '</button>'
+      )).join('')
+      + '</div>'
+      + '<div class="quick-edit-frame-text-offsets">'
+      + '<label><span>X</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.x + '" data-quick-edit-frame-text-x="' + layerId + '" /></label>'
+      + '<label><span>Y</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.y + '" data-quick-edit-frame-text-y="' + layerId + '" /></label>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-font-row">'
+      + '<label><span>FontFamily</span><input type="text" maxlength="80" autocomplete="off" value="' + escapeHtml(layer.fontFamily) + '" data-quick-edit-frame-text-family="' + layerId + '" /></label>'
+      + '<label><span>字号</span><input type="text" inputmode="numeric" pattern="[0-9]*" value="' + layer.size + '" data-quick-edit-frame-text-size="' + layerId + '" /></label>'
+      + '<label><span>粗细程度</span><input type="text" inputmode="numeric" pattern="[0-9]*" value="' + layer.weight + '" data-quick-edit-frame-text-weight="' + layerId + '" /></label>'
+      + '</div>'
+      + '<div class="quick-edit-frame-text-color"><span>颜色</span>' + quickEditFrameTextColorControl(layer) + '</div>'
+      + '</div>'
+      + '</div>';
+    }).join('');
+  }
+
+  function renderQuickEditFrameImageLayers() {
+    const el = state.quickEdit.el;
+    if (!el) return;
+    const list = el.querySelector('[data-quick-edit-frame-image-list]');
+    if (!list) return;
+    const layers = quickEditFrameImageLayers();
+    if (!layers.length) {
+      list.innerHTML = '<div class="quick-edit-frame-text-empty">暂无图片标识</div>';
+      return;
+    }
+    list.innerHTML = layers.map((layer) => {
+      const layerId = escapeHtml(layer.id);
+      const assetUrl = quickEditCachedFrameAssetUrl(layer.assetId);
+      return '<div class="quick-edit-frame-text-layer quick-edit-frame-image-layer" data-quick-edit-frame-image-layer="' + layerId + '">'
+        + '<div class="quick-edit-frame-text-layer-head">'
+        + '<span title="' + escapeHtml(layer.name) + '">' + escapeHtml(layer.name) + '</span>'
+        + '<button class="icon-btn quick-edit-frame-text-remove-btn" type="button" data-quick-edit-frame-image-remove="' + layerId + '" title="删除图片标识" aria-label="删除图片标识">' + quickEditIconSvg('trash') + '</button>'
+        + '</div>'
+        + '<div class="quick-edit-frame-image-row">'
+        + '<div class="quick-edit-frame-image-thumb">' + (assetUrl ? '<img alt="" src="' + escapeHtml(assetUrl) + '" />' : '<span>读取中</span>') + '</div>'
+        + '<div class="quick-edit-frame-text-controls">'
+        + '<div class="quick-edit-frame-text-offsets">'
+        + '<label><span>X</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.x + '" data-quick-edit-frame-image-x="' + layerId + '" /></label>'
+        + '<label><span>Y</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.y + '" data-quick-edit-frame-image-y="' + layerId + '" /></label>'
+        + '</div>'
+        + '<div class="quick-edit-frame-image-controls">'
+        + '<label><span>大小</span><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="' + layer.size + '" data-quick-edit-frame-image-size="' + layerId + '" /></label>'
+        + '<label><span>透明</span><input type="text" inputmode="numeric" pattern="[0-9]*" value="' + layer.opacity + '" data-quick-edit-frame-image-opacity="' + layerId + '" /></label>'
+        + '<label><span>旋转</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.rotation + '" data-quick-edit-frame-image-rotation="' + layerId + '" /></label>'
+        + '</div>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function quickEditFrameTextNumericInputMeta(target) {
+    const dataset = target && target.dataset ? target.dataset : {};
+    if (dataset.quickEditFrameTextSize) {
+      return { id: dataset.quickEditFrameTextSize, key: 'size', min: 8, max: 72, step: 1, shiftStep: 5, signed: false };
+    }
+    if (dataset.quickEditFrameTextWeight) {
+      return { id: dataset.quickEditFrameTextWeight, key: 'weight', min: 100, max: 900, step: 20, shiftStep: 100, signed: false };
+    }
+    if (dataset.quickEditFrameTextX) {
+      return { id: dataset.quickEditFrameTextX, key: 'x', min: -100, max: 100, step: 0.2, shiftStep: 1, signed: true, precision: 1 };
+    }
+    if (dataset.quickEditFrameTextY) {
+      return { id: dataset.quickEditFrameTextY, key: 'y', min: -100, max: 100, step: 0.2, shiftStep: 1, signed: true, precision: 1 };
+    }
+    return null;
+  }
+
+  function quickEditFrameImageNumericInputMeta(target) {
+    const dataset = target && target.dataset ? target.dataset : {};
+    if (dataset.quickEditFrameImageSize) {
+      return { id: dataset.quickEditFrameImageSize, key: 'size', min: 2, max: 90, step: 0.5, shiftStep: 5, signed: false, precision: 1 };
+    }
+    if (dataset.quickEditFrameImageOpacity) {
+      return { id: dataset.quickEditFrameImageOpacity, key: 'opacity', min: 0, max: 100, step: 1, shiftStep: 10, signed: false };
+    }
+    if (dataset.quickEditFrameImageRotation) {
+      return { id: dataset.quickEditFrameImageRotation, key: 'rotation', min: -180, max: 180, step: 1, shiftStep: 10, signed: true, precision: 1 };
+    }
+    if (dataset.quickEditFrameImageX) {
+      return { id: dataset.quickEditFrameImageX, key: 'x', min: -160, max: 160, step: 0.2, shiftStep: 1, signed: true, precision: 1 };
+    }
+    if (dataset.quickEditFrameImageY) {
+      return { id: dataset.quickEditFrameImageY, key: 'y', min: -160, max: 160, step: 0.2, shiftStep: 1, signed: true, precision: 1 };
+    }
+    return null;
+  }
+
+  function quickEditSanitizeFrameTextNumber(value, meta) {
+    const raw = String(value || '').trim().replace(',', '.');
+    const negative = !!meta.signed && raw.startsWith('-');
+    const precision = Math.max(0, Number(meta.precision || 0));
+    if (!precision) {
+      const digits = raw.replace(/[^\d]/g, '').slice(0, 3);
+      return (negative ? '-' : '') + digits;
+    }
+    const body = raw.replace(/[^\d.]/g, '');
+    const dotIndex = body.indexOf('.');
+    const hasDot = dotIndex >= 0;
+    const whole = (hasDot ? body.slice(0, dotIndex) : body).replace(/[^\d]/g, '').slice(0, 3);
+    const fraction = hasDot ? body.slice(dotIndex + 1).replace(/[^\d]/g, '').slice(0, precision) : '';
+    return (negative ? '-' : '') + whole + (hasDot ? '.' + fraction : '');
+  }
+
+  function quickEditFormatFrameTextNumber(value, meta) {
+    const precision = Math.max(0, Number(meta.precision || 0));
+    const rounded = precision ? Math.round(Number(value || 0) * Math.pow(10, precision)) / Math.pow(10, precision) : Math.round(Number(value || 0));
+    return precision ? String(Number(rounded.toFixed(precision))) : String(rounded);
+  }
+
+  function quickEditFrameTextInputNumberValue(target, meta, emptyValue) {
+    const clean = quickEditSanitizeFrameTextNumber(target.value, meta);
+    if (target.value !== clean) target.value = clean;
+    if (clean === '' || clean === '-' || clean === '.' || clean === '-.') return emptyValue;
+    const precision = Math.max(0, Number(meta.precision || 0));
+    const value = clamp(Number(clean || 0), meta.min, meta.max);
+    return precision ? Math.round(value * Math.pow(10, precision)) / Math.pow(10, precision) : Math.round(value);
+  }
+
+  function commitQuickEditFrameTextNumericInput(target, options) {
+    const meta = quickEditFrameTextNumericInputMeta(target);
+    if (!meta) return false;
+    const opts = options || {};
+    const emptyValue = opts.emptyValue !== undefined ? opts.emptyValue : (meta.signed ? 0 : meta.min);
+    const value = quickEditFrameTextInputNumberValue(target, meta, emptyValue);
+    if (value === undefined || value === null || !Number.isFinite(Number(value))) return true;
+    if (opts.normalizeInput) {
+      const displayValue = quickEditFormatFrameTextNumber(value, meta);
+      if (String(target.value) !== displayValue) target.value = displayValue;
+    }
+    updateQuickEditFrameTextLayer(meta.id, { [meta.key]: value }, { skipRender: true });
+    return true;
+  }
+
+  function stepQuickEditFrameTextNumericInput(target, direction, shiftKey) {
+    const meta = quickEditFrameTextNumericInputMeta(target);
+    if (!meta) return false;
+    const current = quickEditFrameTextInputNumberValue(target, meta, 0);
+    const step = shiftKey ? meta.shiftStep : meta.step;
+    const value = clamp(Number(current || 0) + direction * step, meta.min, meta.max);
+    target.value = quickEditFormatFrameTextNumber(value, meta);
+    updateQuickEditFrameTextLayer(meta.id, { [meta.key]: value }, { skipRender: true });
+    return true;
+  }
+
+  function commitQuickEditFrameImageNumericInput(target, options) {
+    const meta = quickEditFrameImageNumericInputMeta(target);
+    if (!meta) return false;
+    const opts = options || {};
+    const emptyValue = opts.emptyValue !== undefined ? opts.emptyValue : (meta.signed ? 0 : meta.min);
+    const value = quickEditFrameTextInputNumberValue(target, meta, emptyValue);
+    if (value === undefined || value === null || !Number.isFinite(Number(value))) return true;
+    if (opts.normalizeInput) {
+      const displayValue = quickEditFormatFrameTextNumber(value, meta);
+      if (String(target.value) !== displayValue) target.value = displayValue;
+    }
+    updateQuickEditFrameImageLayer(meta.id, { [meta.key]: value }, { skipRender: true });
+    return true;
+  }
+
+  function stepQuickEditFrameImageNumericInput(target, direction, shiftKey) {
+    const meta = quickEditFrameImageNumericInputMeta(target);
+    if (!meta) return false;
+    const current = quickEditFrameTextInputNumberValue(target, meta, 0);
+    const step = shiftKey ? meta.shiftStep : meta.step;
+    const value = clamp(Number(current || 0) + direction * step, meta.min, meta.max);
+    target.value = quickEditFormatFrameTextNumber(value, meta);
+    updateQuickEditFrameImageLayer(meta.id, { [meta.key]: value }, { skipRender: true });
+    return true;
+  }
+
+  function updateQuickEditFrameTextLayer(id, patch, options) {
+    const opts = options || {};
+    const layers = quickEditFrameTextLayers();
+    const index = layers.findIndex((layer) => layer.id === id);
+    if (index < 0) return;
+    layers[index] = quickEditNormalizeFrameTextLayer(Object.assign({}, layers[index], patch || {}), index);
+    state.quickEdit.frameTextLayers = layers;
+    if (!opts.skipRender) renderQuickEditFrameTextLayers();
+    syncQuickEditFramePreview();
+    syncQuickEditFramePresetUi();
+    syncQuickEditSaveConfirm();
+  }
+
+  function updateQuickEditFrameImageLayer(id, patch, options) {
+    const opts = options || {};
+    const layers = quickEditFrameImageLayers();
+    const index = layers.findIndex((layer) => layer.id === id);
+    if (index < 0) return;
+    layers[index] = quickEditNormalizeFrameImageLayer(Object.assign({}, layers[index], patch || {}), index);
+    state.quickEdit.frameImageLayers = layers;
+    if (!opts.skipRender) renderQuickEditFrameImageLayers();
+    syncQuickEditFramePreview();
+    syncQuickEditFramePresetUi();
+    syncQuickEditSaveConfirm();
+  }
+
+  function quickEditFramePresetPayload() {
+    return {
+      preset: quickEditFramePresetKey(state.quickEdit.framePreset),
+      insets: quickEditNormalizeFrameInsets(state.quickEdit.frameInsets),
+      textLayers: quickEditFrameTextLayers().map((layer) => ({
+        id: layer.id,
+        text: layer.text,
+        position: layer.position,
+        coordinateSpace: layer.coordinateSpace,
+        x: layer.x,
+        y: layer.y,
+        fontFamily: layer.fontFamily,
+        size: layer.size,
+        weight: layer.weight,
+        color: layer.color,
+        enabled: layer.enabled !== false,
+      })),
+      imageLayers: quickEditFrameImageLayers().map((layer) => ({
+        id: layer.id,
+        assetId: layer.assetId,
+        name: layer.name,
+        mime: layer.mime,
+        coordinateSpace: layer.coordinateSpace,
+        anchor: layer.anchor,
+        x: layer.x,
+        y: layer.y,
+        size: layer.size,
+        rotation: layer.rotation,
+        opacity: layer.opacity,
+        enabled: layer.enabled !== false,
+      })),
+    };
+  }
+
+  function normalizeQuickEditFramePresetItem(item) {
+    const raw = item && typeof item === 'object' ? item : {};
+    const id = String(raw.id || '').trim();
+    const name = String(raw.name || '').trim();
+    const frame = raw.frame && typeof raw.frame === 'object' ? raw.frame : raw;
+    const preset = quickEditFramePresetKey(frame.preset || frame.framePreset || frame.key);
+    const textLayers = Array.isArray(frame.textLayers)
+      ? frame.textLayers.map((layer, index) => quickEditNormalizeFrameTextLayer(layer, index))
+      : [];
+    const imageLayers = Array.isArray(frame.imageLayers)
+      ? frame.imageLayers.map((layer, index) => quickEditNormalizeFrameImageLayer(layer, index)).filter((layer) => layer.assetId)
+      : [];
+    const hasText = textLayers.some((layer) => layer.enabled && String(layer.text || '').trim());
+    const hasImage = imageLayers.some((layer) => layer.enabled && layer.assetId);
+    if (!id || !name || (preset === 'none' && !hasText && !hasImage)) return null;
+    return {
+      id,
+      name,
+      frame: {
+        preset,
+        insets: quickEditNormalizeFrameInsets(frame.insets),
+        textLayers,
+        imageLayers,
+      },
+      favorite: raw.favorite === true,
+      order: Number(raw.order || 0),
+      createdAt: Math.max(0, Number(raw.created_at || 0)),
+      updatedAt: Math.max(0, Number(raw.updated_at || 0)),
+    };
+  }
+
+  function quickEditFramePresetById(presetId) {
+    const id = String(presetId || '').trim();
+    return (state.quickEdit.framePresets || []).find((preset) => preset.id === id) || null;
+  }
+
+  function quickEditFramePresetStatusText() {
+    if (state.quickEdit.framePresetsLoading) return '正在读取相框预设';
+    if (state.quickEdit.framePresetsMessage) return state.quickEdit.framePresetsMessage;
+    const count = (state.quickEdit.framePresets || []).length;
+    return count ? '已有 ' + count + ' 个相框预设' : '还没有相框预设';
+  }
+
+  function quickEditFramePresetDetail(preset) {
+    return [
+      quickEditFramePresetName(preset && preset.frame && preset.frame.preset),
+      preset && preset.frame && preset.frame.textLayers && preset.frame.textLayers.length ? preset.frame.textLayers.length + ' 个文字层' : '',
+      preset && preset.frame && preset.frame.imageLayers && preset.frame.imageLayers.length ? preset.frame.imageLayers.length + ' 张图片标识' : '',
+      preset && preset.updatedAt ? new Date(preset.updatedAt * 1000).toLocaleString() : '',
+    ].filter(Boolean).join(' · ') || '相框参数';
+  }
+
+  function syncQuickEditFramePresetUi() {
+    const el = state.quickEdit.el;
+    if (el) syncQuickEditFramePresetSide(el);
+    syncQuickEditFramePresetModal();
+  }
+
+  function syncQuickEditFramePresetSide(el) {
+    if (!el) return;
+    const status = el.querySelector('[data-quick-edit-frame-preset-status]');
+    const list = el.querySelector('[data-quick-edit-frame-preset-list]');
+    const save = el.querySelector('[data-quick-edit-frame-preset-save]');
+    const manage = el.querySelector('[data-quick-edit-frame-preset-manage]');
+    const hasFramePreset = quickEditFramePresetKey(state.quickEdit.framePreset) !== 'none';
+    const hasText = quickEditFrameTextLayers().some((layer) => layer.enabled && String(layer.text || '').trim());
+    const hasImage = quickEditFrameImageLayers().some((layer) => layer.enabled && layer.assetId);
+    const canSave = hasFramePreset || hasText || hasImage;
+    if (status) status.textContent = quickEditFramePresetStatusText();
+    if (save) save.disabled = !canSave || state.quickEdit.framePresetsLoading;
+    if (manage) manage.disabled = state.quickEdit.framePresetsLoading && !(state.quickEdit.framePresets || []).length;
+    if (!list) return;
+    const presets = state.quickEdit.framePresets || [];
+    if (state.quickEdit.framePresetsLoading && !presets.length) {
+      list.innerHTML = '<div class="quick-edit-frame-preset-empty">正在读取相框预设</div>';
+      return;
+    }
+    if (!presets.length) {
+      list.innerHTML = '<div class="quick-edit-frame-preset-empty">保存当前相框后会显示在这里</div>';
+      return;
+    }
+    list.innerHTML = presets.slice(0, 8).map((preset) => (
+      '<button class="quick-edit-preset-pill quick-edit-frame-preset-pill" type="button" data-quick-edit-frame-preset-apply="' + escapeHtml(preset.id) + '" title="' + escapeHtml(quickEditFramePresetDetail(preset)) + '">' +
+      (preset.favorite ? '<b aria-hidden="true">★</b>' : '') +
+      '<span>' + escapeHtml(preset.name) + '</span>' +
+      '</button>'
+    )).join('');
+  }
+
+  function syncQuickEditFramePresetModal() {
+    const modal = state.quickEdit.framePresetModal;
+    if (!modal || !modal.isConnected) return;
+    const list = modal.querySelector('[data-quick-edit-frame-preset-modal-list]');
+    const count = modal.querySelector('[data-quick-edit-frame-preset-modal-count]');
+    const message = modal.querySelector('[data-quick-edit-frame-preset-modal-message]');
+    const presets = state.quickEdit.framePresets || [];
+    if (count) count.textContent = presets.length ? presets.length + ' 个相框预设' : '没有相框预设';
+    if (message) message.textContent = quickEditFramePresetStatusText();
+    modal.classList.toggle('loading', !!state.quickEdit.framePresetsLoading);
+    if (!list) return;
+    if (state.quickEdit.framePresetsLoading && !presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-modal-empty">正在读取相框预设</div>';
+      return;
+    }
+    if (!presets.length) {
+      list.innerHTML = '<div class="quick-edit-preset-modal-empty">还没有相框预设，先保存当前相框</div>';
+      return;
+    }
+    list.innerHTML = presets.map((preset) => {
+      const selected = state.quickEdit.framePresetSelectedId === preset.id;
+      const overwriting = state.quickEdit.framePresetOverwritingId === preset.id;
+      return '<div class="quick-edit-preset-modal-item quick-edit-frame-preset-modal-item' + (overwriting ? ' overwriting' : '') + (selected ? ' selected' : '') + '" data-quick-edit-frame-preset-modal-id="' + escapeHtml(preset.id) + '">'
+        + '<button class="icon-btn quick-edit-preset-apply-btn" type="button" data-quick-edit-frame-preset-modal-apply="' + escapeHtml(preset.id) + '" title="应用相框预设" aria-label="应用相框预设">' + quickEditIconSvg('check') + '</button>'
+        + '<span><b>' + escapeHtml(preset.name) + '</b><em>' + escapeHtml(quickEditFramePresetDetail(preset)) + '</em></span>'
+        + '<button class="icon-btn quick-edit-preset-overwrite-btn" type="button" data-quick-edit-frame-preset-modal-overwrite="' + escapeHtml(preset.id) + '" title="用当前相框覆盖此预设" aria-label="用当前相框覆盖此预设">' + quickEditIconSvg(overwriting ? 'refresh' : 'save') + '</button>'
+        + '<button class="icon-btn quick-edit-preset-favorite-btn' + (preset.favorite ? ' active' : '') + '" type="button" data-quick-edit-frame-preset-modal-favorite="' + escapeHtml(preset.id) + '" title="收藏置顶" aria-label="收藏置顶">★</button>'
+        + '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-frame-preset-modal-move="up" data-quick-edit-frame-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="上移" aria-label="上移">↑</button>'
+        + '<button class="icon-btn quick-edit-preset-move-btn" type="button" data-quick-edit-frame-preset-modal-move="down" data-quick-edit-frame-preset-modal-move-id="' + escapeHtml(preset.id) + '" title="下移" aria-label="下移">↓</button>'
+        + '<button class="icon-btn quick-edit-preset-rename-btn" type="button" data-quick-edit-frame-preset-modal-rename="' + escapeHtml(preset.id) + '" title="重命名" aria-label="重命名">名</button>'
+        + '<button class="icon-btn quick-edit-preset-delete-btn" type="button" data-quick-edit-frame-preset-modal-delete="' + escapeHtml(preset.id) + '" title="删除相框预设" aria-label="删除相框预设">' + quickEditIconSvg('trash') + '</button>'
+        + '</div>';
+    }).join('');
+  }
+
+  function setQuickEditFramePresetsFromResponse(res) {
+    state.quickEdit.framePresets = (Array.isArray(res && res.items) ? res.items : [])
+      .map(normalizeQuickEditFramePresetItem)
+      .filter(Boolean);
+    state.quickEdit.framePresetsLoaded = true;
+    state.quickEdit.framePresetsMessage = '';
+    if (state.quickEdit.framePresetSelectedId && !quickEditFramePresetById(state.quickEdit.framePresetSelectedId)) {
+      state.quickEdit.framePresetSelectedId = '';
+    }
+    if (state.quickEdit.framePresetHoverId && !quickEditFramePresetById(state.quickEdit.framePresetHoverId)) {
+      state.quickEdit.framePresetHoverId = '';
+    }
+    syncQuickEditFramePresetUi();
+  }
+
+  async function refreshQuickEditFramePresets(options) {
+    const opts = options || {};
+    if (state.quickEdit.framePresetsLoading) return;
+    state.quickEdit.framePresetsLoading = true;
+    state.quickEdit.framePresetsMessage = '正在读取相框预设';
+    syncQuickEditFramePresetUi();
+    try {
+      const res = await call('list_quick_edit_frame_presets');
+      if (!res || !res.success) {
+        const message = res && res.message ? res.message : '相框预设读取失败';
+        state.quickEdit.framePresetsMessage = message;
+        if (!opts.silent) showToast(message, 'error');
+        return;
+      }
+      setQuickEditFramePresetsFromResponse(res);
+    } catch (err) {
+      const message = String((err && err.message) || err || '相框预设读取失败');
+      state.quickEdit.framePresetsMessage = message;
+      if (!opts.silent) showToast(message, 'error');
+    } finally {
+      state.quickEdit.framePresetsLoading = false;
+      syncQuickEditFramePresetUi();
+    }
+  }
+
+  async function saveCurrentQuickEditFramePreset() {
+    if (!state.quickEdit.open) return;
+    const hasText = quickEditFrameTextLayers().some((layer) => layer.enabled && String(layer.text || '').trim());
+    const hasImage = quickEditFrameImageLayers().some((layer) => layer.enabled && layer.assetId);
+    if (quickEditFramePresetKey(state.quickEdit.framePreset) === 'none' && !hasText && !hasImage) {
+      showToast('请选择相框或添加文字后再保存预设', 'error');
+      return;
+    }
+    const name = await openTextInput({
+      title: '保存相框预设',
+      message: '保存当前相框宽度和文字层。',
+      placeholder: '例如：白边参数条',
+      value: '',
+    });
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return;
+    try {
+      const res = await call('save_quick_edit_frame_preset', cleanName, quickEditFramePresetPayload());
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设保存失败', 'error');
+        return;
+      }
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(res.message || '已保存相框预设');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设保存失败', err);
+      showToast(String((err && err.message) || '相框预设保存失败'), 'error');
+    }
+  }
+
+  function applyQuickEditFramePreset(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    state.quickEdit.framePreset = quickEditFramePresetKey(preset.frame.preset);
+    state.quickEdit.frameInsets = quickEditNormalizeFrameInsets(preset.frame.insets);
+    state.quickEdit.frameTextLayers = (preset.frame.textLayers || []).map((layer, index) => quickEditNormalizeFrameTextLayer(layer, index));
+    state.quickEdit.frameImageLayers = (preset.frame.imageLayers || []).map((layer, index) => quickEditNormalizeFrameImageLayer(layer, index));
+    quickEditFrameImageLayers().forEach((layer) => {
+      quickEditLoadFrameAssetUrl(layer.assetId, { silent: true })
+        .then(() => {
+          renderQuickEditFrameImageLayers();
+          syncQuickEditFramePreview();
+        })
+        .catch((err) => console.warn('[PicScanner] frame asset preload failed', err));
+    });
+    refreshQuickEditImageDisplayBasis();
+    syncQuickEditFrameUi();
+    syncQuickEditSaveConfirm();
+    showToast('已应用相框预设：' + preset.name);
+  }
+
+  async function renameQuickEditFramePreset(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    const name = await openTextInput({
+      title: '重命名相框预设',
+      message: '输入新的相框预设名称。',
+      placeholder: '相框预设名称',
+      value: preset.name,
+    });
+    const cleanName = String(name || '').trim();
+    if (!cleanName || cleanName === preset.name) return;
+    try {
+      const res = await call('rename_quick_edit_frame_preset', preset.id, cleanName);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设重命名失败', 'error');
+        return;
+      }
+      state.quickEdit.framePresetSelectedId = preset.id;
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(res.message || '已重命名相框预设');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设重命名失败', err);
+      showToast(String((err && err.message) || '相框预设重命名失败'), 'error');
+    }
+  }
+
+  async function toggleQuickEditFramePresetFavorite(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('set_quick_edit_frame_preset_favorite', preset.id, !preset.favorite);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设收藏失败', 'error');
+        return;
+      }
+      state.quickEdit.framePresetSelectedId = preset.id;
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(preset.favorite ? '已取消相框预设置顶' : '已收藏相框预设置顶');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设收藏失败', err);
+      showToast(String((err && err.message) || '相框预设收藏失败'), 'error');
+    }
+  }
+
+  async function moveQuickEditFramePreset(presetId, direction) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('move_quick_edit_frame_preset', preset.id, direction);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设排序失败', 'error');
+        return;
+      }
+      state.quickEdit.framePresetSelectedId = preset.id;
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(res.message || '已调整相框预设顺序');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设排序失败', err);
+      showToast(String((err && err.message) || '相框预设排序失败'), 'error');
+    }
+  }
+
+  function deleteQuickEditFramePreset(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    const modal = ensureQuickEditFramePresetDeleteConfirm();
+    const message = modal.querySelector('[data-quick-edit-frame-preset-delete-message]');
+    if (message) {
+      message.textContent = '确定删除“' + preset.name + '”？这个相框预设会从本机预设库移除。';
+    }
+    modal.dataset.quickEditFramePresetDeleteId = preset.id;
+    modal.classList.remove('hidden');
+    const confirm = modal.querySelector('[data-quick-edit-frame-preset-delete-confirm]');
+    if (confirm) requestAnimationFrame(() => confirm.focus({ preventScroll: true }));
+  }
+
+  async function deleteQuickEditFramePresetNow(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset) return;
+    try {
+      const res = await call('delete_quick_edit_frame_preset', preset.id);
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设删除失败', 'error');
+        return;
+      }
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(res.message || '已删除相框预设');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设删除失败', err);
+      showToast(String((err && err.message) || '相框预设删除失败'), 'error');
+    }
+  }
+
+  function ensureQuickEditFramePresetOverwriteConfirm() {
+    if (state.quickEdit.framePresetOverwriteConfirm && state.quickEdit.framePresetOverwriteConfirm.isConnected) {
+      return state.quickEdit.framePresetOverwriteConfirm;
+    }
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-apply-confirm hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '覆盖相框预设确认');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-exit-card">',
+      '<h2>覆盖相框预设？</h2>',
+      '<p data-quick-edit-frame-preset-overwrite-message>当前相框会写入这个预设。</p>',
+      '<div class="modal-actions">',
+      '<button class="ghost-btn" type="button" data-quick-edit-frame-preset-overwrite-cancel>取消</button>',
+      '<button class="primary-btn" type="button" data-quick-edit-frame-preset-overwrite-confirm>覆盖保存</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-frame-preset-overwrite-cancel]').addEventListener('click', () => hideQuickEditFramePresetOverwriteConfirm());
+    modal.querySelector('[data-quick-edit-frame-preset-overwrite-confirm]').addEventListener('click', () => {
+      const presetId = String(modal.dataset.quickEditFramePresetOverwriteId || '');
+      hideQuickEditFramePresetOverwriteConfirm();
+      overwriteQuickEditFramePresetNow(presetId);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.framePresetOverwriteConfirm = modal;
+    return modal;
+  }
+
+  function hideQuickEditFramePresetOverwriteConfirm() {
+    const modal = state.quickEdit.framePresetOverwriteConfirm;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.dataset.quickEditFramePresetOverwriteId = '';
+  }
+
+  function quickEditCanSaveFramePreset() {
+    const hasText = quickEditFrameTextLayers().some((layer) => layer.enabled && String(layer.text || '').trim());
+    const hasImage = quickEditFrameImageLayers().some((layer) => layer.enabled && layer.assetId);
+    return quickEditFramePresetKey(state.quickEdit.framePreset) !== 'none' || hasText || hasImage;
+  }
+
+  function overwriteQuickEditFramePreset(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset || state.quickEdit.framePresetOverwritingId) return;
+    if (!quickEditCanSaveFramePreset()) {
+      showToast('请选择相框或添加文字后再覆盖预设', 'error');
+      return;
+    }
+    const modal = ensureQuickEditFramePresetOverwriteConfirm();
+    const message = modal.querySelector('[data-quick-edit-frame-preset-overwrite-message]');
+    if (message) {
+      message.textContent = '将用当前相框宽度和文字层覆盖“' + preset.name + '”；名称、收藏和排序会保留。';
+    }
+    modal.dataset.quickEditFramePresetOverwriteId = preset.id;
+    modal.classList.remove('hidden');
+    const confirm = modal.querySelector('[data-quick-edit-frame-preset-overwrite-confirm]');
+    if (confirm) requestAnimationFrame(() => confirm.focus({ preventScroll: true }));
+  }
+
+  async function overwriteQuickEditFramePresetNow(presetId) {
+    const preset = quickEditFramePresetById(presetId);
+    if (!preset || state.quickEdit.framePresetOverwritingId) return;
+    if (!quickEditCanSaveFramePreset()) {
+      showToast('请选择相框或添加文字后再覆盖预设', 'error');
+      return;
+    }
+    state.quickEdit.framePresetOverwritingId = preset.id;
+    state.quickEdit.framePresetSelectedId = preset.id;
+    syncQuickEditFramePresetUi();
+    try {
+      const res = await call('update_quick_edit_frame_preset', preset.id, quickEditFramePresetPayload());
+      if (!res || !res.success) {
+        showToast(res && res.message ? res.message : '相框预设覆盖失败', 'error');
+        return;
+      }
+      state.quickEdit.framePresetSelectedId = preset.id;
+      setQuickEditFramePresetsFromResponse(res);
+      showToast(res.message || '已覆盖相框预设');
+    } catch (err) {
+      console.warn('[PicScanner] 相框预设覆盖失败', err);
+      showToast(String((err && err.message) || '相框预设覆盖失败'), 'error');
+    } finally {
+      state.quickEdit.framePresetOverwritingId = '';
+      syncQuickEditFramePresetUi();
+    }
+  }
+
+  function ensureQuickEditFramePresetDeleteConfirm() {
+    if (state.quickEdit.framePresetDeleteConfirm && state.quickEdit.framePresetDeleteConfirm.isConnected) {
+      return state.quickEdit.framePresetDeleteConfirm;
+    }
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-apply-confirm hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '删除相框预设确认');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-exit-card">',
+      '<h2>删除相框预设？</h2>',
+      '<p data-quick-edit-frame-preset-delete-message>确定删除这个相框预设？</p>',
+      '<div class="modal-actions">',
+      '<button class="ghost-btn" type="button" data-quick-edit-frame-preset-delete-cancel>取消</button>',
+      '<button class="danger-btn" type="button" data-quick-edit-frame-preset-delete-confirm>删除</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-frame-preset-delete-cancel]').addEventListener('click', () => hideQuickEditFramePresetDeleteConfirm());
+    modal.querySelector('[data-quick-edit-frame-preset-delete-confirm]').addEventListener('click', () => {
+      const presetId = String(modal.dataset.quickEditFramePresetDeleteId || '');
+      hideQuickEditFramePresetDeleteConfirm();
+      deleteQuickEditFramePresetNow(presetId);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.framePresetDeleteConfirm = modal;
+    return modal;
+  }
+
+  function hideQuickEditFramePresetDeleteConfirm() {
+    const modal = state.quickEdit.framePresetDeleteConfirm;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.dataset.quickEditFramePresetDeleteId = '';
+  }
+
+  function hideQuickEditFramePresetModal() {
+    const modal = state.quickEdit.framePresetModal;
+    if (!modal) return;
+    hideQuickEditFramePresetOverwriteConfirm();
+    modal.classList.add('hidden');
+  }
+
+  function ensureQuickEditFramePresetModal() {
+    if (state.quickEdit.framePresetModal && state.quickEdit.framePresetModal.isConnected) return state.quickEdit.framePresetModal;
+    const modal = document.createElement('div');
+    modal.className = 'modal quick-edit-preset-modal quick-edit-frame-preset-modal hidden';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', '相框预设管理');
+    modal.innerHTML = [
+      '<div class="modal-card quick-edit-preset-card">',
+      '<div class="quick-edit-save-head">',
+      '<h2>相框预设管理</h2>',
+      '<div class="quick-edit-lut-head-actions">',
+      '<button class="icon-btn" type="button" data-quick-edit-frame-preset-modal-save title="保存当前相框预设" aria-label="保存当前相框预设">' + quickEditIconSvg('plus') + '</button>',
+      '<button class="icon-btn quick-edit-save-close" type="button" data-quick-edit-frame-preset-modal-cancel title="关闭" aria-label="关闭">' + quickEditIconSvg('close') + '</button>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-preset-modal-head"><span data-quick-edit-frame-preset-modal-message></span><em data-quick-edit-frame-preset-modal-count>没有相框预设</em></div>',
+      '<div class="quick-edit-preset-modal-list" data-quick-edit-frame-preset-modal-list></div>',
+      '</div>',
+    ].join('');
+    modal.querySelector('[data-quick-edit-frame-preset-modal-cancel]').addEventListener('click', () => hideQuickEditFramePresetModal());
+    modal.querySelector('[data-quick-edit-frame-preset-modal-save]').addEventListener('click', () => {
+      saveCurrentQuickEditFramePreset();
+    });
+    modal.querySelector('[data-quick-edit-frame-preset-modal-list]').addEventListener('click', (ev) => {
+      const apply = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-apply]') : null;
+      if (apply) {
+        applyQuickEditFramePreset(String(apply.dataset.quickEditFramePresetModalApply || ''));
+        return;
+      }
+      const overwrite = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-overwrite]') : null;
+      if (overwrite) {
+        overwriteQuickEditFramePreset(String(overwrite.dataset.quickEditFramePresetModalOverwrite || ''));
+        return;
+      }
+      const favorite = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-favorite]') : null;
+      if (favorite) {
+        toggleQuickEditFramePresetFavorite(String(favorite.dataset.quickEditFramePresetModalFavorite || ''));
+        return;
+      }
+      const move = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-move]') : null;
+      if (move) {
+        moveQuickEditFramePreset(
+          String(move.dataset.quickEditFramePresetModalMoveId || ''),
+          String(move.dataset.quickEditFramePresetModalMove || ''),
+        );
+        return;
+      }
+      const rename = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-rename]') : null;
+      if (rename) {
+        renameQuickEditFramePreset(String(rename.dataset.quickEditFramePresetModalRename || ''));
+        return;
+      }
+      const del = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-delete]') : null;
+      if (del) {
+        deleteQuickEditFramePreset(String(del.dataset.quickEditFramePresetModalDelete || ''));
+        return;
+      }
+      const row = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-modal-id]') : null;
+      if (row) {
+        state.quickEdit.framePresetSelectedId = String(row.dataset.quickEditFramePresetModalId || '');
+        syncQuickEditFramePresetUi();
+      }
+    });
+    modal.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'f' && ev.key !== 'F') return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const preset = quickEditFramePresetById(state.quickEdit.framePresetSelectedId);
+      if (!preset) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleQuickEditFramePresetFavorite(preset.id);
+    });
+    document.body.appendChild(modal);
+    state.quickEdit.framePresetModal = modal;
+    return modal;
+  }
+
+  function showQuickEditFramePresetModal() {
+    const modal = ensureQuickEditFramePresetModal();
+    modal.classList.remove('hidden');
+    syncQuickEditFramePresetUi();
+    if (!state.quickEdit.framePresetsLoaded && !state.quickEdit.framePresetsLoading) {
+      refreshQuickEditFramePresets({ silent: true });
+    }
+    const first = modal.querySelector('[data-quick-edit-frame-preset-modal-save]');
+    if (first) requestAnimationFrame(() => first.focus({ preventScroll: true }));
   }
 
   function applyQuickEditSplitTonePreset(key) {
@@ -9784,8 +12863,22 @@
       '<div class="quick-edit-content">',
       '<div class="quick-edit-preview">',
       '<div class="quick-edit-stage" data-quick-edit-stage>',
+      '<div class="quick-edit-visual-layer" data-quick-edit-visual-layer>',
       '<img class="quick-edit-img" alt="" data-quick-edit-img />',
       '<img class="quick-edit-compare-img hidden" alt="" data-quick-edit-compare-img />',
+      '<div class="quick-edit-output-mask hidden" aria-hidden="true" data-quick-edit-output-mask>',
+      '<span data-quick-edit-output-mask-side="top"></span>',
+      '<span data-quick-edit-output-mask-side="right"></span>',
+      '<span data-quick-edit-output-mask-side="bottom"></span>',
+      '<span data-quick-edit-output-mask-side="left"></span>',
+      '</div>',
+      '<div class="quick-edit-frame-preview hidden" aria-hidden="true" data-quick-edit-frame-preview>',
+      '<span data-quick-edit-frame-side="top"></span>',
+      '<span data-quick-edit-frame-side="right"></span>',
+      '<span data-quick-edit-frame-side="bottom"></span>',
+      '<span data-quick-edit-frame-side="left"></span>',
+      '</div>',
+      '</div>',
       '<div class="quick-edit-crop-overlay hidden" data-quick-edit-crop-overlay>',
       '<div class="quick-edit-crop-box" data-quick-edit-crop-box>',
       '<div class="quick-edit-crop-grid"></div>',
@@ -9811,12 +12904,19 @@
       '<div class="quick-edit-filename" data-quick-edit-filename></div>',
       '<div class="quick-edit-subline"><span data-quick-edit-format></span><span data-quick-edit-status></span></div>',
       '</div>',
+      '<div class="quick-edit-batch-strip hidden" data-quick-edit-batch-strip><div class="quick-edit-batch-thumbnails" data-quick-edit-batch-thumbnails></div></div>',
       '</div>',
       '<aside class="quick-edit-side">',
       '<div class="quick-edit-side-head">',
       '<div class="section-title">快速调整</div>',
-      '<div class="quick-edit-side-title">临时预览</div>',
+      '<div class="quick-edit-panel-tabs" role="tablist" aria-label="快速调整面板">',
+      '<button class="quick-edit-panel-tab active" type="button" data-quick-edit-panel-tab="adjust" aria-pressed="true">调参</button>',
+      '<button class="quick-edit-panel-tab" type="button" data-quick-edit-panel-tab="frame" aria-pressed="false">相框</button>',
+      '<button class="quick-edit-panel-tab quick-edit-batch-only hidden" type="button" data-quick-edit-panel-tab="sync" aria-pressed="false">同步</button>',
+      '<button class="quick-edit-panel-tab quick-edit-batch-only hidden" type="button" data-quick-edit-panel-tab="output" aria-pressed="false">输出设置</button>',
       '</div>',
+      '</div>',
+      '<div class="quick-edit-panel-page" data-quick-edit-panel-page="adjust">',
       '<div class="quick-edit-group">',
       '<div class="quick-edit-group-head">',
       '<div class="quick-edit-group-title">直方图</div>',
@@ -9979,6 +13079,67 @@
       '<div class="quick-edit-lut-status" data-quick-edit-lut-status>未选择 LUT</div>',
       '</div>',
       '</div>',
+      '</div>',
+      '<div class="quick-edit-panel-page quick-edit-frame-page hidden" data-quick-edit-panel-page="frame">',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="framePresets">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="framePresets" aria-expanded="true">',
+      '<span><b>相框预设</b><em data-quick-edit-frame-preset-status>还没有相框预设</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="framePresets">',
+      '<div class="quick-edit-frame-preset-panel">',
+      '<div class="quick-edit-frame-preset-head">',
+      '<span>常用相框</span>',
+      '<div>',
+      '<button class="icon-btn" type="button" data-quick-edit-frame-preset-save title="保存相框预设" aria-label="保存相框预设">' + quickEditIconSvg('plus') + '</button>',
+      '<button class="icon-btn" type="button" data-quick-edit-frame-preset-manage title="管理相框预设" aria-label="管理相框预设">' + quickEditIconSvg('library') + '</button>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-frame-preset-list" data-quick-edit-frame-preset-list></div>',
+      '</div>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="frameAdjust">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="frameAdjust" aria-expanded="true">',
+      '<span><b>相框选择</b><em>样式与边距</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="frameAdjust">',
+      '<div class="quick-edit-frame-main">',
+      '<div class="quick-edit-frame-options">',
+      '<button type="button" class="active" data-quick-edit-frame-preset="none"><span></span><b>无相框</b></button>',
+      '<button type="button" data-quick-edit-frame-preset="white"><span></span><b>白边</b></button>',
+      '<button type="button" data-quick-edit-frame-preset="black"><span></span><b>黑边</b></button>',
+      '<button type="button" data-quick-edit-frame-preset="paper"><span></span><b>相纸</b></button>',
+      '</div>',
+      '<div class="quick-edit-frame-insets" aria-label="相框宽度">',
+      '<label><span>上</span><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-quick-edit-frame-inset="top" /></label>',
+      '<label><span>右</span><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-quick-edit-frame-inset="right" /></label>',
+      '<label><span>下</span><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-quick-edit-frame-inset="bottom" /></label>',
+      '<label><span>左</span><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-quick-edit-frame-inset="left" /></label>',
+      '</div>',
+      '</div>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-group quick-edit-collapsible" data-quick-edit-section="frameText">',
+      '<button class="quick-edit-section-toggle" type="button" data-quick-edit-section-toggle="frameText" aria-expanded="true">',
+      '<span><b>文字</b><em>模板、位置与字体</em></span>',
+      '<i aria-hidden="true">' + quickEditIconSvg('chevron') + '</i>',
+      '</button>',
+      '<div class="quick-edit-section-body" data-quick-edit-section-body="frameText">',
+      '<div class="quick-edit-frame-text-panel">',
+      '<div class="quick-edit-frame-text-tools">',
+      '<button type="button" data-quick-edit-frame-text-add>添加文字</button>',
+      '<button type="button" data-quick-edit-frame-text-token>参数注入</button>',
+      '<button type="button" data-quick-edit-frame-image-add>图片库</button>',
+      '</div>',
+      '<div class="quick-edit-frame-text-list" data-quick-edit-frame-text-list></div>',
+      '<div class="quick-edit-frame-image-list" data-quick-edit-frame-image-list></div>',
+      '</div>',
+      '</div>',
+      '</div>',
+      '<div class="quick-edit-panel-page quick-edit-batch-page hidden" data-quick-edit-panel-page="sync"></div>',
+      '<div class="quick-edit-panel-page quick-edit-batch-page hidden" data-quick-edit-panel-page="output"><div class="quick-edit-batch-output"><b>批量输出设置</b><span>使用每张照片独立保存的调参与相框状态。</span><button class="primary-btn" type="button" data-quick-edit-batch-output-open>打开输出设置</button></div></div>',
       '</aside>',
       '</div>',
       '</section>',
@@ -9997,20 +13158,41 @@
       stage.addEventListener('dblclick', onQuickEditDoubleClick);
       ensureQuickEditPanController(stage);
     }
+    const framePreview = el.querySelector('[data-quick-edit-frame-preview]');
+    if (framePreview) {
+      framePreview.addEventListener('wheel', onQuickEditFrameImageWheel, { passive: false });
+      framePreview.addEventListener('pointerdown', (ev) => {
+        const textTarget = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-preview]') : null;
+        if (textTarget) {
+          startQuickEditFrameTextDrag(ev, textTarget.dataset.quickEditFrameTextPreview);
+          return;
+        }
+        const imageTarget = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-image-preview]') : null;
+        if (!imageTarget) return;
+        startQuickEditFrameImageDrag(ev, imageTarget.dataset.quickEditFrameImagePreview);
+      });
+    }
     const previewImg = el.querySelector('[data-quick-edit-img]');
     if (previewImg) {
       previewImg.addEventListener('load', () => requestAnimationFrame(() => {
+        const hadDisplayBasis = !!state.quickEdit.displayBasisReady;
         const source = state.quickEdit.sourceImage || previewImg;
         const basis = quickEditImageBasis(
           source.naturalWidth || source.width,
           source.naturalHeight || source.height,
         );
-        setQuickEditImageDisplayBasis(
-          previewImg,
-          basis.width,
-          basis.height,
-        );
-        ensureQuickEditCenteredCropFrame(false);
+        if (!hadDisplayBasis) {
+          setQuickEditImageDisplayBasis(
+            previewImg,
+            basis.width,
+            basis.height,
+          );
+        }
+        if (isQuickEditCropToolActive()) {
+          ensureQuickEditCenteredCropFrame(false);
+        } else if (!hadDisplayBasis && !state.quickEdit.cropFrame && fitQuickEditCommittedOutput({ force: true })) {
+          applyQuickEditPreview({ skipOverlay: true, skipColorRender: true });
+        }
         updateQuickEditCropOverlay();
         scheduleQuickEditHistogramRender(120);
         refreshQuickEditPanController();
@@ -10035,8 +13217,7 @@
     el.querySelector('[data-quick-edit-reset]').addEventListener('click', () => {
       state.quickEdit.params = quickEditDefaultParams();
       state.quickEdit.committedParams = null;
-      state.quickEdit.committedPanX = 0;
-      state.quickEdit.committedPanY = 0;
+      state.quickEdit.committedStages = [];
       state.quickEdit.panX = 0;
       state.quickEdit.panY = 0;
       state.quickEdit.cropFrame = null;
@@ -10045,6 +13226,12 @@
       state.quickEdit.histogramMenuOpen = false;
       state.quickEdit.histogramData = null;
       state.quickEdit.hslColor = 'red';
+      state.quickEdit.framePreset = 'none';
+      state.quickEdit.frameInsets = quickEditFrameDefaultInsets('none');
+      state.quickEdit.frameTextLayers = [];
+      state.quickEdit.frameTextDrag = null;
+      state.quickEdit.frameImageLayers = [];
+      state.quickEdit.frameImageDrag = null;
       state.quickEdit.lut = null;
       state.quickEdit.luts = [];
       state.quickEdit.lutDraft = null;
@@ -10054,16 +13241,23 @@
       state.quickEdit.viewZoom = 1;
       resetQuickEditRawPreviewState();
       invalidateQuickEditRenderedPreview({ clearTimers: true });
+      fitQuickEditCommittedOutput({ force: true });
       syncQuickEditControls();
       applyQuickEditPreview();
-      if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
+      if (quickEditUsesRawDevelopPipeline()) scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
       scheduleQuickEditHistogramRender(0);
       scheduleQuickEditCropShade();
     });
     el.querySelector('[data-quick-edit-reset-current]').addEventListener('click', () => {
       resetQuickEditCurrentChanges();
     });
-    el.querySelector('[data-quick-edit-save-current]').addEventListener('click', () => {
+    el.querySelector('[data-quick-edit-save-current]').addEventListener('click', (ev) => {
+      console.info('[PicScannerCrop] toolbar confirm click', {
+        photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+        cropActive: isQuickEditCropToolActive(),
+        disabled: !!ev.currentTarget.disabled,
+        frame: state.quickEdit.cropFrame,
+      });
       saveQuickEditCurrentChanges();
     });
     el.querySelector('[data-quick-edit-save-final]').addEventListener('click', () => {
@@ -10079,6 +13273,21 @@
       btn.addEventListener('click', () => {
         toggleQuickEditSection(String(btn.dataset.quickEditSectionToggle || ''));
       });
+    });
+    el.querySelectorAll('[data-quick-edit-panel-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setQuickEditPanelTab(String(btn.dataset.quickEditPanelTab || 'adjust'));
+      });
+    });
+    el.querySelector('[data-quick-edit-batch-thumbnails]').addEventListener('click', (ev) => {
+      const button = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-batch-index]') : null;
+      if (!button) return;
+      switchBatchQuickEditPhoto(Number(button.dataset.quickEditBatchIndex || 0));
+    });
+    el.querySelector('[data-quick-edit-batch-output-open]').addEventListener('click', () => {
+      if (!state.quickEdit.batchMode || !batchProcessingController) return;
+      saveActiveBatchEditSession();
+      batchProcessingController.open(state.quickEdit.batchPhotos, { sessions: state.quickEdit.batchSessions, activePage: 'output' });
     });
     el.querySelectorAll('[data-quick-edit-tool]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -10121,6 +13330,203 @@
         applyQuickEditSplitTonePreset(String(btn.dataset.quickEditSplitTonePreset || ''));
       });
     });
+    el.querySelectorAll('[data-quick-edit-frame-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setQuickEditFramePreset(btn.dataset.quickEditFramePreset);
+      });
+    });
+    const framePresetSave = el.querySelector('[data-quick-edit-frame-preset-save]');
+    if (framePresetSave) {
+      framePresetSave.addEventListener('click', () => {
+        saveCurrentQuickEditFramePreset();
+      });
+    }
+    const framePresetManage = el.querySelector('[data-quick-edit-frame-preset-manage]');
+    if (framePresetManage) {
+      framePresetManage.addEventListener('click', () => {
+        showQuickEditFramePresetModal();
+      });
+    }
+    const framePresetList = el.querySelector('[data-quick-edit-frame-preset-list]');
+    if (framePresetList) {
+      framePresetList.addEventListener('mouseover', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-apply]') : null;
+        if (btn) state.quickEdit.framePresetHoverId = String(btn.dataset.quickEditFramePresetApply || '');
+      });
+      framePresetList.addEventListener('focusin', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-apply]') : null;
+        if (btn) state.quickEdit.framePresetHoverId = String(btn.dataset.quickEditFramePresetApply || '');
+      });
+      framePresetList.addEventListener('mouseleave', () => {
+        state.quickEdit.framePresetHoverId = '';
+      });
+      framePresetList.addEventListener('focusout', (ev) => {
+        if (!framePresetList.contains(ev.relatedTarget)) state.quickEdit.framePresetHoverId = '';
+      });
+      framePresetList.addEventListener('click', (ev) => {
+        const apply = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-preset-apply]') : null;
+        if (apply) {
+          applyQuickEditFramePreset(String(apply.dataset.quickEditFramePresetApply || ''));
+        }
+      });
+    }
+    el.querySelectorAll('[data-quick-edit-frame-inset]').forEach((input) => {
+      const commit = () => {
+        const key = String(input.dataset.quickEditFrameInset || '');
+        if (!['top', 'right', 'bottom', 'left'].includes(key)) return;
+        const digits = String(input.value || '').replace(/[^\d]/g, '').slice(0, 2);
+        const value = clamp(Number(digits || 0), 0, 40);
+        const insets = quickEditNormalizeFrameInsets(state.quickEdit.frameInsets);
+        insets[key] = value;
+        state.quickEdit.frameInsets = insets;
+        input.value = String(value);
+        refreshQuickEditImageDisplayBasis();
+        syncQuickEditFrameUi();
+        syncQuickEditSaveConfirm();
+      };
+      input.addEventListener('input', () => {
+        const digits = String(input.value || '').replace(/[^\d]/g, '').slice(0, 2);
+        if (input.value !== digits) input.value = digits;
+        commit();
+      });
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+        ev.preventDefault();
+        const key = String(input.dataset.quickEditFrameInset || '');
+        if (!['top', 'right', 'bottom', 'left'].includes(key)) return;
+        const step = ev.shiftKey ? 5 : 1;
+        const delta = ev.key === 'ArrowUp' ? step : -step;
+        const current = Number(String(input.value || '').replace(/[^\d]/g, '') || 0);
+        const value = clamp(current + delta, 0, 40);
+        const insets = quickEditNormalizeFrameInsets(state.quickEdit.frameInsets);
+        insets[key] = value;
+        state.quickEdit.frameInsets = insets;
+        input.value = String(value);
+        refreshQuickEditImageDisplayBasis();
+        syncQuickEditFrameUi();
+        syncQuickEditSaveConfirm();
+      });
+    });
+    const frameTextAdd = el.querySelector('[data-quick-edit-frame-text-add]');
+    if (frameTextAdd) {
+      frameTextAdd.addEventListener('click', () => {
+        const layers = quickEditFrameTextLayers();
+        layers.push(quickEditNewFrameTextLayer());
+        state.quickEdit.frameTextLayers = layers;
+        renderQuickEditFrameTextLayers();
+        syncQuickEditFramePreview();
+        syncQuickEditFramePresetUi();
+        syncQuickEditSaveConfirm();
+      });
+    }
+    const frameTextToken = el.querySelector('[data-quick-edit-frame-text-token]');
+    if (frameTextToken) {
+      frameTextToken.addEventListener('click', () => {
+        openQuickEditFrameTextTokenPanel(frameTextToken);
+      });
+    }
+    const frameImageAdd = el.querySelector('[data-quick-edit-frame-image-add]');
+    if (frameImageAdd) {
+      frameImageAdd.title = '打开图片素材库';
+      frameImageAdd.addEventListener('click', () => {
+        showQuickEditFrameAssetModal();
+      });
+    }
+    const frameTextList = el.querySelector('[data-quick-edit-frame-text-list]');
+    if (frameTextList) {
+      frameTextList.addEventListener('input', (ev) => {
+        const target = ev.target;
+        if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameTextTemplate) {
+          updateQuickEditFrameTextLayer(target.dataset.quickEditFrameTextTemplate, { text: String(target.value || '').slice(0, 120) }, { skipRender: true });
+        } else if (target.dataset.quickEditFrameTextFamily) {
+          updateQuickEditFrameTextLayer(target.dataset.quickEditFrameTextFamily, { fontFamily: String(target.value || '').slice(0, 80) }, { skipRender: true });
+        } else if (target.dataset.quickEditFrameTextColorInput) {
+          const layerId = String(target.dataset.quickEditFrameTextColorInput || '');
+          let value = String(target.value || '').trim().replace(/[^#0-9a-f]/gi, '').slice(0, 7);
+          if (value && !value.startsWith('#')) value = '#' + value.slice(0, 6);
+          if (target.value !== value) target.value = value;
+          const color = quickEditNormalizeHexColor(value);
+          if (color) {
+            updateQuickEditFrameTextLayer(layerId, { color }, { skipRender: true });
+            syncQuickEditFrameTextColorControl(layerId, color);
+          }
+        } else {
+          commitQuickEditFrameTextNumericInput(target, { emptyValue: undefined });
+        }
+      });
+      frameTextList.addEventListener('change', (ev) => {
+        const target = ev.target;
+        if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameTextColorInput) {
+          const layerId = String(target.dataset.quickEditFrameTextColorInput || '');
+          const layer = quickEditFrameTextLayerById(layerId);
+          const color = quickEditNormalizeHexColor(target.value) || (layer && layer.color) || quickEditDefaultFrameTextColor();
+          target.value = color;
+          updateQuickEditFrameTextLayer(layerId, { color }, { skipRender: true });
+          syncQuickEditFrameTextColorControl(layerId, color);
+          return;
+        }
+        commitQuickEditFrameTextNumericInput(target, { normalizeInput: true });
+      });
+      frameTextList.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+        const target = ev.target;
+        if (!target || !target.dataset || !quickEditFrameTextNumericInputMeta(target)) return;
+        ev.preventDefault();
+        stepQuickEditFrameTextNumericInput(target, ev.key === 'ArrowUp' ? 1 : -1, ev.shiftKey);
+      });
+      frameTextList.addEventListener('click', (ev) => {
+        const target = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+        if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameTextRemove) {
+          state.quickEdit.frameTextLayers = quickEditFrameTextLayers().filter((layer) => layer.id !== target.dataset.quickEditFrameTextRemove);
+          renderQuickEditFrameTextLayers();
+          syncQuickEditFramePreview();
+          syncQuickEditFramePresetUi();
+          syncQuickEditSaveConfirm();
+        } else if (target.dataset.quickEditFrameTextPositionLayer) {
+          updateQuickEditFrameTextLayer(
+            target.dataset.quickEditFrameTextPositionLayer,
+            { position: target.dataset.quickEditFrameTextPosition || 'bottom-center' },
+          );
+        } else if (target.dataset.quickEditFrameTextColorTrigger) {
+          openQuickEditFrameTextColorPanel(target.dataset.quickEditFrameTextColorTrigger, target);
+        }
+      });
+    }
+    const frameImageList = el.querySelector('[data-quick-edit-frame-image-list]');
+    if (frameImageList) {
+      frameImageList.addEventListener('input', (ev) => {
+        const target = ev.target;
+        if (!target || !target.dataset) return;
+        commitQuickEditFrameImageNumericInput(target, { emptyValue: undefined });
+      });
+      frameImageList.addEventListener('change', (ev) => {
+        const target = ev.target;
+        if (!target || !target.dataset) return;
+        commitQuickEditFrameImageNumericInput(target, { normalizeInput: true });
+      });
+      frameImageList.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+        const target = ev.target;
+        if (!target || !target.dataset || !quickEditFrameImageNumericInputMeta(target)) return;
+        ev.preventDefault();
+        stepQuickEditFrameImageNumericInput(target, ev.key === 'ArrowUp' ? 1 : -1, ev.shiftKey);
+      });
+      frameImageList.addEventListener('click', (ev) => {
+        const target = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+        if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameImageRemove) {
+          state.quickEdit.frameImageLayers = quickEditFrameImageLayers().filter((layer) => layer.id !== target.dataset.quickEditFrameImageRemove);
+          renderQuickEditFrameImageLayers();
+          syncQuickEditFramePreview();
+          syncQuickEditFramePresetUi();
+          syncQuickEditSaveConfirm();
+        }
+      });
+    }
     const hslPicker = el.querySelector('[data-quick-edit-hsl-picker]');
     if (hslPicker) {
       hslPicker.addEventListener('click', () => {
@@ -10136,6 +13542,20 @@
     if (presetSave) presetSave.addEventListener('click', () => saveCurrentQuickEditPreset());
     if (presetManage) presetManage.addEventListener('click', () => showQuickEditPresetModal());
     if (presetList) {
+      presetList.addEventListener('mouseover', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-apply]') : null;
+        if (btn) state.quickEdit.presetHoverId = String(btn.dataset.quickEditPresetApply || '');
+      });
+      presetList.addEventListener('focusin', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-apply]') : null;
+        if (btn) state.quickEdit.presetHoverId = String(btn.dataset.quickEditPresetApply || '');
+      });
+      presetList.addEventListener('mouseleave', () => {
+        state.quickEdit.presetHoverId = '';
+      });
+      presetList.addEventListener('focusout', (ev) => {
+        if (!presetList.contains(ev.relatedTarget)) state.quickEdit.presetHoverId = '';
+      });
       presetList.addEventListener('click', (ev) => {
         const btn = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-preset-apply]') : null;
         if (!btn) return;
@@ -10169,15 +13589,14 @@
         const next = normalizeQuickEditParams(state.quickEdit.params);
         next[key] = Number(input.value || 0);
         state.quickEdit.params = normalizeQuickEditParams(next);
-        const rawDevelop = quickEditIsRawPhoto() && quickEditIsRawDevelopParamKey(key);
-        const cssOnly = !rawDevelop && (key === 'exposure' || key === 'saturation');
-        if (!cssOnly || rawDevelop) invalidateQuickEditRenderedPreview({ clearTimers: true });
+        const rawDevelop = quickEditUsesRawDevelopPipeline() && quickEditIsRawDevelopParamKey(key);
+        invalidateQuickEditRenderedPreview({ clearTimers: true });
         syncQuickEditControls();
         if (rawDevelop) {
           applyQuickEditPreview({ skipColorRender: true });
           scheduleQuickEditRawDevelopPreview({ interactive: true });
         } else {
-          applyQuickEditPreview(cssOnly ? { skipColorRender: true } : { interactive: true });
+          applyQuickEditPreview({ interactive: true });
           scheduleQuickEditHistogramRender(key === 'temperature' ? 320 : 180);
         }
       });
@@ -10191,7 +13610,7 @@
         state.quickEdit.params = normalizeQuickEditParams(next);
         invalidateQuickEditRenderedPreview({ clearTimers: true });
         syncQuickEditControls();
-        if (quickEditIsRawPhoto()) {
+        if (quickEditUsesRawDevelopPipeline()) {
           applyQuickEditPreview({ skipColorRender: true });
           scheduleQuickEditRawDevelopPreview({ interactive: true });
         } else {
@@ -10205,7 +13624,7 @@
         state.quickEdit.params = normalizeQuickEditParams(next);
         invalidateQuickEditRenderedPreview({ clearTimers: true });
         syncQuickEditControls();
-        if (quickEditIsRawPhoto()) {
+        if (quickEditUsesRawDevelopPipeline()) {
           applyQuickEditPreview({ skipColorRender: true });
           scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
         } else {
@@ -10254,7 +13673,12 @@
     state.quickEdit.activeTools = tools;
     if (!tools.crop) {
       state.quickEdit.cropDrag = null;
+      state.quickEdit.cropFrame = null;
       clearQuickEditCropShade();
+      if (tool === 'crop' && !nextActive) fitQuickEditCommittedOutput({ force: true });
+    } else if (tool === 'crop' && nextActive) {
+      state.quickEdit.cropFrame = null;
+      fitQuickEditCommittedOutput({ force: true, silent: true });
     }
     if (!tools.rotate) {
       state.quickEdit.rotationDrag = null;
@@ -10262,7 +13686,15 @@
     syncQuickEditControls();
     applyQuickEditPreview({ skipColorRender: true });
     if (tool === 'crop' && nextActive) {
-      requestAnimationFrame(() => ensureQuickEditCenteredCropFrame(false));
+      requestAnimationFrame(() => {
+        ensureQuickEditCenteredCropFrame(true);
+        console.info('[PicScannerGeometry] crop session opened', {
+          photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+          effectiveParams: quickEditEffectiveParams(),
+          frame: quickEditCropFrameRect(),
+          zoom: state.quickEdit.viewZoom,
+        });
+      });
     }
     scheduleQuickEditCropShade();
   }
@@ -10279,13 +13711,16 @@
     state.quickEdit.viewZoom = 1;
     resetQuickEditRawPreviewState();
     invalidateQuickEditRenderedPreview({ clearTimers: true });
-    syncQuickEditControls();
-    applyQuickEditPreview();
-    if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
     if (isQuickEditCropToolActive()) {
       state.quickEdit.cropFrame = null;
+      fitQuickEditCommittedOutput({ force: true, silent: true });
       requestAnimationFrame(() => ensureQuickEditCenteredCropFrame(true));
+    } else {
+      fitQuickEditCommittedOutput({ force: true });
     }
+    syncQuickEditControls();
+    applyQuickEditPreview();
+    if (quickEditUsesRawDevelopPipeline()) scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
     scheduleQuickEditCropShade();
     showToast('已重置本轮调整');
   }
@@ -10295,8 +13730,7 @@
     cancelQuickEditPan();
     state.quickEdit.params = quickEditDefaultParams();
     state.quickEdit.committedParams = null;
-    state.quickEdit.committedPanX = 0;
-    state.quickEdit.committedPanY = 0;
+    state.quickEdit.committedStages = [];
     state.quickEdit.panX = 0;
     state.quickEdit.panY = 0;
     state.quickEdit.cropFrame = null;
@@ -10308,6 +13742,13 @@
     state.quickEdit.histogramData = null;
     state.quickEdit.hslColor = 'red';
     state.quickEdit.hslPickerActive = false;
+    state.quickEdit.panelTab = 'adjust';
+    state.quickEdit.framePreset = 'none';
+    state.quickEdit.frameInsets = quickEditFrameDefaultInsets('none');
+    state.quickEdit.frameTextLayers = [];
+    state.quickEdit.frameTextDrag = null;
+    state.quickEdit.frameImageLayers = [];
+    state.quickEdit.frameImageDrag = null;
     state.quickEdit.lut = null;
     state.quickEdit.luts = [];
     state.quickEdit.lutDraft = null;
@@ -10319,18 +13760,60 @@
     clearQuickEditCropShade();
   }
 
-  function quickEditBakeFrame(stage, img) {
-    const stageRect = stage.getBoundingClientRect();
+  function quickEditRenderView(options) {
+    const opts = options || {};
+    const canonical = !!opts.canonical && !isQuickEditCropToolActive();
+    return canonical
+      ? { zoom: 1, pan: { x: 0, y: 0 } }
+      : {
+        zoom: Math.max(0.0001, Number(state.quickEdit.viewZoom || 1)),
+        pan: quickEditEffectivePan(),
+      };
+  }
+
+  function quickEditBakeFrame(stage, img, options) {
+    const opts = options || {};
     if (isQuickEditCropToolActive()) {
       const frame = quickEditCropFrameRect();
       if (frame) return frame;
     }
-    const imgRect = img.getBoundingClientRect();
+    const params = quickEditEffectiveParams();
+    const view = quickEditRenderView(opts);
+    const geometry = quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: view.zoom,
+      pan: view.pan,
+      recenter: false,
+    });
+    return geometry ? quickEditCropFrameForParams(params, geometry) : null;
+  }
+
+  function quickEditCropParamsFromFrame(frame) {
+    const el = ensureQuickEdit();
+    const img = el.querySelector('[data-quick-edit-img]');
+    const stage = el.querySelector('[data-quick-edit-stage]');
+    if (!frame || !img || !stage) return null;
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params, { stage, img });
+    if (!geometry) return null;
+    const baseFrame = quickEditCropFrameForParams(params, geometry);
+    const selection = quickEditGeometryApi().selectionFromFrames(
+      baseFrame,
+      frame,
+      QUICK_EDIT_CROP_MIN_SIZE,
+    );
+    if (!selection) return null;
+    const composed = quickEditGeometryApi().composeCrop(
+      quickEditCropRect(params),
+      selection,
+      QUICK_EDIT_CROP_MIN_SIZE,
+    );
     return {
-      x: imgRect.left - stageRect.left,
-      y: imgRect.top - stageRect.top,
-      w: imgRect.width,
-      h: imgRect.height,
+      cropLeft: composed.x,
+      cropTop: composed.y,
+      cropRight: 100 - composed.x - composed.w,
+      cropBottom: 100 - composed.y - composed.h,
     };
   }
 
@@ -10350,18 +13833,20 @@
       throw new Error('当前预览图还没有加载完成');
     }
     const sourceImg = await loadQuickEditImage(sourceSrc);
-    const frame = quickEditBakeFrame(stage, img);
-    if (!frame || frame.w <= 1 || frame.h <= 1) {
+    const frame = quickEditBakeFrame(stage, img, { canonical: true });
+    if (!frame || frame.w <= 0.0001 || frame.h <= 0.0001) {
       throw new Error('当前取景框尺寸无效');
     }
     const params = quickEditEffectiveParams();
-    const pan = quickEditEffectivePan();
+    const renderView = quickEditRenderView({ canonical: true });
+    const pan = renderView.pan;
     const angle = (params.rotation + params.straighten) * Math.PI / 180;
     const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const canvas = document.createElement('canvas');
     const stageRect = stage.getBoundingClientRect();
-    const baseWidth = img.offsetWidth;
-    const baseHeight = img.offsetHeight;
+    const displayBasis = quickEditDisplayBasisSize(img);
+    const baseWidth = displayBasis.width;
+    const baseHeight = displayBasis.height;
     const sourceBasis = quickEditImageBasis(sourceImg.naturalWidth || sourceImg.width, sourceImg.naturalHeight || sourceImg.height);
     const sourceScale = Math.max(
       Number(sourceBasis.width || sourceImg.naturalWidth || sourceImg.width || 1) / Math.max(1, baseWidth),
@@ -10369,7 +13854,7 @@
     );
     const maxSide = 2400;
     const outputScale = saveOptions.fullResolution
-      ? sourceScale
+      ? sourceScale / renderView.zoom
       : Math.min(dpr, maxSide / Math.max(frame.w, frame.h));
     canvas.width = Math.max(1, Math.round(frame.w * outputScale));
     canvas.height = Math.max(1, Math.round(frame.h * outputScale));
@@ -10386,7 +13871,7 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     imageCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
     imageCtx.translate(baseLeft - frame.x + baseWidth / 2 + pan.x, baseTop - frame.y + baseHeight / 2 + pan.y);
-    imageCtx.scale(state.quickEdit.viewZoom, state.quickEdit.viewZoom);
+    imageCtx.scale(renderView.zoom, renderView.zoom);
     imageCtx.rotate(angle);
     imageCtx.drawImage(sourceImg, -baseWidth / 2, -baseHeight / 2, baseWidth, baseHeight);
     applyQuickEditCurveToCanvas(imageCanvas, params);
@@ -10405,27 +13890,33 @@
       src: img && imageHasSource(img) ? img.src : '',
       sourceSrc: state.quickEdit.sourceSrc || (img && imageHasSource(img) ? img.src : ''),
       params: normalizeQuickEditParams(state.quickEdit.params),
+      effectiveParams: quickEditEffectiveParams(),
       committedParams: normalizeQuickEditParams(state.quickEdit.committedParams || quickEditDefaultParams()),
-      committedPanX: Number(state.quickEdit.committedPanX || 0),
-      committedPanY: Number(state.quickEdit.committedPanY || 0),
+      committedStages: (state.quickEdit.committedStages || []).map(cloneQuickEditPixelStage),
       panX: Number(state.quickEdit.panX || 0),
       panY: Number(state.quickEdit.panY || 0),
+      panRatioX: img && img.offsetWidth ? Number(state.quickEdit.panX || 0) / img.offsetWidth : 0,
+      panRatioY: img && img.offsetHeight ? Number(state.quickEdit.panY || 0) / img.offsetHeight : 0,
       cropFrame: state.quickEdit.cropFrame ? Object.assign({}, state.quickEdit.cropFrame) : null,
       activeTools: Object.assign({ crop: false, rotate: false }, state.quickEdit.activeTools || {}),
       viewZoom: Number(state.quickEdit.viewZoom || 1),
       histogramMode: state.quickEdit.histogramMode || 'white',
       luts: quickEditEnabledLuts().map((lut) => Object.assign({}, lut)),
+      framePreset: String(state.quickEdit.framePreset || 'none'),
+      frameInsets: Object.assign({}, state.quickEdit.frameInsets || quickEditFrameDefaultInsets('none')),
+      frameTextLayers: (state.quickEdit.frameTextLayers || []).map((layer) => Object.assign({}, layer)),
+      frameImageLayers: (state.quickEdit.frameImageLayers || []).map((layer) => Object.assign({}, layer)),
+      panelTab: String(state.quickEdit.panelTab || 'adjust'),
+      history: (state.quickEdit.history || []).slice(),
+      bakedSource: !!state.quickEdit.bakedSource,
     };
   }
 
-  function restoreQuickEditState(snapshot) {
+  function applyQuickEditSnapshotState(snapshot) {
     if (!snapshot) return false;
-    const el = ensureQuickEdit();
-    const img = el.querySelector('[data-quick-edit-img]');
     state.quickEdit.params = normalizeQuickEditParams(snapshot.params);
     state.quickEdit.committedParams = normalizeQuickEditParams(snapshot.committedParams);
-    state.quickEdit.committedPanX = Number(snapshot.committedPanX || 0);
-    state.quickEdit.committedPanY = Number(snapshot.committedPanY || 0);
+    state.quickEdit.committedStages = (snapshot.committedStages || []).map(cloneQuickEditPixelStage);
     state.quickEdit.panX = Number(snapshot.panX || 0);
     state.quickEdit.panY = Number(snapshot.panY || 0);
     state.quickEdit.cropFrame = snapshot.cropFrame ? Object.assign({}, snapshot.cropFrame) : null;
@@ -10433,16 +13924,39 @@
     state.quickEdit.viewZoom = Number(snapshot.viewZoom || 1);
     state.quickEdit.histogramMode = snapshot.histogramMode || 'white';
     quickEditSetLuts(snapshot.luts || (snapshot.lut ? [snapshot.lut] : []));
+    state.quickEdit.framePreset = String(snapshot.framePreset || 'none');
+    state.quickEdit.frameInsets = Object.assign({}, snapshot.frameInsets || quickEditFrameDefaultInsets(state.quickEdit.framePreset));
+    state.quickEdit.frameTextLayers = (snapshot.frameTextLayers || []).map((layer) => Object.assign({}, layer));
+    state.quickEdit.frameImageLayers = (snapshot.frameImageLayers || []).map((layer) => Object.assign({}, layer));
+    state.quickEdit.panelTab = String(snapshot.panelTab || 'adjust');
+    state.quickEdit.history = (snapshot.history || []).slice();
+    state.quickEdit.bakedSource = !!snapshot.bakedSource;
     state.quickEdit.cropDrag = null;
     state.quickEdit.rotationDrag = null;
+    return true;
+  }
+
+  function restoreQuickEditState(snapshot, options) {
+    if (!snapshot) return false;
+    const opts = options || {};
+    const el = ensureQuickEdit();
+    const img = el.querySelector('[data-quick-edit-img]');
+    applyQuickEditSnapshotState(snapshot);
     invalidateQuickEditRenderedPreview({ clearTimers: true });
     clearQuickEditCropShade();
-    if (img && (snapshot.sourceSrc || snapshot.src)) setQuickEditImageSource(img, snapshot.sourceSrc || snapshot.src);
+    if (!opts.keepCurrentSource && img && (snapshot.sourceSrc || snapshot.src)) {
+      setQuickEditImageSource(img, snapshot.sourceSrc || snapshot.src);
+    }
     syncQuickEditControls();
-    applyQuickEditPreview();
-    if (quickEditIsRawPhoto()) scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
+    if (quickEditUsesRawDevelopPipeline()) {
+      applyQuickEditPreview({ skipColorRender: true });
+      scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
+    } else {
+      applyQuickEditPreview();
+    }
     updateQuickEditCropOverlay();
     scheduleQuickEditHistogramRender(0);
+    scheduleQuickEditCropShade();
     return true;
   }
 
@@ -10470,47 +13984,65 @@
     return JSON.stringify(normalizeQuickEditParams(committed)) !== JSON.stringify(normalizeQuickEditParams(quickEditDefaultParams()));
   }
 
-  function quickEditGeometryChanged() {
-    return Math.abs(Number(state.quickEdit.committedPanX || 0)) > 0.01
-      || Math.abs(Number(state.quickEdit.committedPanY || 0)) > 0.01
-      || Math.abs(Number(state.quickEdit.panX || 0)) > 0.01
-      || Math.abs(Number(state.quickEdit.panY || 0)) > 0.01
-      || Math.abs(Number(state.quickEdit.viewZoom || 1) - 1) > 0.0001;
-  }
-
   function hasQuickEditUnsavedChanges() {
     return quickEditParamsChanged()
       || quickEditCommittedParamsChanged()
-      || quickEditGeometryChanged()
+      || !!quickEditFrameExportConfig(state.quickEdit.framePreset)
       || quickEditEnabledLuts().length > 0
-      || !!state.quickEdit.cropFrame
+      || (isQuickEditCropToolActive() && !!state.quickEdit.cropFrame)
       || (Array.isArray(state.quickEdit.history) && state.quickEdit.history.length > 0);
   }
 
   async function saveQuickEditCurrentChanges() {
-    let bakedUrl = '';
-    let before = null;
-    try {
-      before = snapshotQuickEditState();
-      bakedUrl = await bakeQuickEditPreviewToImage({ format: 'jpg', quality: 95 });
-    } catch (err) {
-      console.warn('[PicScanner] 快速调整应用失败', err);
-      showToast('无法应用当前调整，详情见控制台', 'error');
-      return;
+    const cropFrame = isQuickEditCropToolActive() ? quickEditCropFrameRect() : null;
+    const before = snapshotQuickEditState();
+    console.info('[PicScannerCrop] confirm start', {
+      photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+      batchMode: !!state.quickEdit.batchMode,
+      cropActive: !!cropFrame,
+      frame: cropFrame,
+      effectiveParams: quickEditEffectiveParams(),
+    });
+    const committed = quickEditEffectiveParams();
+    if (cropFrame) {
+      const cropParams = quickEditCropParamsFromFrame(cropFrame);
+      if (!cropParams) {
+        console.error('[PicScannerCrop] confirm failed', { reason: 'crop transform unavailable', frame: cropFrame });
+        showToast('裁切确认失败：无法换算图片坐标', 'error');
+        return;
+      }
+      Object.assign(committed, cropParams);
     }
-    if (before && before.src) {
-      state.quickEdit.history.push(before);
-      if (state.quickEdit.history.length > 24) state.quickEdit.history.shift();
-    }
-    const el = ensureQuickEdit();
-    const img = el.querySelector('[data-quick-edit-img]');
-    resetQuickEditPreviewAdjustments({ keepHistogramMode: true });
+    state.quickEdit.history.push(before);
+    if (state.quickEdit.history.length > 24) state.quickEdit.history.shift();
+    const stage = captureQuickEditPixelStage(state.quickEdit.params, quickEditEnabledLuts());
+    state.quickEdit.committedStages = (state.quickEdit.committedStages || []).concat([stage]);
+    state.quickEdit.committedParams = normalizeQuickEditParams(committed);
+    state.quickEdit.params = quickEditDefaultParams();
+    quickEditSetLuts([]);
+    state.quickEdit.bakedSource = false;
+    state.quickEdit.activeTools = { crop: false, rotate: false };
+    fitQuickEditCommittedOutput({ force: true });
     syncQuickEditControls();
-    if (img) setQuickEditImageSource(img, bakedUrl);
     applyQuickEditPreview();
     updateQuickEditCropOverlay();
     scheduleQuickEditHistogramRender(0);
-    showToast('已应用到临时预览');
+    if (state.quickEdit.batchMode) saveActiveBatchEditSession();
+    console.info('[PicScannerCrop] confirm complete', {
+      photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+      batchMode: !!state.quickEdit.batchMode,
+      bakedSource: false,
+      rawPreserved: quickEditIsRawPhoto(),
+      cropExited: !isQuickEditCropToolActive(),
+      paramsReset: JSON.stringify(normalizeQuickEditParams(state.quickEdit.params)) === JSON.stringify(normalizeQuickEditParams(quickEditDefaultParams())),
+      committedStored: !!state.quickEdit.committedParams,
+      committedStageCount: state.quickEdit.committedStages.length,
+      sourcePreserved: !state.quickEdit.bakedSource,
+      presentationFitted: true,
+      presentationZoom: state.quickEdit.viewZoom,
+      presentationPan: quickEditEffectivePan(),
+    });
+    showToast(cropFrame ? '裁切已确认' : '当前调整已确认');
   }
 
   function scheduleQuickEditCropShade() {
@@ -10524,16 +14056,58 @@
   }
 
   function quickEditMinimumZoomForCropFrame() {
-    if (!isQuickEditCropToolActive()) return QUICK_EDIT_MIN_ZOOM;
+    if (!isQuickEditCropToolActive()) return quickEditPresentationZoomBounds().min;
     const el = state.quickEdit.el;
+    const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
     const img = el ? el.querySelector('[data-quick-edit-img]') : null;
     const frame = quickEditCropFrameRect();
-    if (!img || !frame || img.offsetWidth <= 1 || img.offsetHeight <= 1) return QUICK_EDIT_MIN_ZOOM;
+    if (!stage || !img || !frame) return quickEditPresentationZoomBounds().min;
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+    });
+    const outputFrame = geometry ? quickEditCropFrameForParams(params, geometry) : null;
+    if (!outputFrame) return quickEditPresentationZoomBounds().min;
     return Math.max(
-      QUICK_EDIT_MIN_ZOOM,
-      frame.w / Math.max(1, img.offsetWidth),
-      frame.h / Math.max(1, img.offsetHeight),
+      0.0001,
+      frame.w / Math.max(0.0001, outputFrame.w),
+      frame.h / Math.max(0.0001, outputFrame.h),
     );
+  }
+
+  function resolveAnchoredZoomView(options) {
+    const opts = options || {};
+    const currentZoom = Math.max(0.0001, Number(opts.currentZoom || 1));
+    const requestedZoom = Number(opts.nextZoom);
+    const zoom = clamp(
+      Number.isFinite(requestedZoom) ? requestedZoom : currentZoom,
+      Number(opts.minZoom),
+      Number(opts.maxZoom),
+    );
+    let panX = Number(opts.panX || 0);
+    let panY = Number(opts.panY || 0);
+    const anchorEvent = opts.anchorEvent;
+    const stage = opts.stage;
+    if (opts.resetPan) {
+      panX = Number(opts.resetPanX || 0);
+      panY = Number(opts.resetPanY || 0);
+    } else if (anchorEvent && stage) {
+      const rect = stage.getBoundingClientRect();
+      const localX = anchorEvent.clientX - rect.left - rect.width / 2;
+      const localY = anchorEvent.clientY - rect.top - rect.height / 2;
+      const ratio = zoom / currentZoom;
+      panX = localX - (localX - panX) * ratio;
+      panY = localY - (localY - panY) * ratio;
+    }
+    const resetThreshold = Number(opts.resetAtOrBelowZoom);
+    if (Number.isFinite(resetThreshold) && zoom <= resetThreshold) {
+      panX = Number(opts.resetPanX || 0);
+      panY = Number(opts.resetPanY || 0);
+    }
+    return { zoom, panX, panY };
   }
 
   function setQuickEditZoom(nextZoom, anchorEvent, options) {
@@ -10542,28 +14116,30 @@
     const oldZoom = Number(state.quickEdit.viewZoom || 1);
     const oldPanX = Number(state.quickEdit.panX || 0);
     const oldPanY = Number(state.quickEdit.panY || 0);
-    const zoom = clamp(Number(nextZoom || 1), quickEditMinimumZoomForCropFrame(), QUICK_EDIT_MAX_ZOOM);
     const el = state.quickEdit.el;
     const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
-    if (opts.resetPan) {
-      state.quickEdit.panX = 0;
-      state.quickEdit.panY = 0;
-    } else if (anchorEvent && stage) {
-      const rect = stage.getBoundingClientRect();
-      const localX = anchorEvent.clientX - rect.left - rect.width / 2;
-      const localY = anchorEvent.clientY - rect.top - rect.height / 2;
-      const ratio = zoom / Math.max(0.0001, oldZoom);
-      state.quickEdit.panX = localX - (localX - Number(state.quickEdit.panX || 0)) * ratio;
-      state.quickEdit.panY = localY - (localY - Number(state.quickEdit.panY || 0)) * ratio;
-    } else if (zoom <= 1 && !isQuickEditCropToolActive()) {
-      state.quickEdit.panX = 0;
-      state.quickEdit.panY = 0;
-    }
+    const cropActive = isQuickEditCropToolActive();
+    const zoomBounds = quickEditPresentationZoomBounds();
+    const minimumZoom = cropActive ? quickEditMinimumZoomForCropFrame() : zoomBounds.min;
+    const maximumZoom = Math.max(minimumZoom, zoomBounds.max);
+    const view = resolveAnchoredZoomView({
+      currentZoom: oldZoom,
+      nextZoom,
+      minZoom: minimumZoom,
+      maxZoom: maximumZoom,
+      panX: oldPanX,
+      panY: oldPanY,
+      anchorEvent,
+      stage,
+      resetPan: !!opts.resetPan,
+      resetAtOrBelowZoom: cropActive ? null : zoomBounds.fit,
+      resetPanX: zoomBounds.panX,
+      resetPanY: zoomBounds.panY,
+    });
+    const zoom = view.zoom;
     state.quickEdit.viewZoom = zoom;
-    if (state.quickEdit.viewZoom <= 1 && !isQuickEditCropToolActive()) {
-      state.quickEdit.panX = 0;
-      state.quickEdit.panY = 0;
-    }
+    state.quickEdit.panX = view.panX;
+    state.quickEdit.panY = view.panY;
     const panChanged = Math.abs(Number(state.quickEdit.panX || 0) - oldPanX) > 0.01
       || Math.abs(Number(state.quickEdit.panY || 0) - oldPanY) > 0.01;
     if (Math.abs(zoom - oldZoom) < 0.0001 && !panChanged) return;
@@ -10601,7 +14177,7 @@
     if (!state.quickEdit.open) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const factor = ev.deltaY < 0 ? QUICK_EDIT_ZOOM_STEP : 1 / QUICK_EDIT_ZOOM_STEP;
+    const factor = ev.deltaY < 0 ? LIGHTBOX_ZOOM_STEP : 1 / LIGHTBOX_ZOOM_STEP;
     setQuickEditZoom(state.quickEdit.viewZoom * factor, ev);
   }
 
@@ -10609,17 +14185,22 @@
     if (!state.quickEdit.open) return;
     ev.preventDefault();
     ev.stopPropagation();
-    setQuickEditZoom(QUICK_EDIT_MIN_ZOOM, null, { resetPan: true });
+    const zoomBounds = quickEditPresentationZoomBounds();
+    setQuickEditZoom(zoomBounds.fit, null, { resetPan: true });
   }
 
   function setQuickEditRotation(value) {
+    const committed = normalizeQuickEditParams(state.quickEdit.committedParams || quickEditDefaultParams());
     const next = normalizeQuickEditParams(state.quickEdit.params);
-    next.rotation = normalizeQuickEditRotation(value);
+    next.rotation = normalizeQuickEditRotation(
+      normalizeQuickEditRotation(value) - committed.rotation - committed.straighten,
+    );
     next.straighten = 0;
     state.quickEdit.params = normalizeQuickEditParams(next);
     syncQuickEditControls();
     applyQuickEditPreview({ skipColorRender: true });
     requestAnimationFrame(() => {
+      state.quickEdit.viewZoom = Math.max(state.quickEdit.viewZoom, quickEditMinimumZoomForCropFrame());
       const pan = clampQuickEditPan(state.quickEdit.panX, state.quickEdit.panY);
       state.quickEdit.panX = pan.x;
       state.quickEdit.panY = pan.y;
@@ -10635,7 +14216,7 @@
     state.quickEdit.rotationDrag = {
       pointerId: ev.pointerId,
       startX: ev.clientX,
-      startRotation: normalizeQuickEditParams(state.quickEdit.params).rotation,
+      startRotation: quickEditEffectiveParams().rotation,
     };
     ruler.classList.add('dragging');
     try {
@@ -10666,6 +14247,13 @@
     } catch (err) {
       // Pointer capture may already be released by the browser.
     }
+    console.info('[PicScannerGeometry] rotation drag complete', {
+      photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+      startRotation: drag.startRotation,
+      rotation: quickEditEffectiveParams().rotation,
+      frame: isQuickEditCropToolActive() ? quickEditCropFrameRect() : null,
+      zoom: state.quickEdit.viewZoom,
+    });
     scheduleQuickEditCropShade();
     ev.stopPropagation();
   }
@@ -10674,13 +14262,13 @@
     if (!state.quickEdit.open) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const current = normalizeQuickEditParams(state.quickEdit.params).rotation;
+    const current = quickEditEffectiveParams().rotation;
     setQuickEditRotation(current + (ev.deltaY < 0 ? 1 : -1));
   }
 
   function onQuickEditRotationKeydown(ev) {
     if (!state.quickEdit.open) return;
-    const current = normalizeQuickEditParams(state.quickEdit.params).rotation;
+    const current = quickEditEffectiveParams().rotation;
     const step = ev.shiftKey ? 10 : 1;
     if (ev.key === 'ArrowLeft') {
       setQuickEditRotation(current - step);
@@ -10705,10 +14293,10 @@
     if (rawPanel) rawPanel.classList.toggle('hidden', !rawActive);
     const saveCurrent = el.querySelector('[data-quick-edit-save-current]');
     if (saveCurrent) {
-      saveCurrent.disabled = rawActive;
-      saveCurrent.classList.toggle('disabled', rawActive);
-      saveCurrent.title = rawActive ? 'RAW 显影请直接导出保存' : '保存更改';
-      saveCurrent.setAttribute('aria-disabled', rawActive ? 'true' : 'false');
+      saveCurrent.disabled = false;
+      saveCurrent.classList.remove('disabled');
+      saveCurrent.title = rawActive ? '确认当前 RAW 预览调整' : '保存更改';
+      saveCurrent.setAttribute('aria-disabled', 'false');
     }
     el.querySelectorAll('[data-quick-edit-range]').forEach((input) => {
       const key = String(input.dataset.quickEditRange || '');
@@ -10747,6 +14335,8 @@
       node.textContent = quickEditValueText(key, key === 'rotation' ? effectiveParams[key] : params[key]);
     });
     syncQuickEditLutUi();
+    syncQuickEditPanelTabs();
+    syncQuickEditFrameUi();
     el.querySelectorAll('[data-quick-edit-tool]').forEach((btn) => {
       const key = String(btn.dataset.quickEditTool || '');
       const active = !!(state.quickEdit.activeTools && state.quickEdit.activeTools[key]);
@@ -10793,6 +14383,14 @@
     };
   }
 
+  function quickEditHasCropInsets(params) {
+    const clean = normalizeQuickEditParams(params);
+    return clean.cropTop > 0.000001
+      || clean.cropRight > 0.000001
+      || clean.cropBottom > 0.000001
+      || clean.cropLeft > 0.000001;
+  }
+
   function quickEditStageRect() {
     const el = state.quickEdit.el;
     const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
@@ -10802,23 +14400,222 @@
     return rect;
   }
 
+  function quickEditCropStageBounds(stageRect) {
+    const width = Math.max(1, Number(stageRect && stageRect.width || 0));
+    const height = Math.max(1, Number(stageRect && stageRect.height || 0));
+    const marginX = Math.min(QUICK_EDIT_CROP_STAGE_MARGIN, Math.max(0, (width - QUICK_EDIT_CROP_MIN_FRAME_PX) / 2));
+    const marginY = Math.min(QUICK_EDIT_CROP_STAGE_MARGIN, Math.max(0, (height - QUICK_EDIT_CROP_MIN_FRAME_PX) / 2));
+    return {
+      left: marginX,
+      top: marginY,
+      right: width - marginX,
+      bottom: height - marginY,
+      width: Math.max(1, width - marginX * 2),
+      height: Math.max(1, height - marginY * 2),
+    };
+  }
+
+  function quickEditTransformedImageGeometry(params, options) {
+    const opts = options || {};
+    const el = state.quickEdit.el;
+    const stage = opts.stage || (el ? el.querySelector('[data-quick-edit-stage]') : null);
+    const img = opts.img || (el ? el.querySelector('[data-quick-edit-img]') : null);
+    if (!stage || !img) return null;
+    const displayBasis = quickEditDisplayBasisSize(img);
+    if (displayBasis.width <= 1 || displayBasis.height <= 1) return null;
+    const stageRect = stage.getBoundingClientRect();
+    if (stageRect.width <= 1 || stageRect.height <= 1) return null;
+    const clean = normalizeQuickEditParams(params || quickEditEffectiveParams());
+    const zoom = Math.max(0.0001, Number(opts.zoom === undefined ? state.quickEdit.viewZoom : opts.zoom));
+    const pan = opts.pan || quickEditEffectivePan();
+    const angle = (Number(clean.rotation || 0) + Number(clean.straighten || 0)) * Math.PI / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const unscaledWidth = Math.abs(cos) * displayBasis.width + Math.abs(sin) * displayBasis.height;
+    const unscaledHeight = Math.abs(sin) * displayBasis.width + Math.abs(cos) * displayBasis.height;
+    const recenterParams = opts.recenterParams || quickEditEffectiveParams();
+    const transformed = quickEditGeometryApi().transformedGeometry({
+      stageWidth: stageRect.width,
+      stageHeight: stageRect.height,
+      fullWidth: unscaledWidth,
+      fullHeight: unscaledHeight,
+      crop: quickEditCropRect(recenterParams),
+      zoom,
+      panX: Number(pan.x || 0),
+      panY: Number(pan.y || 0),
+      recenter: opts.recenter !== false,
+    });
+    const scaledWidth = Math.max(1, displayBasis.width * zoom);
+    const scaledHeight = Math.max(1, displayBasis.height * zoom);
+    return {
+      x: transformed.x,
+      y: transformed.y,
+      w: transformed.w,
+      h: transformed.h,
+      centerX: transformed.centerX,
+      centerY: transformed.centerY,
+      angle,
+      cos,
+      sin,
+      scaledWidth,
+      scaledHeight,
+      unscaledWidth,
+      unscaledHeight,
+      presentationOffsetX: transformed.offsetX,
+      presentationOffsetY: transformed.offsetY,
+      stageWidth: stageRect.width,
+      stageHeight: stageRect.height,
+    };
+  }
+
+  function quickEditCropFrameForParams(params, geometry) {
+    const crop = quickEditCropRect(params);
+    return {
+      x: geometry.x + crop.x / 100 * geometry.w,
+      y: geometry.y + crop.y / 100 * geometry.h,
+      w: crop.w / 100 * geometry.w,
+      h: crop.h / 100 * geometry.h,
+      stageWidth: geometry.stageWidth,
+      stageHeight: geometry.stageHeight,
+    };
+  }
+
+  function quickEditClipPathForFrame(frame, geometry) {
+    if (!frame || !geometry) return '';
+    const corners = [
+      [frame.x, frame.y],
+      [frame.x + frame.w, frame.y],
+      [frame.x + frame.w, frame.y + frame.h],
+      [frame.x, frame.y + frame.h],
+    ];
+    const points = corners.map(([x, y]) => {
+      const dx = x - geometry.centerX;
+      const dy = y - geometry.centerY;
+      const localX = dx * geometry.cos + dy * geometry.sin;
+      const localY = -dx * geometry.sin + dy * geometry.cos;
+      return [
+        clamp(50 + localX / geometry.scaledWidth * 100, 0, 100),
+        clamp(50 + localY / geometry.scaledHeight * 100, 0, 100),
+      ];
+    });
+    return 'polygon(' + points.map((point) => point[0].toFixed(4) + '% ' + point[1].toFixed(4) + '%').join(', ') + ')';
+  }
+
+  function storeQuickEditCropFrameRect(rect) {
+    const stageRect = quickEditStageRect();
+    if (!stageRect || !rect) return null;
+    const width = Math.max(1, Number(rect.w || rect.width || 0));
+    const height = Math.max(1, Number(rect.h || rect.height || 0));
+    const x = Number(rect.x || 0);
+    const y = Number(rect.y || 0);
+    state.quickEdit.cropFrame = {
+      width,
+      height,
+      offsetX: x - (stageRect.width - width) / 2,
+      offsetY: y - (stageRect.height - height) / 2,
+    };
+    return state.quickEdit.cropFrame;
+  }
+
+  function quickEditOutputFitMetrics() {
+    if (!state.quickEdit.open) return null;
+    const el = state.quickEdit.el;
+    const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
+    const img = el ? el.querySelector('[data-quick-edit-img]') : null;
+    const stageRect = stage ? stage.getBoundingClientRect() : null;
+    if (!stageRect || !img) return null;
+    const displayBasis = quickEditDisplayBasisSize(img);
+    if (displayBasis.width <= 1 || displayBasis.height <= 1) return null;
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+    });
+    if (!geometry) return null;
+    const frame = quickEditCropFrameForParams(params, geometry);
+    const bounds = quickEditCropStageBounds(stageRect);
+    const frameConfig = isQuickEditCropToolActive() ? null : quickEditFrameExportConfig(state.quickEdit.framePreset);
+    const insets = quickEditNormalizeFrameInsets(frameConfig ? frameConfig.insets : null);
+    const basis = Math.max(1, Math.min(frame.w, frame.h));
+    const frameLeft = basis * insets.left / 100;
+    const frameRight = basis * insets.right / 100;
+    const frameTop = basis * insets.top / 100;
+    const frameBottom = basis * insets.bottom / 100;
+    const outerWidth = frame.w + frameLeft + frameRight;
+    const outerHeight = frame.h + frameTop + frameBottom;
+    const scale = Math.max(0.0001, Math.min(
+      bounds.width / Math.max(0.0001, outerWidth),
+      bounds.height / Math.max(0.0001, outerHeight),
+    ));
+    return {
+      params,
+      frame,
+      bounds,
+      scale,
+      panX: (frameLeft - frameRight) * scale / 2,
+      panY: (frameTop - frameBottom) * scale / 2,
+    };
+  }
+
+  function quickEditPresentationZoomBounds() {
+    const metrics = quickEditOutputFitMetrics();
+    const fitZoom = metrics ? metrics.scale : 1;
+    return {
+      fit: fitZoom,
+      min: Math.max(0.0001, fitZoom * QUICK_EDIT_MIN_ZOOM),
+      max: Math.max(0.0001, fitZoom * QUICK_EDIT_MAX_ZOOM),
+      panX: metrics ? metrics.panX : 0,
+      panY: metrics ? metrics.panY : 0,
+    };
+  }
+
+  function fitQuickEditCommittedOutput(options) {
+    const opts = options || {};
+    if (!state.quickEdit.open || (isQuickEditCropToolActive() && !opts.force)) return false;
+    const metrics = quickEditOutputFitMetrics();
+    if (!metrics) return false;
+    state.quickEdit.viewZoom = metrics.scale;
+    state.quickEdit.panX = metrics.panX;
+    state.quickEdit.panY = metrics.panY;
+    if (!opts.preserveCropFrame) {
+      state.quickEdit.cropFrame = null;
+    }
+    if (!opts.silent) {
+      console.info('[PicScannerGeometry] committed output fitted', {
+        photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+        rawSourcePreserved: quickEditIsRawPhoto(),
+        crop: quickEditCropRect(metrics.params),
+        rotation: Number(metrics.params.rotation || 0) + Number(metrics.params.straighten || 0),
+        presentationZoom: metrics.scale,
+        presentationPan: { x: state.quickEdit.panX, y: state.quickEdit.panY },
+        outputFrame: metrics.frame,
+      });
+    }
+    return true;
+  }
+
   function quickEditCropFrameRect() {
     const stageRect = quickEditStageRect();
     if (!stageRect) return null;
+    const bounds = quickEditCropStageBounds(stageRect);
     const frame = state.quickEdit.cropFrame || {};
-    const maxW = Math.max(120, stageRect.width - 48);
-    const maxH = Math.max(120, stageRect.height - 48);
-    const width = clamp(Number(frame.width || stageRect.width * 0.72), QUICK_EDIT_CROP_MIN_SIZE * 8, maxW);
-    const height = clamp(Number(frame.height || stageRect.height * 0.62), QUICK_EDIT_CROP_MIN_SIZE * 8, maxH);
-    const offsetX = clamp(Number(frame.offsetX || 0), -(stageRect.width - width) / 2, (stageRect.width - width) / 2);
-    const offsetY = clamp(Number(frame.offsetY || 0), -(stageRect.height - height) / 2, (stageRect.height - height) / 2);
+    const minW = Math.min(QUICK_EDIT_CROP_MIN_FRAME_PX, bounds.width);
+    const minH = Math.min(QUICK_EDIT_CROP_MIN_FRAME_PX, bounds.height);
+    const width = clamp(Number(frame.width || bounds.width * 0.72), minW, bounds.width);
+    const height = clamp(Number(frame.height || bounds.height * 0.62), minH, bounds.height);
+    const rawX = (stageRect.width - width) / 2 + Number(frame.offsetX || 0);
+    const rawY = (stageRect.height - height) / 2 + Number(frame.offsetY || 0);
+    const x = clamp(rawX, bounds.left, bounds.right - width);
+    const y = clamp(rawY, bounds.top, bounds.bottom - height);
     return {
-      x: (stageRect.width - width) / 2 + offsetX,
-      y: (stageRect.height - height) / 2 + offsetY,
+      x,
+      y,
       w: width,
       h: height,
-      offsetX,
-      offsetY,
+      offsetX: x - (stageRect.width - width) / 2,
+      offsetY: y - (stageRect.height - height) / 2,
       stageWidth: stageRect.width,
       stageHeight: stageRect.height,
     };
@@ -10828,18 +14625,25 @@
     if (!state.quickEdit.open || !isQuickEditCropToolActive()) return;
     if (!force && state.quickEdit.cropFrame) return;
     const stageRect = quickEditStageRect();
-    if (!stageRect) return;
-    state.quickEdit.cropFrame = {
-      width: Math.max(120, stageRect.width * 0.72),
-      height: Math.max(120, stageRect.height * 0.62),
-      offsetX: 0,
-      offsetY: 0,
-    };
-    state.quickEdit.viewZoom = Math.max(state.quickEdit.viewZoom, quickEditMinimumZoomForCropFrame());
-    const pan = clampQuickEditPan(state.quickEdit.panX, state.quickEdit.panY);
-    state.quickEdit.panX = pan.x;
-    state.quickEdit.panY = pan.y;
+    const el = state.quickEdit.el;
+    const img = el ? el.querySelector('[data-quick-edit-img]') : null;
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params, { img });
+    if (!stageRect || !geometry) return;
+    const bounds = quickEditCropStageBounds(stageRect);
+    const desired = quickEditCropFrameForParams(params, geometry);
+    const width = Math.min(bounds.width, desired.w);
+    const height = Math.min(bounds.height, desired.h);
+    storeQuickEditCropFrameRect({
+      x: clamp(desired.x, bounds.left, bounds.right - width),
+      y: clamp(desired.y, bounds.top, bounds.bottom - height),
+      w: width,
+      h: height,
+    });
+    applyQuickEditPreview({ skipOverlay: true, skipColorRender: true });
     updateQuickEditCropOverlay();
+    const overlay = el ? el.querySelector('[data-quick-edit-crop-overlay]') : null;
+    if (overlay) overlay.classList.add('shade-active');
   }
 
   function updateQuickEditCropOverlay() {
@@ -10893,7 +14697,7 @@
     if (!sampleCtx) throw new Error('无法创建直方图采样画布');
     sampleCtx.drawImage(img, 0, 0, sampleWidth, sampleHeight);
     const data = sampleCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
-    applyQuickEditPixelAdjustments(data, quickEditWorkerParams(params), sampleWidth, sampleHeight);
+    applyQuickEditPixelStages(data, quickEditWorkerParams(params), sampleWidth, sampleHeight);
     const white = new Array(256).fill(0);
     const red = new Array(256).fill(0);
     const green = new Array(256).fill(0);
@@ -11069,25 +14873,15 @@
   function setQuickEditCropFrameRect(rect) {
     const stageRect = quickEditStageRect();
     if (!stageRect) return;
+    const bounds = quickEditCropStageBounds(stageRect);
     const raw = rect || {};
-    const maxW = Math.max(120, stageRect.width - 48);
-    const maxH = Math.max(120, stageRect.height - 48);
-    const width = clamp(Number(raw.w || raw.width || 0), QUICK_EDIT_CROP_MIN_SIZE * 8, maxW);
-    const height = clamp(Number(raw.h || raw.height || 0), QUICK_EDIT_CROP_MIN_SIZE * 8, maxH);
-    const x = clamp(Number(raw.x || 0), 24, stageRect.width - 24 - width);
-    const y = clamp(Number(raw.y || 0), 24, stageRect.height - 24 - height);
-    const next = {
-      width,
-      height,
-      offsetX: x - (stageRect.width - width) / 2,
-      offsetY: y - (stageRect.height - height) / 2,
-    };
-    state.quickEdit.cropFrame = next;
-    state.quickEdit.viewZoom = Math.max(state.quickEdit.viewZoom, quickEditMinimumZoomForCropFrame());
-    const pan = clampQuickEditPan(state.quickEdit.panX, state.quickEdit.panY);
-    state.quickEdit.panX = pan.x;
-    state.quickEdit.panY = pan.y;
-    applyQuickEditPreview({ skipColorRender: true });
+    const minW = Math.min(QUICK_EDIT_CROP_MIN_FRAME_PX, bounds.width);
+    const minH = Math.min(QUICK_EDIT_CROP_MIN_FRAME_PX, bounds.height);
+    const width = clamp(Number(raw.w || raw.width || 0), minW, bounds.width);
+    const height = clamp(Number(raw.h || raw.height || 0), minH, bounds.height);
+    const x = clamp(Number(raw.x || 0), bounds.left, bounds.right - width);
+    const y = clamp(Number(raw.y || 0), bounds.top, bounds.bottom - height);
+    storeQuickEditCropFrameRect({ x, y, w: width, h: height });
     updateQuickEditCropOverlay();
     scheduleQuickEditCropShade();
   }
@@ -11098,8 +14892,9 @@
     if (!frame || !stageRect) return;
     const currentCenterX = frame.x + frame.w / 2;
     const currentCenterY = frame.y + frame.h / 2;
-    const targetX = clamp(stageRect.width / 2, frame.w / 2 + 24, stageRect.width - frame.w / 2 - 24);
-    const targetY = clamp(stageRect.height / 2, frame.h / 2 + 24, stageRect.height - frame.h / 2 - 24);
+    const bounds = quickEditCropStageBounds(stageRect);
+    const targetX = clamp(stageRect.width / 2, bounds.left + frame.w / 2, bounds.right - frame.w / 2);
+    const targetY = clamp(stageRect.height / 2, bounds.top + frame.h / 2, bounds.bottom - frame.h / 2);
     const dx = targetX - currentCenterX;
     const dy = targetY - currentCenterY;
     const el = state.quickEdit.el;
@@ -11107,12 +14902,14 @@
     const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
     if (overlay) overlay.classList.add('centering');
     if (stage) stage.classList.add('settling');
-    state.quickEdit.cropFrame = {
-      width: frame.w,
-      height: frame.h,
-      offsetX: 0,
-      offsetY: 0,
-    };
+    storeQuickEditCropFrameRect({
+      x: frame.x + dx,
+      y: frame.y + dy,
+      w: frame.w,
+      h: frame.h,
+    });
+    state.quickEdit.viewZoom = Math.max(state.quickEdit.viewZoom, quickEditMinimumZoomForCropFrame());
+    applyQuickEditPreview({ skipOverlay: true, skipColorRender: true });
     updateQuickEditCropOverlay();
     const pan = clampQuickEditPan(state.quickEdit.panX + dx, state.quickEdit.panY + dy);
     state.quickEdit.panX = pan.x;
@@ -11130,26 +14927,24 @@
     const el = state.quickEdit.el;
     const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
     const img = el ? el.querySelector('[data-quick-edit-img]') : null;
-    const stageRect = stage ? stage.getBoundingClientRect() : null;
-    const imgRect = img ? img.getBoundingClientRect() : null;
     const frame = quickEditCropFrameRect();
-    if (!stageRect || !imgRect || !frame) return raw;
-    const committedX = Number(state.quickEdit.committedPanX || 0);
-    const committedY = Number(state.quickEdit.committedPanY || 0);
-    const currentPan = quickEditEffectivePan();
-    const effectiveX = committedX + Number(x || 0);
-    const effectiveY = committedY + Number(y || 0);
-    const baseLeft = imgRect.left - stageRect.left - currentPan.x;
-    const baseTop = imgRect.top - stageRect.top - currentPan.y;
-    const imageWidth = Math.max(1, imgRect.width);
-    const imageHeight = Math.max(1, imgRect.height);
-    const minX = frame.x + frame.w - baseLeft - imageWidth;
-    const maxX = frame.x - baseLeft;
-    const minY = frame.y + frame.h - baseTop - imageHeight;
-    const maxY = frame.y - baseTop;
+    if (!stage || !img || !frame) return raw;
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: state.quickEdit.viewZoom,
+      pan: { x: 0, y: 0 },
+    });
+    const outputFrame = geometry ? quickEditCropFrameForParams(params, geometry) : null;
+    if (!outputFrame) return raw;
+    const minX = frame.x + frame.w - outputFrame.x - outputFrame.w;
+    const maxX = frame.x - outputFrame.x;
+    const minY = frame.y + frame.h - outputFrame.y - outputFrame.h;
+    const maxY = frame.y - outputFrame.y;
     return {
-      x: clamp(effectiveX, Math.min(minX, maxX), Math.max(minX, maxX)) - committedX,
-      y: clamp(effectiveY, Math.min(minY, maxY), Math.max(minY, maxY)) - committedY,
+      x: clamp(raw.x, Math.min(minX, maxX), Math.max(minX, maxX)),
+      y: clamp(raw.y, Math.min(minY, maxY), Math.max(minY, maxY)),
     };
   }
 
@@ -11163,6 +14958,11 @@
     if (!overlay || !box || !mode) return;
     const overlayRect = overlay.getBoundingClientRect();
     if (overlayRect.width <= 1 || overlayRect.height <= 1) return;
+    const startRect = quickEditCropFrameRect();
+    const params = quickEditEffectiveParams();
+    const geometry = quickEditTransformedImageGeometry(params);
+    if (!startRect || !geometry) return;
+    const outputFrame = quickEditCropFrameForParams(params, geometry);
     state.quickEdit.cropDrag = {
       mode,
       pointerId: ev.pointerId,
@@ -11170,9 +14970,14 @@
       startY: ev.clientY,
       overlayWidth: overlayRect.width,
       overlayHeight: overlayRect.height,
-      startRect: quickEditCropFrameRect(),
+      startRect,
       startPanX: state.quickEdit.panX,
       startPanY: state.quickEdit.panY,
+      startZoom: state.quickEdit.viewZoom,
+      startOutputCenterX: outputFrame.x + outputFrame.w / 2,
+      startOutputCenterY: outputFrame.y + outputFrame.h / 2,
+      minWidth: Math.max(QUICK_EDIT_CROP_MIN_FRAME_PX, outputFrame.w * QUICK_EDIT_CROP_MIN_SIZE / 100),
+      minHeight: Math.max(QUICK_EDIT_CROP_MIN_FRAME_PX, outputFrame.h * QUICK_EDIT_CROP_MIN_SIZE / 100),
     };
     clearQuickEditCropShade();
     overlay.classList.add('dragging');
@@ -11185,9 +14990,39 @@
     ev.stopPropagation();
   }
 
-  function resizedQuickEditCropFrame(startRect, mode, dx, dy) {
-    const margin = 24;
-    const min = QUICK_EDIT_CROP_MIN_SIZE * 8;
+  function quickEditCropResizeAnchor(rect, mode) {
+    return {
+      x: mode.includes('w') ? rect.x + rect.w : (mode.includes('e') ? rect.x : rect.x + rect.w / 2),
+      y: mode.includes('n') ? rect.y + rect.h : (mode.includes('s') ? rect.y : rect.y + rect.h / 2),
+    };
+  }
+
+  function quickEditScaleRectAroundAnchor(rect, anchor, scale) {
+    const left = anchor.x + (rect.x - anchor.x) * scale;
+    const top = anchor.y + (rect.y - anchor.y) * scale;
+    const right = anchor.x + (rect.x + rect.w - anchor.x) * scale;
+    const bottom = anchor.y + (rect.y + rect.h - anchor.y) * scale;
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  function quickEditCropAutoFitScale(rect, anchor, bounds) {
+    let scale = 1;
+    if (rect.x < bounds.left && anchor.x > rect.x) {
+      scale = Math.min(scale, (anchor.x - bounds.left) / (anchor.x - rect.x));
+    }
+    if (rect.x + rect.w > bounds.right && rect.x + rect.w > anchor.x) {
+      scale = Math.min(scale, (bounds.right - anchor.x) / (rect.x + rect.w - anchor.x));
+    }
+    if (rect.y < bounds.top && anchor.y > rect.y) {
+      scale = Math.min(scale, (anchor.y - bounds.top) / (anchor.y - rect.y));
+    }
+    if (rect.y + rect.h > bounds.bottom && rect.y + rect.h > anchor.y) {
+      scale = Math.min(scale, (bounds.bottom - anchor.y) / (rect.y + rect.h - anchor.y));
+    }
+    return clamp(scale, 0.0001, 1);
+  }
+
+  function resizedQuickEditCropFrame(startRect, mode, dx, dy, minWidth, minHeight) {
     let left = startRect.x;
     let top = startRect.y;
     let right = startRect.x + startRect.w;
@@ -11197,15 +15032,22 @@
       return { x: left, y: top, w: startRect.w, h: startRect.h };
     }
 
-    if (mode.includes('w')) left = clamp(left + dx, margin, right - min);
-    if (mode.includes('e')) right = clamp(right + dx, left + min, startRect.stageWidth - margin);
-    if (mode.includes('n')) top = clamp(top + dy, margin, bottom - min);
-    if (mode.includes('s')) bottom = clamp(bottom + dy, top + min, startRect.stageHeight - margin);
-    return {
+    if (mode.includes('w')) left = Math.min(left + dx, right - minWidth);
+    if (mode.includes('e')) right = Math.max(right + dx, left + minWidth);
+    if (mode.includes('n')) top = Math.min(top + dy, bottom - minHeight);
+    if (mode.includes('s')) bottom = Math.max(bottom + dy, top + minHeight);
+    const desired = {
       x: left,
       y: top,
       w: right - left,
       h: bottom - top,
+    };
+    const anchor = quickEditCropResizeAnchor(startRect, mode);
+    const bounds = quickEditCropStageBounds({ width: startRect.stageWidth, height: startRect.stageHeight });
+    return {
+      desired,
+      anchor,
+      scale: quickEditCropAutoFitScale(desired, anchor, bounds),
     };
   }
 
@@ -11224,13 +15066,28 @@
       ev.stopPropagation();
       return;
     }
-    const nextFrame = resizedQuickEditCropFrame(
+    const resized = resizedQuickEditCropFrame(
       drag.startRect,
       drag.mode,
       ev.clientX - drag.startX,
       ev.clientY - drag.startY,
+      drag.minWidth,
+      drag.minHeight,
     );
+    const scale = resized.scale;
+    const nextFrame = quickEditScaleRectAroundAnchor(resized.desired, resized.anchor, scale);
+    const nextOutputCenterX = resized.anchor.x + (drag.startOutputCenterX - resized.anchor.x) * scale;
+    const nextOutputCenterY = resized.anchor.y + (drag.startOutputCenterY - resized.anchor.y) * scale;
+    state.quickEdit.viewZoom = Math.max(0.0001, drag.startZoom * scale);
+    state.quickEdit.panX = nextOutputCenterX - drag.startRect.stageWidth / 2;
+    state.quickEdit.panY = nextOutputCenterY - drag.startRect.stageHeight / 2;
     setQuickEditCropFrameRect(nextFrame);
+    state.quickEdit.viewZoom = Math.max(state.quickEdit.viewZoom, quickEditMinimumZoomForCropFrame());
+    const pan = clampQuickEditPan(state.quickEdit.panX, state.quickEdit.panY);
+    state.quickEdit.panX = pan.x;
+    state.quickEdit.panY = pan.y;
+    applyQuickEditPreview({ skipOverlay: true, skipColorRender: true });
+    updateQuickEditCropOverlay();
     ev.preventDefault();
     ev.stopPropagation();
   }
@@ -11250,6 +15107,13 @@
       }
     }
     if (drag.mode !== 'image') centerQuickEditCropFrameWithAnimation();
+    console.info('[PicScannerGeometry] crop drag complete', {
+      photoId: Number(state.quickEdit.photo && state.quickEdit.photo.id || 0),
+      mode: drag.mode,
+      frame: quickEditCropFrameRect(),
+      zoom: state.quickEdit.viewZoom,
+      pan: quickEditEffectivePan(),
+    });
     scheduleQuickEditCropShade();
     ev.stopPropagation();
   }
@@ -11364,25 +15228,86 @@
     if (stage) stage.classList.toggle('loading', !!loading);
   }
 
+  function syncQuickEditOutputMask(frame) {
+    const el = state.quickEdit.el;
+    const stage = el ? el.querySelector('[data-quick-edit-stage]') : null;
+    const mask = el ? el.querySelector('[data-quick-edit-output-mask]') : null;
+    if (!stage || !mask || !frame || frame.w <= 0 || frame.h <= 0) {
+      if (mask) mask.classList.add('hidden');
+      return;
+    }
+    const stageWidth = Math.max(1, stage.clientWidth);
+    const stageHeight = Math.max(1, stage.clientHeight);
+    const left = clamp(Number(frame.x || 0), 0, stageWidth);
+    const top = clamp(Number(frame.y || 0), 0, stageHeight);
+    const right = clamp(left + Number(frame.w || 0), left, stageWidth);
+    const bottom = clamp(top + Number(frame.h || 0), top, stageHeight);
+    const sides = {
+      top: { left: 0, top: 0, width: stageWidth, height: top },
+      right: { left: right, top, width: stageWidth - right, height: bottom - top },
+      bottom: { left: 0, top: bottom, width: stageWidth, height: stageHeight - bottom },
+      left: { left: 0, top, width: left, height: bottom - top },
+    };
+    Object.keys(sides).forEach((key) => {
+      const node = mask.querySelector('[data-quick-edit-output-mask-side="' + key + '"]');
+      const rect = sides[key];
+      if (!node) return;
+      node.style.left = rect.left.toFixed(2) + 'px';
+      node.style.top = rect.top.toFixed(2) + 'px';
+      node.style.width = Math.max(0, rect.width).toFixed(2) + 'px';
+      node.style.height = Math.max(0, rect.height).toFixed(2) + 'px';
+    });
+    mask.classList.remove('hidden');
+  }
+
   function applyQuickEditPreview(options) {
     const opts = options || {};
     const el = ensureQuickEdit();
     const img = el.querySelector('[data-quick-edit-img]');
     if (!img) return;
+    enforceQuickEditDisplayBasis(img);
     const compareImg = el.querySelector('[data-quick-edit-compare-img]');
+    const visualLayer = el.querySelector('[data-quick-edit-visual-layer]');
+    const stage = el.querySelector('[data-quick-edit-stage]');
     const params = quickEditEffectiveParams();
     const pan = quickEditEffectivePan();
     const angle = params.rotation + params.straighten;
-    const transform = 'translate(' + pan.x.toFixed(2) + 'px, ' + pan.y.toFixed(2) + 'px) scale(' + state.quickEdit.viewZoom.toFixed(4) + ') rotate(' + angle.toFixed(2) + 'deg)';
-    img.style.transform = transform;
-    img.style.filter = quickEditPreviewFilter(params);
+    const clipParams = params;
+    const presentationGeometry = quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+      recenterParams: clipParams,
+    });
+    const offsetX = Number(presentationGeometry && presentationGeometry.presentationOffsetX || 0);
+    const offsetY = Number(presentationGeometry && presentationGeometry.presentationOffsetY || 0);
+    const viewTransform = 'translate(' + pan.x.toFixed(2) + 'px, ' + pan.y.toFixed(2) + 'px) '
+      + 'scale(' + state.quickEdit.viewZoom.toFixed(4) + ') '
+      + 'translate(' + (-offsetX).toFixed(2) + 'px, ' + (-offsetY).toFixed(2) + 'px)';
+    if (visualLayer) visualLayer.style.transform = viewTransform;
+    img.style.transform = 'rotate(' + angle.toFixed(2) + 'deg)';
+    img.style.filter = 'none';
+    const committedCropVisible = quickEditHasCropInsets(clipParams);
+    const geometry = committedCropVisible ? quickEditTransformedImageGeometry(params, {
+      stage,
+      img,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+      recenter: false,
+    }) : null;
+    const committedFrame = geometry ? quickEditCropFrameForParams(clipParams, geometry) : null;
+    img.style.clipPath = committedCropVisible ? quickEditClipPathForFrame(committedFrame, geometry) : '';
+    syncQuickEditOutputMask(null);
     if (compareImg) {
       compareImg.style.width = img.style.width || '';
       compareImg.style.height = img.style.height || '';
       compareImg.style.aspectRatio = img.style.aspectRatio || '';
-      compareImg.style.transform = transform;
+      compareImg.style.transform = img.style.transform;
       compareImg.style.filter = 'none';
+      compareImg.style.clipPath = img.style.clipPath;
     }
+    syncQuickEditFramePreview();
     if (!opts.skipColorRender) {
       const interactive = !!opts.interactive && quickEditShouldUseLowResolutionInteractive(params);
       scheduleQuickEditPreviewRender({
@@ -11411,14 +15336,34 @@
     );
 
     img.alt = photo.filename || '';
+    if (quickEditIsRawPhoto(cachedPhoto)) {
+      const request = quickEditRawPreviewRequest({ maxSide: QUICK_EDIT_SETTLED_PREVIEW_MAX_SIDE });
+      const cachedRaw = request
+        ? cachedQuickEditRawPreview(photoId, request.rawSignature, request.maxSide)
+        : null;
+      if (cachedRaw && displayCachedQuickEditRawPreview(cachedRaw, img)) {
+        if (Number(cachedRaw.maxSide || 0) > 0) {
+          scheduleQuickEditRawOriginalDevelopPreview(request.rawSignature);
+        }
+        return;
+      }
+      revokeQuickEditPreviewObjectUrl();
+      state.quickEdit.sourceSrc = '';
+      state.quickEdit.sourceImageSrc = '';
+      state.quickEdit.sourceImage = null;
+      state.quickEdit.sourceImagePromise = null;
+      img.removeAttribute('src');
+      setQuickEditRawPreviewLoading(true);
+      renderQuickEditMeta(cachedPhoto, 'raw-developing');
+      applyQuickEditPreview({ skipColorRender: true });
+      scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
+      return;
+    }
     if (url) {
       setQuickEditImageSource(img, url);
       setQuickEditLoading(false);
       renderQuickEditMeta(cachedPhoto, 'ready');
       applyQuickEditPreview();
-      if (quickEditIsRawPhoto(cachedPhoto)) {
-        scheduleQuickEditRawDevelopPreview({ delayMs: 0, force: true });
-      }
       return;
     }
     if (previewUrl) {
@@ -11484,16 +15429,29 @@
     hideQuickEditExitConfirm();
     hideQuickEditSaveConfirm();
     hideQuickEditPresetApplyConfirm();
+    hideQuickEditPresetOverwriteConfirm();
     hideQuickEditPresetModal();
+    hideQuickEditFramePresetOverwriteConfirm();
+    hideQuickEditFramePresetDeleteConfirm();
+    hideQuickEditFramePresetModal();
+    hideQuickEditFrameAssetModal();
+    hideQuickEditFrameTextPanels();
     hideQuickEditLutModal();
     cancelQuickEditPan();
+    endQuickEditFrameTextDrag();
+    endQuickEditFrameImageDrag();
     hideQuickEditCurvePanel();
     state.quickEdit.open = false;
+    state.quickEdit.batchMode = false;
+    state.quickEdit.batchPhotos = [];
+    state.quickEdit.batchIndex = 0;
+    state.quickEdit.batchSessions = new Map();
+    state.quickEdit.batchSwitching = false;
+    state.quickEdit.bakedSource = false;
     state.quickEdit.photo = null;
     state.quickEdit.params = null;
     state.quickEdit.committedParams = null;
-    state.quickEdit.committedPanX = 0;
-    state.quickEdit.committedPanY = 0;
+    state.quickEdit.committedStages = [];
     state.quickEdit.panX = 0;
     state.quickEdit.panY = 0;
     state.quickEdit.cropFrame = null;
@@ -11503,6 +15461,7 @@
     state.quickEdit.histogramData = null;
     state.quickEdit.hslColor = 'red';
     state.quickEdit.hslPickerActive = false;
+    state.quickEdit.panelTab = 'adjust';
     state.quickEdit.lut = null;
     state.quickEdit.luts = [];
     state.quickEdit.lutDraft = null;
@@ -11537,9 +15496,17 @@
     state.quickEdit.previewRendering = false;
     revokeQuickEditPreviewObjectUrl();
     state.quickEdit.viewZoom = 1;
+    state.quickEdit.displayBasisReady = false;
+    state.quickEdit.displayBasisWidth = 0;
+    state.quickEdit.displayBasisHeight = 0;
+    state.quickEdit.bakedSource = false;
     state.quickEdit.loadToken += 1;
     clearQuickEditCropShade();
     const el = ensureQuickEdit();
+    el.classList.remove('batch-mode');
+    el.querySelectorAll('.quick-edit-batch-only').forEach((node) => node.classList.add('hidden'));
+    const batchStrip = el.querySelector('[data-quick-edit-batch-strip]');
+    if (batchStrip) batchStrip.classList.add('hidden');
     const img = el.querySelector('[data-quick-edit-img]');
     if (img) {
       img.removeAttribute('src');
@@ -11551,6 +15518,19 @@
       compareImg.classList.add('hidden');
       compareImg.removeAttribute('src');
       compareImg.removeAttribute('style');
+    }
+    const visualLayer = el.querySelector('[data-quick-edit-visual-layer]');
+    if (visualLayer) visualLayer.removeAttribute('style');
+    const framePreview = el.querySelector('[data-quick-edit-frame-preview]');
+    if (framePreview) {
+      framePreview.classList.add('hidden');
+      framePreview.classList.remove('frame-white', 'frame-black', 'frame-paper');
+      framePreview.removeAttribute('style');
+    }
+    const outputMask = el.querySelector('[data-quick-edit-output-mask]');
+    if (outputMask) {
+      outputMask.classList.add('hidden');
+      outputMask.querySelectorAll('[data-quick-edit-output-mask-side]').forEach((node) => node.removeAttribute('style'));
     }
     const overlay = el.querySelector('[data-quick-edit-crop-overlay]');
     if (overlay) {
@@ -11566,6 +15546,12 @@
 
   function openQuickEdit(photo, options) {
     const opts = options || {};
+    const preservedBatch = opts.preserveBatch ? {
+      batchMode: state.quickEdit.batchMode,
+      batchPhotos: state.quickEdit.batchPhotos,
+      batchIndex: state.quickEdit.batchIndex,
+      batchSessions: state.quickEdit.batchSessions,
+    } : null;
     const current = photo || null;
     if (!canQuickEditPhoto(current)) {
       showToast('这张照片暂时无法预览调整', 'error');
@@ -11588,8 +15574,7 @@
     state.quickEdit.photo = current;
     state.quickEdit.params = quickEditDefaultParams();
     state.quickEdit.committedParams = null;
-    state.quickEdit.committedPanX = 0;
-    state.quickEdit.committedPanY = 0;
+    state.quickEdit.committedStages = [];
     state.quickEdit.panX = 0;
     state.quickEdit.panY = 0;
     state.quickEdit.cropFrame = null;
@@ -11598,6 +15583,12 @@
     state.quickEdit.histogramMenuOpen = false;
     state.quickEdit.histogramData = null;
     state.quickEdit.hslColor = 'red';
+    state.quickEdit.framePreset = 'none';
+    state.quickEdit.frameInsets = quickEditFrameDefaultInsets('none');
+    state.quickEdit.frameTextLayers = [];
+    state.quickEdit.frameTextDrag = null;
+    state.quickEdit.frameImageLayers = [];
+    state.quickEdit.frameImageDrag = null;
     state.quickEdit.lut = null;
     state.quickEdit.luts = [];
     state.quickEdit.lutDraft = null;
@@ -11610,7 +15601,13 @@
     state.quickEdit.cropDrag = null;
     state.quickEdit.rotationDrag = null;
     state.quickEdit.viewZoom = 1;
+    state.quickEdit.displayBasisReady = false;
+    state.quickEdit.displayBasisWidth = 0;
+    state.quickEdit.displayBasisHeight = 0;
+    state.quickEdit.bakedSource = false;
+    if (preservedBatch) Object.assign(state.quickEdit, preservedBatch);
     resetQuickEditRawPreviewState();
+    if (opts.session) applyQuickEditSnapshotState(opts.session);
     syncQuickEditControls();
     syncQuickEditPresetUi();
     if (!state.quickEdit.lutLibraryLoaded && !state.quickEdit.lutLibraryLoading) {
@@ -11619,12 +15616,91 @@
     if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
       refreshQuickEditPresets({ silent: true });
     }
+    if (!state.quickEdit.framePresetsLoaded && !state.quickEdit.framePresetsLoading) {
+      refreshQuickEditFramePresets({ silent: true });
+    }
     renderQuickEditMeta(current, 'loading');
     show(el);
     refreshQuickEditPanController();
     applyQuickEditPreview();
     loadQuickEditPreview(current);
     scheduleQuickEditCropShade();
+    return true;
+  }
+
+  function saveActiveBatchEditSession() {
+    if (!state.quickEdit.batchMode || !state.quickEdit.photo) return;
+    const snapshot = snapshotQuickEditState();
+    if (!snapshot.bakedSource) {
+      snapshot.src = '';
+      snapshot.sourceSrc = '';
+    }
+    state.quickEdit.batchSessions.set(Number(state.quickEdit.photo.id), snapshot);
+  }
+
+  function renderQuickEditBatchStrip() {
+    const el = ensureQuickEdit();
+    const strip = el.querySelector('[data-quick-edit-batch-strip]');
+    const list = el.querySelector('[data-quick-edit-batch-thumbnails]');
+    el.classList.toggle('batch-mode', state.quickEdit.batchMode);
+    el.querySelectorAll('.quick-edit-batch-only').forEach((node) => node.classList.toggle('hidden', !state.quickEdit.batchMode));
+    if (!strip || !list) return;
+    strip.classList.toggle('hidden', !state.quickEdit.batchMode);
+    list.innerHTML = '';
+    if (!state.quickEdit.batchMode) return;
+    state.quickEdit.batchPhotos.forEach((photo, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'quick-edit-batch-thumbnail' + (index === state.quickEdit.batchIndex ? ' active' : '');
+      button.dataset.quickEditBatchIndex = String(index);
+      button.title = String(photo.filename || ('图片 ' + (index + 1)));
+      const src = String(photo.preview_url || photo.lightbox_url || photo.original_url || '');
+      if (src) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = '';
+        button.appendChild(img);
+      }
+      const order = document.createElement('b');
+      order.textContent = String(index + 1);
+      button.appendChild(order);
+      list.appendChild(button);
+    });
+    const active = list.querySelector('.quick-edit-batch-thumbnail.active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  function switchBatchQuickEditPhoto(index) {
+    if (!state.quickEdit.batchMode || state.quickEdit.batchSwitching) return false;
+    const nextIndex = Math.max(0, Math.min(state.quickEdit.batchPhotos.length - 1, Number(index || 0)));
+    if (nextIndex === state.quickEdit.batchIndex) return true;
+    saveActiveBatchEditSession();
+    const nextPhoto = state.quickEdit.batchPhotos[nextIndex];
+    const session = state.quickEdit.batchSessions.get(Number(nextPhoto.id)) || null;
+    state.quickEdit.batchSwitching = true;
+    state.quickEdit.batchIndex = nextIndex;
+    const editor = ensureQuickEdit();
+    const previewImg = editor.querySelector('[data-quick-edit-img]');
+    state.quickEdit.sourceSrc = '';
+    state.quickEdit.sourceImageSrc = '';
+    state.quickEdit.sourceImage = null;
+    state.quickEdit.sourceImagePromise = null;
+    if (previewImg) previewImg.removeAttribute('src');
+    openQuickEdit(nextPhoto, { skipPairChoice: true, preserveBatch: true, session });
+    state.quickEdit.batchSwitching = false;
+    renderQuickEditBatchStrip();
+    return true;
+  }
+
+  function openBatchQuickEdit(photos) {
+    const selected = (Array.isArray(photos) ? photos : []).filter((photo) => Number(photo && photo.id || 0));
+    if (!selected.length) return false;
+    state.quickEdit.batchMode = true;
+    state.quickEdit.batchPhotos = selected.map((photo) => Object.assign({}, photo));
+    state.quickEdit.batchIndex = 0;
+    state.quickEdit.batchSessions = new Map();
+    if (!openQuickEdit(state.quickEdit.batchPhotos[0], { skipPairChoice: true, preserveBatch: true })) return false;
+    renderQuickEditBatchStrip();
     return true;
   }
 
@@ -11653,6 +15729,12 @@
 
   function handleQuickEditShortcut(ev) {
     if ((ev.key !== 'q' && ev.key !== 'Q') || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+    if (ev.repeat) return true;
+    if (state.quickEdit.picking) {
+      cancelQuickEditPicking();
+      showToast('已取消快速调整选图');
+      return true;
+    }
     if (!els.lightbox.classList.contains('hidden')) {
       if (state.compare.lightbox) {
         showToast('对比模式暂不支持快速调整');
@@ -12002,14 +16084,14 @@
       if (!state.lightbox.infoVisible) return;
       if (els.lightbox.classList.contains('hidden')) return;
       if (state.lightboxInfoDetailsCollapsed) {
-        clampLightboxInfoPosition();
+        resizeLightboxInfoToVisibleContent(true);
         return;
       }
       expandLightboxInfoToDetails();
     });
   }
 
-  function expandLightboxInfoToDetails() {
+  function resizeLightboxInfoToVisibleContent(allowShrink) {
     if (!els.lightboxInfo || !els.lightboxInfoBody || !els.lightboxInfoHead) return;
     if (els.lightboxInfo.classList.contains('hidden')) return;
     const headHeight = Math.ceil(els.lightboxInfoHead.getBoundingClientRect().height || 34);
@@ -12018,10 +16100,14 @@
     const maxHeight = Math.min(LIGHTBOX_INFO_MAX_HEIGHT, window.innerHeight - 90);
     const targetHeight = Math.round(clamp(headHeight + bodyHeight + borderHeight, LIGHTBOX_INFO_MIN_HEIGHT, maxHeight));
     const currentHeight = els.lightboxInfo.getBoundingClientRect().height;
-    if (targetHeight > currentHeight + 1) {
+    if ((allowShrink && Math.abs(targetHeight - currentHeight) > 1) || targetHeight > currentHeight + 1) {
       els.lightboxInfo.style.height = targetHeight + 'px';
     }
     clampLightboxInfoPosition();
+  }
+
+  function expandLightboxInfoToDetails() {
+    resizeLightboxInfoToVisibleContent(false);
   }
 
   function clampLightboxInfoPosition() {
@@ -12246,27 +16332,22 @@
       return;
     }
     const box = state.lightbox;
-    const oldZoom = box.zoom;
-    const zoom = clamp(nextZoom, LIGHTBOX_MIN_ZOOM, LIGHTBOX_MAX_ZOOM);
-    if (Math.abs(zoom - oldZoom) < 0.0001) return;
-
-    if (anchorEvent) {
-      const rect = els.lightboxStage.getBoundingClientRect();
-      const localX = anchorEvent.clientX - rect.left - rect.width / 2;
-      const localY = anchorEvent.clientY - rect.top - rect.height / 2;
-      const ratio = zoom / oldZoom;
-      box.panX = localX - (localX - box.panX) * ratio;
-      box.panY = localY - (localY - box.panY) * ratio;
-    } else if (zoom <= 1) {
-      box.panX = 0;
-      box.panY = 0;
-    }
-
-    box.zoom = zoom;
-    if (box.zoom <= 1) {
-      box.panX = 0;
-      box.panY = 0;
-    }
+    const oldZoom = Number(box.zoom || 1);
+    const view = resolveAnchoredZoomView({
+      currentZoom: oldZoom,
+      nextZoom,
+      minZoom: LIGHTBOX_MIN_ZOOM,
+      maxZoom: LIGHTBOX_MAX_ZOOM,
+      panX: box.panX,
+      panY: box.panY,
+      anchorEvent,
+      stage: els.lightboxStage,
+      resetAtOrBelowZoom: 1,
+    });
+    if (Math.abs(view.zoom - oldZoom) < 0.0001) return;
+    box.zoom = view.zoom;
+    box.panX = view.panX;
+    box.panY = view.panY;
     updateLightboxView();
   }
 
@@ -12297,26 +16378,33 @@
       els.lightboxImg.style.height = '';
       return;
     }
+    const embedded = state.lightbox.embedded;
     const titlebar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')) || 36;
-    const maxWidth = Math.max(1, window.innerWidth - 56);
-    const maxHeight = Math.max(1, window.innerHeight - titlebar - 116);
+    const maxWidth = embedded
+      ? Math.max(1, Number(els.lightboxStage.clientWidth || 0) - 32)
+      : Math.max(1, window.innerWidth - 56);
+    const maxHeight = embedded
+      ? Math.max(1, Number(els.lightboxStage.clientHeight || 0) - 32)
+      : Math.max(1, window.innerHeight - titlebar - 116);
     const fit = Math.min(maxWidth / rawWidth, maxHeight / rawHeight);
-    const scale = options && options.allowUpscale ? fit : Math.min(1, fit);
+    const scale = embedded || (options && options.allowUpscale) ? fit : Math.min(1, fit);
     els.lightboxImg.style.width = Math.max(1, rawWidth * scale).toFixed(2) + 'px';
     els.lightboxImg.style.height = Math.max(1, rawHeight * scale).toFixed(2) + 'px';
   }
 
   function loadLightboxImage(photo) {
     const token = ++state.lightbox.loadToken;
-    const cachedPhoto = state.photoCache.get(Number(photo.id || 0)) || photo;
+    const transientPreview = !!(photo && photo.batch_preview);
+    const cachedPhoto = transientPreview ? photo : (state.photoCache.get(Number(photo.id || 0)) || photo);
     const localUrl = lightboxLocalUrl(photo, cachedPhoto);
     const url = lightboxSourceUrl(photo, cachedPhoto);
-    const thumbnailUrl = photo.preview_url || cachedPhoto.preview_url || '';
+    const thumbnailUrl = transientPreview ? '' : (photo.preview_url || cachedPhoto.preview_url || '');
     const previewUrl = thumbnailUrl && thumbnailUrl !== url
       ? thumbnailUrl
       : '';
     const photoId = Number(photo.id || 0);
     const previewable = !!(photo.previewable || cachedPhoto.previewable);
+    const keepCurrentImage = state.lightbox.embedded && transientPreview;
     const isCurrent = () => (
       token === state.lightbox.loadToken
       && state.lightbox.photo
@@ -12324,9 +16412,9 @@
     );
     els.lightboxImg.onload = null;
     els.lightboxImg.onerror = null;
-    els.lightboxImg.alt = photo.filename || '';
-    els.lightboxImg.removeAttribute('src');
-    if (url && !localUrl) warmLightboxCache(cachedPhoto);
+    els.lightboxImg.alt = keepCurrentImage ? '' : (photo.filename || '');
+    if (!keepCurrentImage) els.lightboxImg.removeAttribute('src');
+    if (!transientPreview && url && !localUrl) warmLightboxCache(cachedPhoto);
     if (!url && previewable && photoId) {
       els.lightbox.classList.add('loading');
       els.lightbox.classList.remove('previewing');
@@ -12367,6 +16455,8 @@
     if (previewUrl) {
       els.lightbox.classList.remove('loading');
       els.lightbox.classList.add('previewing');
+    } else if (keepCurrentImage) {
+      els.lightbox.classList.remove('loading', 'previewing');
     } else {
       els.lightbox.classList.add('loading');
       els.lightbox.classList.remove('previewing');
@@ -12499,6 +16589,11 @@
 
   function updateLightboxNavButtons() {
     if (!els.lightboxPrev || !els.lightboxNext) return;
+    if (state.lightbox.embedded) {
+      els.lightboxPrev.disabled = true;
+      els.lightboxNext.disabled = true;
+      return;
+    }
     if (state.compare.lightbox) {
       const cards = lightboxOpenableCards();
       const paneIndex = state.compare.activePane || 0;
@@ -12519,6 +16614,7 @@
 
   function navigateLightbox(direction) {
     if (els.lightbox.classList.contains('hidden')) return;
+    if (state.lightbox.embedded) return;
     if (state.compare.lightbox) {
       navigateCompareLightbox(direction);
       return;
@@ -12537,6 +16633,70 @@
     }
     target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     openLightbox(photo, { preserveNavHover: true });
+  }
+
+  function attachBatchLightbox(host) {
+    if (!host) throw new Error('批量处理灯箱缺少挂载容器');
+    if (state.lightbox.embedded && els.lightbox.parentNode === host) return;
+    if (!els.lightbox.classList.contains('hidden')) closeLightbox();
+    state.lightbox.embedded = true;
+    els.lightbox.classList.add('embedded');
+    host.appendChild(els.lightbox);
+    show(els.lightbox);
+    setLightboxInfoVisible(false, { save: false });
+    updateLightboxNavButtons();
+  }
+
+  function showBatchLightboxPreview(photo, sourceUrl) {
+    if (!state.lightbox.embedded) throw new Error('批量处理灯箱尚未挂载');
+    const src = String(sourceUrl || '');
+    if (!photo || !src) {
+      state.lightbox.loadToken += 1;
+      state.lightbox.photo = null;
+      els.lightboxImg.removeAttribute('src');
+      els.lightboxImg.style.width = '';
+      els.lightboxImg.style.height = '';
+      els.lightbox.classList.remove('loading', 'previewing');
+      updateLightboxView();
+      return;
+    }
+    const previewPhoto = Object.assign({}, photo, {
+      lightbox_url: src,
+      original_url: src,
+      preview_url: '',
+      previewable: true,
+      width: 0,
+      height: 0,
+      orientation: '',
+      batch_preview: true,
+    });
+    state.lightbox.photo = previewPhoto;
+    state.lightbox.zoom = 1;
+    state.lightbox.panX = 0;
+    state.lightbox.panY = 0;
+    state.lightbox.dragging = false;
+    state.lightbox.dragMoved = false;
+    state.lightbox.suppressCloseUntil = 0;
+    show(els.lightbox);
+    setLightboxInfoVisible(false, { save: false });
+    updateLightboxView();
+    loadLightboxImage(previewPhoto);
+    updateLightboxNavButtons();
+  }
+
+  function setBatchLightboxBusy(loading) {
+    els.lightbox.classList.toggle('batch-rendering', state.lightbox.embedded && !!loading);
+  }
+
+  function detachBatchLightbox() {
+    if (!state.lightbox.embedded) return;
+    state.lightbox.embedded = false;
+    els.lightbox.classList.remove('embedded', 'batch-rendering');
+    closeLightbox();
+    const anchor = lightboxHomeNextSibling && lightboxHomeNextSibling.parentNode === lightboxHomeParent
+      ? lightboxHomeNextSibling
+      : null;
+    lightboxHomeParent.insertBefore(els.lightbox, anchor);
   }
 
   function openLightbox(photo, options) {
@@ -12585,6 +16745,7 @@
   }
 
   function closeLightbox() {
+    if (state.lightbox.embedded) return;
     hide(els.lightbox);
     state.compare.lightbox = false;
     state.compare.infoDragging = -1;
@@ -12764,7 +16925,6 @@
     const cached = state.exifCache.get(photo.id);
     const ready = cached ? Promise.resolve(cached) : call('get_photo_exif', photo.id).then((res) => {
       if (!res.success) throw new Error(res.message || 'EXIF 读取失败');
-      state.exifCache.set(photo.id, res.photo);
       return res.photo;
     });
     els.exifPop.innerHTML = '<div class="exif-title">读取 EXIF...</div>';
@@ -12772,7 +16932,13 @@
     show(els.exifPop);
     ready.then((full) => {
       if (hoverCard !== card || !card.isConnected) return;
-      const merged = Object.assign({}, state.photoCache.get(photoId) || {}, full);
+      const current = state.photoCache.get(photoId) || {};
+      const merged = Object.assign({}, current, full, {
+        favorite: !!current.favorite,
+        note: String(current.note || ''),
+        category: String(current.category || ''),
+      });
+      state.exifCache.set(photoId, merged);
       state.photoCache.set(photoId, merged);
       updatePhotoCardMeta(card, merged, true);
       els.exifPop.innerHTML = exifHtml(merged);
@@ -12882,6 +17048,16 @@
 
   function viewedPositionFromScroll(fallbackDate) {
     const fallback = String(fallbackDate || '').trim();
+    const fallbackSection = fallback ? document.getElementById('date-' + fallback) : null;
+    if (fallbackSection) {
+      const viewTop = els.galleryScroll.scrollTop;
+      const viewBottom = viewTop + els.galleryScroll.clientHeight;
+      const top = fallbackSection.offsetTop;
+      const bottom = top + fallbackSection.offsetHeight;
+      if (Math.min(bottom, viewBottom) - Math.max(top, viewTop) > 12) {
+        return { date: fallback, offset: Math.max(0, Math.round(viewTop - top)) };
+      }
+    }
     const anchor = els.galleryScroll.scrollTop + 4;
     const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
     for (const section of sections) {
@@ -12949,6 +17125,8 @@
       saveLastViewedDate(dateKey);
       const active = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
       if (active) active.scrollIntoView({ block: 'center' });
+    } else {
+      saveLastViewedDate(dateKey);
     }
   }
 
@@ -13064,16 +17242,210 @@
     scheduleVisiblePreviewCheck();
   }
 
+  function batchSelectionShortcutsAvailable() {
+    return !!els.workspace
+      && !els.workspace.classList.contains('hidden')
+      && !state.settingsOpen
+      && !state.statsOpen
+      && !state.searchOpen
+      && !state.quickEdit.open
+      && !state.quickEdit.picking
+      && !state.compare.lightbox
+      && els.lightbox.classList.contains('hidden')
+      && (!batchProcessingController || !batchProcessingController.isOpen());
+  }
+
+  function batchImageGeometry(photo, image, options) {
+    const naturalWidth = Math.max(1, Number(image && (image.naturalWidth || image.width) || 1));
+    const naturalHeight = Math.max(1, Number(image && (image.naturalHeight || image.height) || 1));
+    if (options && options.developedRaw) {
+      return { width: naturalWidth, height: naturalHeight, orientation: '', applyOrientation: false };
+    }
+    const basis = lightboxImageBasis(photo || {}, naturalWidth, naturalHeight);
+    const width = Math.max(1, Number(basis.width || naturalWidth));
+    const height = Math.max(1, Number(basis.height || naturalHeight));
+    const orientation = String(photo && photo.orientation || '');
+    const applyOrientation = orientationSwapsSize(orientation)
+      && ((naturalWidth >= naturalHeight) !== (width >= height));
+    return { width, height, orientation, applyOrientation };
+  }
+
+  function waitForBatchPresetLoad(isLoading, label) {
+    if (!isLoading()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const timer = setInterval(() => {
+        if (!isLoading()) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (Date.now() - startedAt > 15000) {
+          clearInterval(timer);
+          reject(new Error(label + '读取超时'));
+        }
+      }, 50);
+    });
+  }
+
+  async function batchListAdjustmentPresets() {
+    if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
+      await refreshQuickEditPresets({ silent: true });
+    }
+    await waitForBatchPresetLoad(() => state.quickEdit.presetsLoading, '调整预设');
+    if (state.quickEdit.presetsMessage) throw new Error(state.quickEdit.presetsMessage);
+    return (state.quickEdit.presets || []).map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      detail: preset.luts.length ? preset.luts.length + ' 个 LUT' : '影调、色彩与细节',
+    }));
+  }
+
+  async function batchPrepareAdjustmentPreset(presetId) {
+    const id = String(presetId || '').trim();
+    let name = '无调整预设';
+    let params = quickEditPresetStyleParams(quickEditDefaultParams());
+    let hydratedLuts = [];
+    if (id) {
+      if (!state.quickEdit.presetsLoaded && !state.quickEdit.presetsLoading) {
+        await refreshQuickEditPresets({ silent: true });
+      }
+      await waitForBatchPresetLoad(() => state.quickEdit.presetsLoading, '调整预设');
+      const preset = quickEditPresetById(id);
+      if (!preset) throw new Error('调整预设不存在或已被删除: ' + id);
+      const hydrated = await quickEditHydratePresetLuts(preset);
+      if (hydrated.missing.length) {
+        throw new Error('调整预设“' + preset.name + '”引用的 LUT 缺失：' + hydrated.missing.join('、'));
+      }
+      name = preset.name;
+      params = quickEditPresetStyleParams(preset.params);
+      hydratedLuts = hydrated.loaded;
+    }
+    const luts = quickEditWorkerLutPayload(hydratedLuts);
+    return {
+      id,
+      name,
+      params,
+      rawDevelopParams: quickEditRawDevelopParams(params, { stages: [params] }),
+      workerParams: Object.assign({}, params, { luts }),
+      rawWorkerParams: Object.assign({}, quickEditPixelParamsForRawDevelopedSource(params), { luts }),
+    };
+  }
+
+  async function batchPrepareAdjustmentSession(session) {
+    const params = quickEditPresetStyleParams(session && session.effectiveParams || session && session.params || quickEditDefaultParams());
+    const luts = quickEditWorkerLutPayload(session && session.luts || []);
+    const stages = (session && session.committedStages || []).map(cloneQuickEditPixelStage).concat([
+      Object.assign({}, normalizeQuickEditParams(session && session.params || quickEditDefaultParams()), { luts }),
+    ]);
+    const rawStages = stages.map((stage) => Object.assign(
+      {},
+      quickEditPixelParamsForRawDevelopedSource(stage),
+      { luts: cloneQuickEditWorkerLutPayload(stage.luts) },
+    ));
+    return {
+      id: '',
+      name: '独立调整',
+      params,
+      rawDevelopParams: quickEditRawDevelopParams(params, { stages }),
+      workerParams: { stages },
+      rawWorkerParams: { stages: rawStages },
+    };
+  }
+
+  async function batchPrepareFrameSession(session) {
+    const frame = quickEditFrameExportConfigFromPayload({
+      preset: session && session.framePreset || 'none',
+      insets: session && session.frameInsets,
+      textLayers: session && session.frameTextLayers || [],
+      imageLayers: session && session.frameImageLayers || [],
+    });
+    if (!frame) return null;
+    const assets = (frame.imageLayers || []).filter((layer) => layer.enabled && layer.assetId);
+    await Promise.all(assets.map((layer) => quickEditLoadFrameAssetUrl(layer.assetId)));
+    return { id: '', name: '独立相框', frame };
+  }
+
+  async function batchListFramePresets() {
+    if (!state.quickEdit.framePresetsLoaded && !state.quickEdit.framePresetsLoading) {
+      await refreshQuickEditFramePresets({ silent: true });
+    }
+    await waitForBatchPresetLoad(() => state.quickEdit.framePresetsLoading, '相框预设');
+    if (state.quickEdit.framePresetsMessage) throw new Error(state.quickEdit.framePresetsMessage);
+    return (state.quickEdit.framePresets || []).map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      detail: quickEditFramePresetDetail(preset),
+    }));
+  }
+
+  async function batchPrepareFramePreset(presetId) {
+    const id = String(presetId || '').trim();
+    if (!id) return null;
+    if (!state.quickEdit.framePresetsLoaded && !state.quickEdit.framePresetsLoading) {
+      await refreshQuickEditFramePresets({ silent: true });
+    }
+    await waitForBatchPresetLoad(() => state.quickEdit.framePresetsLoading, '相框预设');
+    const preset = quickEditFramePresetById(id);
+    if (!preset) throw new Error('相框预设不存在或已被删除: ' + id);
+    const frame = quickEditFrameExportConfigFromPayload(preset.frame);
+    if (!frame) throw new Error('相框预设没有可应用的相框内容: ' + preset.name);
+    const assets = (frame.imageLayers || []).filter((layer) => layer.enabled && layer.assetId);
+    await Promise.all(assets.map((layer) => quickEditLoadFrameAssetUrl(layer.assetId)));
+    return { id, name: preset.name, frame };
+  }
+
+  function batchApplyFrame(rendered, options, frame, context) {
+    const sourceBasis = Math.max(1, Math.min(
+      Number(rendered && rendered.outputWidth || 1),
+      Number(rendered && rendered.outputHeight || 1),
+    ));
+    return quickEditApplyFrameToRenderedBlob(rendered, options, frame, Object.assign({}, context || {}, {
+      displayBasis: Math.min(QUICK_EDIT_INTERACTIVE_PREVIEW_MAX_SIDE, sourceBasis),
+    }));
+  }
+
+  function initializeBatchControllers() {
+    if (batchProcessingController || batchSelectionController) return;
+    if (!window.PicScannerBatchRenderer || !window.PicScannerBatchProcessing || !window.PicScannerBatchSelection) {
+      throw new Error('批量处理模块未完整加载，请检查 batch_renderer.js、batch_processing.js 和 batch_selection.js');
+    }
+    const renderer = window.PicScannerBatchRenderer.create({
+      call,
+      resolveGeometry: batchImageGeometry,
+    });
+    batchProcessingController = window.PicScannerBatchProcessing.create({
+      call,
+      renderer,
+      showToast,
+      listAdjustmentPresets: batchListAdjustmentPresets,
+      prepareAdjustmentPreset: batchPrepareAdjustmentPreset,
+      prepareAdjustmentSession: batchPrepareAdjustmentSession,
+      listFramePresets: batchListFramePresets,
+      prepareFramePreset: batchPrepareFramePreset,
+      prepareFrameSession: batchPrepareFrameSession,
+      applyFrame: batchApplyFrame,
+      attachLightbox: attachBatchLightbox,
+      showLightboxPreview: showBatchLightboxPreview,
+      setLightboxBusy: setBatchLightboxBusy,
+      detachLightbox: detachBatchLightbox,
+    });
+    batchSelectionController = window.PicScannerBatchSelection.create({
+      gallery: els.gallery,
+      getSourceId: () => state.currentSourceId || '',
+      canUseShortcuts: batchSelectionShortcutsAvailable,
+      onProcess: (photos) => {
+        const opened = openBatchQuickEdit(photos);
+        if (opened && batchSelectionController) batchSelectionController.clear();
+        return opened;
+      },
+    });
+    syncBatchSelectionSource();
+  }
+
   renderSortMenu();
 
   els.refreshSources.addEventListener('click', loadSources);
-  if (els.sourcePageTabs) {
-    els.sourcePageTabs.addEventListener('click', (ev) => {
-      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-source-page-tab]') : null;
-      if (!btn || !els.sourcePageTabs.contains(btn)) return;
-      setSourcePage(btn.dataset.sourcePageTab);
-    });
-  }
   els.cancelScan.addEventListener('click', () => hide(els.confirmModal));
   els.confirmScan.addEventListener('click', beginScan);
   els.cancelExport.addEventListener('click', closeExportConfirm);
@@ -13221,13 +17593,14 @@
   });
   window.addEventListener('keydown', handleCategoryPickerKey, true);
   window.addEventListener('beforeunload', (ev) => {
-    if (!state.quickEdit.saveSaving) return undefined;
+    if (!state.quickEdit.saveSaving && !(batchProcessingController && batchProcessingController.isRunning())) return undefined;
     ev.preventDefault();
     ev.returnValue = '';
     return '';
   });
   document.addEventListener('click', (ev) => {
-    if (!state.quickEdit.saveSaving) return;
+    const batchRunning = !!(batchProcessingController && batchProcessingController.isRunning());
+    if (!state.quickEdit.saveSaving && !batchRunning) return;
     const target = ev.target;
     const closeControl = target && target.closest
       ? target.closest('.wvu-close, .wvu-btb-btn.close, [data-act="close"]')
@@ -13235,9 +17608,11 @@
     if (!closeControl) return;
     ev.preventDefault();
     ev.stopPropagation();
-    showToast('正在保存，完成前不能退出程序', 'error');
+    showToast(batchRunning ? '批量处理正在运行，完成或取消后才能退出程序' : '正在保存，完成前不能退出程序', 'error');
   }, true);
   document.addEventListener('keydown', (ev) => {
+    if (batchProcessingController && batchProcessingController.handleKeydown(ev)) return;
+    if (batchSelectionController && batchSelectionController.handleKeydown(ev)) return;
     if (ev.key === 'Alt') {
       if (!ev.repeat) showAltExifFromPointer(ev);
       if (canShowGalleryExif() && !isTypingTarget(document.activeElement)) {
@@ -13274,6 +17649,10 @@
       && !isTypingTarget(document.activeElement)
       && (!state.quickEdit.presetModal || state.quickEdit.presetModal.classList.contains('hidden'))
       && (!state.quickEdit.presetApplyConfirm || state.quickEdit.presetApplyConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.presetOverwriteConfirm || state.quickEdit.presetOverwriteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetModal || state.quickEdit.framePresetModal.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetDeleteConfirm || state.quickEdit.framePresetDeleteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetOverwriteConfirm || state.quickEdit.framePresetOverwriteConfirm.classList.contains('hidden'))
       && (!state.quickEdit.saveConfirm || state.quickEdit.saveConfirm.classList.contains('hidden'))
       && (!state.quickEdit.exitConfirm || state.quickEdit.exitConfirm.classList.contains('hidden'))
     ) {
@@ -13288,13 +17667,62 @@
       && !ev.ctrlKey
       && !ev.metaKey
       && !ev.altKey
+      && !isTypingTarget(document.activeElement)
+      && (!state.quickEdit.presetModal || state.quickEdit.presetModal.classList.contains('hidden'))
+      && (!state.quickEdit.presetApplyConfirm || state.quickEdit.presetApplyConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.presetOverwriteConfirm || state.quickEdit.presetOverwriteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetModal || state.quickEdit.framePresetModal.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetDeleteConfirm || state.quickEdit.framePresetDeleteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetOverwriteConfirm || state.quickEdit.framePresetOverwriteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.saveConfirm || state.quickEdit.saveConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.exitConfirm || state.quickEdit.exitConfirm.classList.contains('hidden'))
+    ) {
+      const preset = state.quickEdit.panelTab === 'frame'
+        ? quickEditFramePresetById(state.quickEdit.framePresetHoverId)
+        : quickEditPresetById(state.quickEdit.presetHoverId);
+      if (preset) {
+        if (state.quickEdit.panelTab === 'frame') toggleQuickEditFramePresetFavorite(preset.id);
+        else toggleQuickEditPresetFavorite(preset.id);
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
+    if (
+      state.quickEdit.open
+      && (ev.key === 'f' || ev.key === 'F')
+      && !ev.ctrlKey
+      && !ev.metaKey
+      && !ev.altKey
+      && !isTypingTarget(document.activeElement)
       && state.quickEdit.presetModal
       && !state.quickEdit.presetModal.classList.contains('hidden')
       && (!state.quickEdit.presetApplyConfirm || state.quickEdit.presetApplyConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.presetOverwriteConfirm || state.quickEdit.presetOverwriteConfirm.classList.contains('hidden'))
     ) {
-      const preset = quickEditPresetById(state.quickEdit.presetSelectedId) || (state.quickEdit.presets || [])[0];
+      const preset = quickEditPresetById(state.quickEdit.presetSelectedId);
       if (preset) {
         toggleQuickEditPresetFavorite(preset.id);
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      return;
+    }
+    if (
+      state.quickEdit.open
+      && (ev.key === 'f' || ev.key === 'F')
+      && !ev.ctrlKey
+      && !ev.metaKey
+      && !ev.altKey
+      && !isTypingTarget(document.activeElement)
+      && state.quickEdit.framePresetModal
+      && !state.quickEdit.framePresetModal.classList.contains('hidden')
+      && (!state.quickEdit.framePresetDeleteConfirm || state.quickEdit.framePresetDeleteConfirm.classList.contains('hidden'))
+      && (!state.quickEdit.framePresetOverwriteConfirm || state.quickEdit.framePresetOverwriteConfirm.classList.contains('hidden'))
+    ) {
+      const preset = quickEditFramePresetById(state.quickEdit.framePresetSelectedId);
+      if (preset) {
+        toggleQuickEditFramePresetFavorite(preset.id);
         ev.preventDefault();
         ev.stopPropagation();
       }
@@ -13323,9 +17751,46 @@
         ev.stopPropagation();
         return;
       }
+      const presetOverwriteConfirm = state.quickEdit.presetOverwriteConfirm;
+      if (presetOverwriteConfirm && !presetOverwriteConfirm.classList.contains('hidden')) {
+        hideQuickEditPresetOverwriteConfirm();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const framePresetOverwriteConfirm = state.quickEdit.framePresetOverwriteConfirm;
+      if (framePresetOverwriteConfirm && !framePresetOverwriteConfirm.classList.contains('hidden')) {
+        hideQuickEditFramePresetOverwriteConfirm();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const framePresetDeleteConfirm = state.quickEdit.framePresetDeleteConfirm;
+      if (framePresetDeleteConfirm && !framePresetDeleteConfirm.classList.contains('hidden')) {
+        hideQuickEditFramePresetDeleteConfirm();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      const framePresetModal = state.quickEdit.framePresetModal;
+      if (framePresetModal && !framePresetModal.classList.contains('hidden')) {
+        hideQuickEditFramePresetModal();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
       const presetModal = state.quickEdit.presetModal;
       if (presetModal && !presetModal.classList.contains('hidden')) {
         hideQuickEditPresetModal();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      if (
+        (quickEditFrameTextColorPanel && !quickEditFrameTextColorPanel.classList.contains('hidden'))
+        || (quickEditFrameTextTokenPanel && !quickEditFrameTextTokenPanel.classList.contains('hidden'))
+      ) {
+        hideQuickEditFrameTextPanels();
         ev.preventDefault();
         ev.stopPropagation();
         return;
@@ -13357,6 +17822,21 @@
       cancelQuickEditPicking();
       showToast('已取消快速调整选图');
       ev.preventDefault();
+      return;
+    }
+    if (
+      state.quickEdit.picking
+      && (ev.key === 'q' || ev.key === 'Q')
+      && !ev.ctrlKey
+      && !ev.metaKey
+      && !ev.altKey
+    ) {
+      if (!ev.repeat) {
+        cancelQuickEditPicking();
+        showToast('已取消快速调整选图');
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
       return;
     }
     if (state.quickEdit.open) return;
@@ -13469,10 +17949,48 @@
     if (state.categoryPicker && state.categoryPicker.el && !state.categoryPicker.el.classList.contains('hidden') && !state.categoryPicker.el.contains(ev.target)) {
       closeCategoryPicker();
     }
+    const colorChoice = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-color-choice]') : null;
+    if (colorChoice && quickEditFrameTextColorPanel && quickEditFrameTextColorPanel.contains(colorChoice)) {
+      const layerId = String(quickEditFrameTextColorPanel.dataset.layerId || '');
+      const color = quickEditNormalizeHexColor(colorChoice.dataset.quickEditFrameTextColorChoice);
+      if (layerId && color) {
+        updateQuickEditFrameTextLayer(layerId, { color }, { skipRender: true });
+        syncQuickEditFrameTextColorControl(layerId, color);
+      }
+      hideQuickEditFrameTextColorPanel();
+      return;
+    }
+    if (ev.target && ev.target.closest && ev.target.closest('[data-quick-edit-frame-text-color-close]')) {
+      hideQuickEditFrameTextColorPanel();
+      return;
+    }
+    const tokenCopy = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-token-copy]') : null;
+    if (tokenCopy && quickEditFrameTextTokenPanel && quickEditFrameTextTokenPanel.contains(tokenCopy)) {
+      copyQuickEditFrameTextToken(tokenCopy.dataset.quickEditFrameTextTokenCopy);
+      return;
+    }
+    const tokenInput = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-token-value]') : null;
+    if (tokenInput && quickEditFrameTextTokenPanel && quickEditFrameTextTokenPanel.contains(tokenInput)) {
+      tokenInput.select();
+      return;
+    }
+    if (ev.target && ev.target.closest && ev.target.closest('[data-quick-edit-frame-text-token-close]')) {
+      hideQuickEditFrameTextTokenPanel();
+      return;
+    }
+    const colorTrigger = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-color-trigger]') : null;
+    if (quickEditFrameTextColorPanel && !quickEditFrameTextColorPanel.classList.contains('hidden') && !quickEditFrameTextColorPanel.contains(ev.target) && !colorTrigger) {
+      hideQuickEditFrameTextColorPanel();
+    }
+    const tokenTrigger = ev.target && ev.target.closest ? ev.target.closest('[data-quick-edit-frame-text-token]') : null;
+    if (quickEditFrameTextTokenPanel && !quickEditFrameTextTokenPanel.classList.contains('hidden') && !quickEditFrameTextTokenPanel.contains(ev.target) && !tokenTrigger) {
+      hideQuickEditFrameTextTokenPanel();
+    }
     if (!state.contextMenu || state.contextMenu.classList.contains('hidden')) return;
     if (state.contextMenu.contains(ev.target)) return;
     hideContextMenu();
   });
+  initializeBatchControllers();
   bindGalleryHover();
   bindNoteTooltip();
   bindChartTooltip();
@@ -13497,8 +18015,8 @@
 
   let started = false;
   function startApp() {
-    if (started) return;
-    if (!api()) return;
+    if (started) return true;
+    if (!startupApiReady()) return false;
     started = true;
     console.info('PicScanner app build', APP_BUILD);
     call('get_startup_state').then((data) => {
@@ -13509,14 +18027,14 @@
       if (!enterCachedWorkspace(scan)) {
         show(els.sourceScreen);
       }
-    }).catch(() => {
-      loadSources();
-      show(els.sourceScreen);
+      startStatePolling();
+      setInterval(() => {
+        if (!state.noMoreDates && state.dates.length === 0) loadOlderDates();
+      }, 1200);
+    }).catch((err) => {
+      showSourceStartupError(err, '应用启动失败');
     });
-    startStatePolling();
-    setInterval(() => {
-      if (!state.noMoreDates && state.dates.length === 0) loadOlderDates();
-    }, 1200);
+    return true;
   }
 
   window.addEventListener('pywebviewready', startApp);
@@ -13541,7 +18059,16 @@
     const timer = setInterval(() => {
       checks += 1;
       startApp();
-      if (started || checks >= 120) clearInterval(timer);
+      if (started || checks >= 120) {
+        clearInterval(timer);
+        if (!started) {
+          const missing = missingStartupApiMethods();
+          showSourceStartupError(
+            new Error('业务桥接未完整注入，缺少方法: ' + missing.join(', ')),
+            '应用启动失败',
+          );
+        }
+      }
     }, 100);
   });
   setTimeout(startApp, 0);

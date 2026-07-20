@@ -51,14 +51,23 @@ class ThumbnailError(RuntimeError):
     pass
 
 
+def _thumb_key_from_stat(path: Path, *, mtime_ns: int, size: int) -> str:
+    raw = f"{THUMB_ALGORITHM_VERSION}|{path.resolve()}|{int(mtime_ns)}|{int(size)}".encode("utf-8", errors="strict")
+    return hashlib.sha1(raw).hexdigest()
+
+
 def _thumb_key(path: Path) -> str:
     stat = path.stat()
-    raw = f"{THUMB_ALGORITHM_VERSION}|{path.resolve()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}".encode("utf-8", errors="strict")
-    return hashlib.sha1(raw).hexdigest()
+    return _thumb_key_from_stat(path, mtime_ns=stat.st_mtime_ns, size=stat.st_size)
 
 
 def _thumb_path(path: Path) -> Path:
     key = _thumb_key(path)
+    return THUMB_DIR / key[:2] / f"{key}.jpg"
+
+
+def _thumb_path_from_stat(path: Path, *, mtime_ns: int, size: int) -> Path:
+    key = _thumb_key_from_stat(path, mtime_ns=mtime_ns, size=size)
     return THUMB_DIR / key[:2] / f"{key}.jpg"
 
 
@@ -94,6 +103,51 @@ def existing_thumbnail(path: str | Path) -> Path | None:
     if target.exists() and target.stat().st_size > 0:
         return target
     return None
+
+
+def migrate_thumbnail_cache(
+    previous_path: str | Path,
+    current_path: str | Path,
+    *,
+    expected_size: int | float,
+    expected_mtime: int | float,
+) -> str:
+    source = Path(current_path)
+    if not source.exists() or not source.is_file():
+        return "source_missing"
+    if not is_previewable_image(source):
+        return "not_previewable"
+
+    stat = source.stat()
+    if int(expected_size or 0) != int(stat.st_size):
+        return "source_changed"
+    if abs(float(expected_mtime or 0) - float(stat.st_mtime)) > 0.000001:
+        return "source_changed"
+
+    previous_target = _thumb_path_from_stat(
+        Path(previous_path),
+        mtime_ns=stat.st_mtime_ns,
+        size=stat.st_size,
+    )
+    current_target = _thumb_path_from_stat(
+        source,
+        mtime_ns=stat.st_mtime_ns,
+        size=stat.st_size,
+    )
+    if current_target == previous_target:
+        return "unchanged"
+    if current_target.exists() and current_target.stat().st_size > 0:
+        return "already_current"
+    if not previous_target.exists() or previous_target.stat().st_size <= 0:
+        return "cache_missing"
+
+    lock = _lock_for(current_target)
+    with lock:
+        if current_target.exists() and current_target.stat().st_size > 0:
+            return "already_current"
+        current_target.parent.mkdir(parents=True, exist_ok=True)
+        previous_target.replace(current_target)
+    return "migrated"
 
 
 def existing_lightbox_preview(path: str | Path, *, max_side: int = LIGHTBOX_PREVIEW_SIZE) -> Path | None:

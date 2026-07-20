@@ -935,6 +935,23 @@ function quickEditWorkerMain() {
     if (reportProgress) reportProgress(1);
   }
 
+  function applyQuickEditPixelStages(pixels, params, width, height, onProgress) {
+    const stages = params && Array.isArray(params.stages) && params.stages.length
+      ? params.stages
+      : [params || {}];
+    const reportProgress = typeof onProgress === 'function' ? onProgress : null;
+    stages.forEach((stage, index) => {
+      applyQuickEditPixelAdjustments(
+        pixels,
+        stage,
+        width,
+        height,
+        reportProgress ? (ratio) => reportProgress((index + clamp(Number(ratio || 0), 0, 1)) / stages.length) : null,
+      );
+    });
+    if (reportProgress) reportProgress(1);
+  }
+
   function drawQuickEditBitmap(ctx, bitmap, width, height, applyOrientation, orientation) {
     if (!applyOrientation) {
       ctx.drawImage(bitmap, 0, 0, width, height);
@@ -1024,7 +1041,7 @@ function quickEditWorkerMain() {
     const imageData = ctx.getImageData(0, 0, width, height);
     const readMs = quickEditPerfNow() - readStart;
     const adjustStart = quickEditPerfNow();
-    applyQuickEditPixelAdjustments(imageData.data, message.params || {}, width, height);
+    applyQuickEditPixelStages(imageData.data, message.params || {}, width, height);
     const adjustMs = quickEditPerfNow() - adjustStart;
     const putStart = quickEditPerfNow();
     ctx.putImageData(imageData, 0, 0);
@@ -1125,7 +1142,7 @@ function quickEditWorkerMain() {
     const readMs = quickEditPerfNow() - readStart;
 
     const adjustStart = quickEditPerfNow();
-    applyQuickEditPixelAdjustments(imageData.data, message.params || {}, outputWidth, outputHeight, (ratio) => {
+    applyQuickEditPixelStages(imageData.data, message.params || {}, outputWidth, outputHeight, (ratio) => {
       postQuickEditSaveProgress(message, '应用调色', 36 + clamp(Number(ratio || 0), 0, 1) * 34, outputWidth + ' x ' + outputHeight);
     });
     const adjustMs = quickEditPerfNow() - adjustStart;

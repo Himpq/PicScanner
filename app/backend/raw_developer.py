@@ -14,10 +14,11 @@ from .thumbnailer import is_raw_image
 
 
 RAW_DEVELOP_PREVIEW_DIR = DATA_DIR / "raw_develop_previews"
-RAW_DEVELOP_ALGORITHM_VERSION = "raw-develop-v5-fast-preview-cache"
+RAW_DEVELOP_ALGORITHM_VERSION = "raw-develop-v6-edit-stages"
 RAW_DEVELOP_PREVIEW_QUALITY = 92
 RAW_DEVELOP_FULL_PROXY_QUALITY = 96
-RAW_DEVELOP_CACHE_GRACE_SECONDS = 90
+RAW_DEVELOP_CACHE_GRACE_SECONDS = 24 * 60 * 60
+RAW_DEVELOP_CACHE_MAX_FILES = 128
 RAW_DEVELOP_TMP_GRACE_SECONDS = 3600
 RAW_DEVELOP_RAW_CACHE_TTL_SECONDS = 45
 RAW_DEVELOP_RAW_CACHE_MAX_ITEMS = 2
@@ -110,6 +111,15 @@ def _curve_is_neutral(points: list[dict[str, float]]) -> bool:
 
 def normalize_raw_develop_params(params) -> dict:
     raw = params if isinstance(params, dict) else {}
+    curve_stages = [
+        points
+        for points in (
+            _normalize_curve_points(stage, {})
+            for stage in (raw.get("curveStages", raw.get("curve_stages")) or [])
+            if isinstance(stage, list)
+        )
+        if not _curve_is_neutral(points)
+    ]
     return {
         "temperature": _round_temperature(raw.get("temperature")),
         "tint": int(round(_clamp(_finite_number(raw.get("tint"), 0), -100, 100))),
@@ -125,6 +135,7 @@ def normalize_raw_develop_params(params) -> dict:
             100,
         ))),
         "curve_points": _normalize_curve_points(raw.get("curvePoints", raw.get("curve_points")), raw),
+        "curve_stages": curve_stages,
     }
 
 
@@ -349,7 +360,11 @@ def develop_raw_array(
             cache_entry["lock"].release()
             if drop_cache:
                 _drop_rawpy_cache_entry(cache_key, cache_entry)
-        rgb = _apply_curve(rgb, clean["curve_points"])
+        if clean["curve_stages"]:
+            for curve_points in clean["curve_stages"]:
+                rgb = _apply_curve(rgb, curve_points)
+        else:
+            rgb = _apply_curve(rgb, clean["curve_points"])
     except RawDevelopError:
         raise
     except Exception as exc:
@@ -511,22 +526,33 @@ def cleanup_raw_develop_preview_cache(*, keep_paths: set[Path] | None = None) ->
     keep = {path.resolve() for path in (keep_paths or set()) if path}
     now = time.time()
     with _CACHE_CLEANUP_LOCK:
+        cached_jpegs: list[tuple[float, Path, Path]] = []
         for item in root.rglob("*"):
             if not item.is_file():
                 continue
             try:
                 resolved = item.resolve()
-                age = now - item.stat().st_mtime
+                modified_at = item.stat().st_mtime
+                age = now - modified_at
             except OSError:
                 continue
             if resolved in keep:
                 continue
             suffix = item.suffix.lower()
             if suffix == ".jpg" and age < RAW_DEVELOP_CACHE_GRACE_SECONDS:
+                cached_jpegs.append((modified_at, item, resolved))
                 continue
             if suffix == ".tmp" and age < RAW_DEVELOP_TMP_GRACE_SECONDS:
                 continue
             if suffix not in {".jpg", ".tmp"}:
+                continue
+            try:
+                item.unlink()
+            except OSError:
+                pass
+        overflow = max(0, len(cached_jpegs) - RAW_DEVELOP_CACHE_MAX_FILES)
+        for _, item, resolved in sorted(cached_jpegs, key=lambda entry: entry[0])[:overflow]:
+            if resolved in keep:
                 continue
             try:
                 item.unlink()

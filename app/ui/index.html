@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=frame-text-edge-20260718-17" />
+  <link rel="stylesheet" href="assets/style.css?v=modules-20260723-2" />
   <link rel="stylesheet" href="assets/settings.css?v=settings-alt-exif-20260703-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=batch-edit-tabs-20260717-1" />
@@ -100,7 +100,7 @@
           <div id="sort-dropdown" class="sort-dropdown">
             <button id="sort-trigger" class="sort-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
               <span id="sort-label">拍摄时间 新到旧</span>
-              <span class="sort-caret" aria-hidden="true">⌄</span>
+              <svg class="sort-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <div id="sort-menu" class="sort-menu hidden" role="listbox"></div>
           </div>
@@ -324,6 +324,11 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/app.js?v=frame-text-edge-20260718-17"></script>
+  <script src="assets/vue/picscanner-vue.js?v=modules-20260723-2"></script>
+  <script src="assets/app_core.js?v=modules-20260723-2"></script>
+  <script src="assets/app_gallery.js?v=modules-20260723-2"></script>
+  <script src="assets/app_lightbox.js?v=modules-20260723-2"></script>
+  <script src="assets/app_modules.js?v=modules-20260723-2"></script>
+  <script src="assets/app.js?v=modules-20260723-2"></script>
 </body>
 </html>

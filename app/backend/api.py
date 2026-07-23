@@ -18,6 +18,7 @@ from pathlib import Path
 import webview
 
 from WebViewUI import WindowApi
+from ..modules.loader import discover_modules
 from .batch_processor import BatchProcessingApiMixin
 from .config_store import DATA_DIR, config_store
 from .exif_reader import is_renderable_image
@@ -120,6 +121,35 @@ def _versioned_file_uri(path: str | Path) -> str:
 class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def __init__(self):
         super().__init__()
+        self._modules = discover_modules(DATA_DIR, storage)
+
+    def get_modules(self):
+        return {
+            "success": True,
+            "modules": [
+                {
+                    "key": handle.key,
+                    "name": handle.name,
+                    "version": handle.version,
+                    "description": handle.description,
+                    "frontend_url": handle.frontend_url,
+                }
+                for handle in self._modules.values()
+            ],
+        }
+
+    def module_api(self, module_key, method, *args):
+        handle = self._modules.get(str(module_key or ""))
+        if not handle:
+            return {"success": False, "message": "模块不存在"}
+        fn = handle.methods.get(str(method or ""))
+        if not fn:
+            return {"success": False, "message": "模块方法不存在"}
+        try:
+            result = fn(*args)
+        except Exception as exc:
+            return {"success": False, "message": f"模块调用失败: {exc}"}
+        return result if isinstance(result, dict) else {"success": True, "data": result}
 
     @staticmethod
     def _format_perf_value(value):

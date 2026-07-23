@@ -27,6 +27,11 @@ build/
 dist/
 *.egg-info/
 
+# Frontend tooling
+node_modules/
+frontend/node_modules/
+.vite/
+
 # Editor and local assistant metadata
 .idea/
 .vscode/
@@ -40,3 +45,7 @@ desktop.ini
 
 # Other files
 icons
+
+# Local experiments and ad hoc verification
+/experiments/
+/face_test.mjs

@@ -179,10 +179,35 @@
         onProgress('加载图片', 7, photo.filename || '');
         const image = await loadImage(sourceSrc, signal);
         throwIfAborted(signal);
+
+        let stageBitmap = null;
+        let stageGeometryOverride = null;
+        const stageEntry = session.sourceStages || null;
+        const modules = window.PicScannerModules;
+        if (stageEntry && modules && modules.sourceStagesActive(stageEntry) && !photo.is_raw) {
+          onProgress('应用修脸变形', 9, photo.filename || '');
+          const rawBitmap = await createImageBitmap(image);
+          throwIfAborted(signal);
+          const stageResult = await modules.applySourceStages(rawBitmap, stageEntry, { maxSide });
+          throwIfAborted(signal);
+          if (stageResult && stageResult.bitmap) {
+            stageBitmap = stageResult.bitmap;
+            if (stageResult.orientationApplied) {
+              stageGeometryOverride = {
+                width: Math.max(1, Number(stageResult.width || 1)),
+                height: Math.max(1, Number(stageResult.height || 1)),
+                orientation: '',
+                applyOrientation: false,
+              };
+            }
+          }
+        }
+
         const sessionSource = !!session.bakedSource && !!session.sourceSrc;
-        const geometry = sessionSource
-          ? { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, orientation: '', applyOrientation: false }
-          : config.resolveGeometry(sourcePhoto, image, { developedRaw: !!photo.is_raw });
+        const geometry = stageGeometryOverride
+          || (sessionSource
+            ? { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, orientation: '', applyOrientation: false }
+            : config.resolveGeometry(sourcePhoto, image, { developedRaw: !!photo.is_raw }));
         let outputWidth = Math.max(1, Math.round(Number(geometry && geometry.width || image.naturalWidth || image.width || 1)));
         let outputHeight = Math.max(1, Math.round(Number(geometry && geometry.height || image.naturalHeight || image.height || 1)));
         if (maxSide > 0 && Math.max(outputWidth, outputHeight) > maxSide) {
@@ -225,7 +250,7 @@
         outputWidth = Math.max(1, Math.round(frame.w));
         outputHeight = Math.max(1, Math.round(frame.h));
         const decodeStart = performance.now();
-        const bitmap = await createImageBitmap(image);
+        const bitmap = stageBitmap || await createImageBitmap(image);
         const decodeMs = performance.now() - decodeStart;
         throwIfAborted(signal);
 

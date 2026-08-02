@@ -198,6 +198,7 @@ class Storage:
                     item_type TEXT NOT NULL,
                     item_key TEXT NOT NULL,
                     favorite INTEGER NOT NULL DEFAULT 0,
+                    hidden INTEGER NOT NULL DEFAULT 0,
                     note TEXT NOT NULL DEFAULT '',
                     category TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
@@ -252,6 +253,8 @@ class Storage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source_marks_source_type ON source_marks(source_id, item_type)")
             if "category" not in self._table_columns(conn, "source_marks"):
                 conn.execute("ALTER TABLE source_marks ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+            if "hidden" not in self._table_columns(conn, "source_marks"):
+                conn.execute("ALTER TABLE source_marks ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
             if "cover_photo_path" not in self._table_columns(conn, "source_state"):
                 conn.execute("ALTER TABLE source_state ADD COLUMN cover_photo_path TEXT NOT NULL DEFAULT ''")
             if "cover_thumb_path" not in self._table_columns(conn, "source_state"):
@@ -1114,10 +1117,22 @@ class Storage:
     @staticmethod
     def _photo_filter_sql(filters: dict | None, alias: str = "p") -> tuple[str, list]:
         if not isinstance(filters, dict):
-            return "", []
+            filters = {}
         a = f"{alias}." if alias else ""
         sql = ""
         args: list = []
+        # 隐藏照片默认从所有查询中排除；仅当显式传入 hidden=True 时只查隐藏照片。
+        hidden_clause = (
+            "SELECT 1 FROM source_marks AS hm "
+            f"WHERE hm.source_id={a}source_id "
+            "AND hm.item_type='photo' "
+            f"AND hm.item_key={a}filename "
+            "AND hm.hidden=1"
+        )
+        if filters.get("hidden"):
+            sql += f" AND EXISTS ({hidden_clause})"
+        else:
+            sql += f" AND NOT EXISTS ({hidden_clause})"
         if filters.get("favorite"):
             sql += (
                 " AND EXISTS ("
@@ -1682,6 +1697,8 @@ class Storage:
         kind = str(export_type or "").strip()
         if kind == "favorite":
             return {"favorite": True}
+        if kind == "hidden":
+            return {"hidden": True}
         if kind == "category":
             return {"category": str(category or "").strip()}
         raise ValueError("不允许导出全部照片")
@@ -2052,6 +2069,7 @@ class Storage:
         item_key: str,
         *,
         favorite: bool | None = None,
+        hidden: bool | None = None,
         note: str | None = None,
         category: str | None = None,
     ) -> dict:
@@ -2062,6 +2080,7 @@ class Storage:
             raise ValueError("标记缺少 source_id、类型或键")
         existing = self.marks_for_items(source_id, item_type, [item_key]).get(item_key, {})
         next_favorite = int(bool(existing.get("favorite"))) if favorite is None else int(bool(favorite))
+        next_hidden = int(bool(existing.get("hidden"))) if hidden is None else int(bool(hidden))
         next_note = str(existing.get("note") or "") if note is None else str(note or "")
         next_category = str(existing.get("category") or "") if category is None else str(category or "").strip()
         now = now_text()
@@ -2077,19 +2096,20 @@ class Storage:
                 )
             conn.execute(
                 """
-                INSERT INTO source_marks(source_id, item_type, item_key, favorite, note, category, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO source_marks(source_id, item_type, item_key, favorite, hidden, note, category, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_id, item_type, item_key) DO UPDATE SET
                     favorite=excluded.favorite,
+                    hidden=excluded.hidden,
                     note=excluded.note,
                     category=excluded.category,
                     updated_at=excluded.updated_at
                 """,
-                (source_id, item_type, item_key, next_favorite, next_note, next_category, now, now),
+                (source_id, item_type, item_key, next_favorite, next_hidden, next_note, next_category, now, now),
             )
             row = conn.execute(
                 """
-                SELECT source_id, item_type, item_key, favorite, note, category
+                SELECT source_id, item_type, item_key, favorite, hidden, note, category
                 FROM source_marks
                 WHERE source_id=? AND item_type=? AND item_key=?
                 """,
@@ -2108,7 +2128,7 @@ class Storage:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT item_key, favorite, note, category
+                SELECT item_key, favorite, hidden, note, category
                 FROM source_marks
                 WHERE source_id=? AND item_type=? AND item_key IN ({placeholders})
                 """,
@@ -2117,6 +2137,7 @@ class Storage:
             return {
                 str(row["item_key"]): {
                     "favorite": bool(row["favorite"]),
+                    "hidden": bool(row["hidden"]),
                     "note": str(row["note"] or ""),
                     "category": str(row["category"] or ""),
                 }

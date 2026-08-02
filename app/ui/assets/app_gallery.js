@@ -30,6 +30,7 @@
   const RENDER_AHEAD_PHOTOS = PS.RENDER_AHEAD_PHOTOS;
   const APP_BUILD = PS.APP_BUILD;
   const FAVORITE_CATEGORY = PS.FAVORITE_CATEGORY;
+  const HIDDEN_CATEGORY = PS.HIDDEN_CATEGORY;
   const DATE_RAIL_LOAD_LIMIT = PS.DATE_RAIL_LOAD_LIMIT;
   const INITIAL_PHOTO_LIMIT = PS.INITIAL_PHOTO_LIMIT;
   const PHOTO_LOAD_BATCH = PS.PHOTO_LOAD_BATCH;
@@ -222,6 +223,7 @@
     const raw = filter || {};
     const clean = {};
     if (raw.favorite) clean.favorite = true;
+    if (raw.hidden) clean.hidden = true;
     const lens = String(raw.lens || '').trim();
     if (lens) clean.lens = lens;
     const focal = String(raw.focal_bucket || '').trim();
@@ -235,7 +237,9 @@
 
   function filterPayload() {
     const filter = normalizeFilter(state.activeFilter);
-    if (state.activeCategory === FAVORITE_CATEGORY) {
+    if (state.activeCategory === HIDDEN_CATEGORY) {
+      filter.hidden = true;
+    } else if (state.activeCategory === FAVORITE_CATEGORY) {
       filter.favorite = true;
     } else if (state.activeCategory !== null) {
       filter.category = String(state.activeCategory || '');
@@ -245,6 +249,7 @@
 
   function viewedCategoryKey(categoryName) {
     if (categoryName === FAVORITE_CATEGORY) return '__favorite__';
+    if (categoryName === HIDDEN_CATEGORY) return '__hidden__';
     return categoryName === null ? '__all__' : 'category:' + String(categoryName || '');
   }
 
@@ -368,6 +373,19 @@
     }));
     els.categoryList.appendChild(favorite);
 
+    const hidden = document.createElement('button');
+    hidden.type = 'button';
+    hidden.className = 'category-item category-hidden';
+    hidden.classList.toggle('active', state.activeCategory === HIDDEN_CATEGORY);
+    hidden.innerHTML = '<span>隐藏</span><b></b>';
+    hidden.querySelector('b').textContent = Number(state.hiddenCount || 0);
+    hidden.addEventListener('click', () => setActiveCategory(HIDDEN_CATEGORY));
+    hidden.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+    els.categoryList.appendChild(hidden);
+
     (state.categories || []).forEach((category) => {
       const name = String(category.name || '');
       const btn = document.createElement('button');
@@ -391,6 +409,7 @@
     if (!state.currentSourceId) {
       state.categories = [];
       state.favoriteCount = 0;
+      state.hiddenCount = 0;
       renderCategoryList();
       return Promise.resolve([]);
     }
@@ -398,6 +417,7 @@
       if (!res || !res.success) throw new Error(res && res.message ? res.message : '读取分类失败');
       state.categories = res.categories || [];
       state.favoriteCount = Number(res.favorite_count || 0);
+      state.hiddenCount = Number(res.hidden_count || 0);
       renderCategoryList();
       return state.categories;
     }).catch((err) => {
@@ -3457,6 +3477,7 @@
       if (String(photo.filename || '') !== cleanName) return;
       const next = Object.assign({}, photo, {
         favorite: !!mark.favorite,
+        hidden: !!mark.hidden,
         note: String(mark.note || ''),
         category: String(mark.category || ''),
       });
@@ -3466,6 +3487,7 @@
       if (String(photo.filename || '') !== cleanName) return;
       state.exifCache.set(id, Object.assign({}, photo, {
         favorite: !!mark.favorite,
+        hidden: !!mark.hidden,
         note: String(mark.note || ''),
         category: String(mark.category || ''),
       }));
@@ -3473,6 +3495,7 @@
     if (state.lightbox.photo && String(state.lightbox.photo.filename || '') === cleanName) {
       state.lightbox.photo = Object.assign({}, state.lightbox.photo, {
         favorite: !!mark.favorite,
+        hidden: !!mark.hidden,
         note: String(mark.note || ''),
         category: String(mark.category || ''),
       });
@@ -3515,7 +3538,39 @@
     });
   }
 
+  function setPhotoHidden(photo, hidden) {
+    if (!photo || !requireSourceIdForMark()) return Promise.resolve(false);
+    const filename = String(photo.filename || '');
+    if (!filename) return Promise.resolve(false);
+    return call('set_item_mark', state.currentSourceId, 'photo', filename, null, null, null, !!hidden).then((res) => {
+      if (res && res.success) {
+        const mark = res.mark || {};
+        updatePhotoMark(filename, mark);
+        const updated = Object.assign({}, photo, {
+          favorite: !!mark.favorite,
+          hidden: !!mark.hidden,
+          note: String(mark.note || ''),
+          category: String(mark.category || ''),
+        });
+        showToast(updated.hidden ? '已隐藏' : '已取消隐藏');
+        loadCategories();
+        if (!photoMatchesActiveCategory(updated)) {
+          refreshGalleryForCategory();
+        }
+        return true;
+      }
+      showToast('隐藏状态保存失败', 'error');
+      return false;
+    }).catch((err) => {
+      console.warn(err);
+      showToast('隐藏状态保存失败', 'error');
+      return false;
+    });
+  }
+
   function photoMatchesActiveCategory(photo) {
+    if (photo && photo.hidden) return state.activeCategory === HIDDEN_CATEGORY;
+    if (state.activeCategory === HIDDEN_CATEGORY) return false;
     if (state.activeCategory === null) return true;
     if (state.activeCategory === FAVORITE_CATEGORY) return !!(photo && photo.favorite);
     const category = String(photo && photo.category || '').trim();
@@ -3590,6 +3645,12 @@
         label: photo.favorite ? '取消收藏' : '收藏',
         action: () => {
           setPhotoFavorite(photo, !photo.favorite);
+        },
+      },
+      {
+        label: photo.hidden ? '移出隐藏' : '隐藏',
+        action: () => {
+          setPhotoHidden(photo, !photo.hidden);
         },
       },
       {
@@ -4184,6 +4245,7 @@
   PS.showDateContextMenu = showDateContextMenu;
   PS.updatePhotoMark = updatePhotoMark;
   PS.setPhotoFavorite = setPhotoFavorite;
+  PS.setPhotoHidden = setPhotoHidden;
   PS.setPhotoCategory = setPhotoCategory;
   PS.editPhotoNote = editPhotoNote;
   PS.favoriteHoveredPhoto = favoriteHoveredPhoto;

@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.backend.plugin_config import PluginConfigStore
+
 MODULES_DIR = Path(__file__).resolve().parent
 _KEY_RE = re.compile(r"^[a-z0-9_-]+$")
 
@@ -39,11 +41,16 @@ def _find_module_class(backend):
     return None
 
 
-def discover_modules(data_dir=None, storage_ref=None) -> dict[str, ModuleHandle]:
+def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None) -> dict[str, ModuleHandle]:
     """扫描并加载所有模块，返回 {key: ModuleHandle}。"""
     modules: dict[str, ModuleHandle] = {}
     if not MODULES_DIR.is_dir():
         return modules
+
+    # 插件配置存储（data/module_configs/{key}.json）
+    if plugin_configs is None and data_dir:
+        plugin_configs = PluginConfigStore(Path(data_dir))
+
     for manifest_path in sorted(MODULES_DIR.glob("*/module.json")):
         dir_name = manifest_path.parent.name
         try:
@@ -65,7 +72,10 @@ def discover_modules(data_dir=None, storage_ref=None) -> dict[str, ModuleHandle]
                 raise RuntimeError("backend.py 未提供带 api_methods() 的模块类")
             instance = cls()
             if hasattr(instance, "setup"):
-                instance.setup({"data_dir": data_dir, "storage": storage_ref})
+                ctx = {"data_dir": data_dir, "storage": storage_ref}
+                if plugin_configs:
+                    ctx["config"] = plugin_configs.get_config(key)
+                instance.setup(ctx)
             raw_methods = instance.api_methods() or {}
             methods = {str(name): fn for name, fn in raw_methods.items() if callable(fn)}
 
@@ -74,7 +84,11 @@ def discover_modules(data_dir=None, storage_ref=None) -> dict[str, ModuleHandle]
             if frontend_rel:
                 frontend_path = (manifest_path.parent / frontend_rel).resolve()
                 if frontend_path.exists():
-                    frontend_url = frontend_path.as_uri()
+                    # 用文件 mtime 做缓存破坏：WebView2 会缓存 file:// 脚本，URL 不带
+                    # 版本号时改了前端代码、重启 app 也可能加载到缓存的旧脚本。
+                    # Chromium 解析 file:// 会忽略 query，追加 ?v=<mtime> 安全且文件
+                    # 一改动 URL 即变化，保证每次启动都加载最新代码。
+                    frontend_url = f"{frontend_path.as_uri()}?v={int(frontend_path.stat().st_mtime)}"
                 else:
                     print(f"[PicScannerModules] 模块 {key} 的前端文件不存在：{frontend_path}")
 

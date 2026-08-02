@@ -3692,13 +3692,16 @@
   }
 
   function quickEditOriginalPreviewTargetFromMessage(message) {
-    const sourceMaxSide = Math.max(1, Number(message && message.sourceWidth || 1), Number(message && message.sourceHeight || 1));
     const displayMaxSide = Math.max(
       1,
       Number(message && (message.displayWidth || message.sourceWidth) || 1),
       Number(message && (message.displayHeight || message.sourceHeight) || 1),
     );
-    return Math.min(sourceMaxSide, displayMaxSide);
+    // 用 display basis（= 原图尺寸）而非 min(source, display)：有 source stage（如人脸
+    // 磨皮）激活时，位图先被降采样到 maxSide 再进 QE worker，message.sourceWidth 变成
+    // 降采样后的尺寸，会把原图目标误算成 <=1800，导致原图级渲染永不调度。
+    // displayWidth/displayHeight 来自 basis（原图尺寸），始终可靠；无 stage 时两者相等。
+    return displayMaxSide;
   }
 
   function cancelStaleQuickEditPendingRender(nextKey, nextRenderSignature) {

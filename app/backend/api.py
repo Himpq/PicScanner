@@ -21,6 +21,7 @@ from WebViewUI import WindowApi
 from ..modules.loader import discover_modules
 from .batch_processor import BatchProcessingApiMixin
 from .config_store import DATA_DIR, config_store
+from .plugin_config import PluginConfigStore
 from .exif_reader import is_renderable_image
 from .metadata_copy import MetadataCopyError, copy_complete_metadata
 from .scanner import scanner
@@ -121,7 +122,8 @@ def _versioned_file_uri(path: str | Path) -> str:
 class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def __init__(self):
         super().__init__()
-        self._modules = discover_modules(DATA_DIR, storage)
+        self._plugin_configs = PluginConfigStore(DATA_DIR)
+        self._modules = discover_modules(DATA_DIR, storage, plugin_configs=self._plugin_configs)
 
     def get_modules(self):
         return {
@@ -150,6 +152,24 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         except Exception as exc:
             return {"success": False, "message": f"模块调用失败: {exc}"}
         return result if isinstance(result, dict) else {"success": True, "data": result}
+
+    def get_module_config(self, module_key):
+        """获取指定插件的配置快照。"""
+        key = str(module_key or "").strip()
+        if not key:
+            return {"success": False, "message": "缺少 module_key"}
+        cfg = self._plugin_configs.get_config(key)
+        return {"success": True, "config": cfg.snapshot()}
+
+    def set_module_config(self, module_key, key, value):
+        """设置插件配置项。"""
+        mk = str(module_key or "").strip()
+        k = str(key or "").strip()
+        if not mk or not k:
+            return {"success": False, "message": "缺少 module_key 或 key"}
+        cfg = self._plugin_configs.get_config(mk)
+        cfg.set(k, value)
+        return {"success": True, "config": cfg.snapshot()}
 
     @staticmethod
     def _format_perf_value(value):
@@ -728,6 +748,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             payload = self._photo_payload(row)
             mark = marks.get(str(row.get("filename") or ""), {})
             payload["favorite"] = bool(mark.get("favorite"))
+            payload["hidden"] = bool(mark.get("hidden"))
             payload["note"] = mark.get("note", "")
             payload["category"] = mark.get("category", "")
             if payload["previewable"] and not payload["preview_url"]:
@@ -1961,6 +1982,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             "success": True,
             "categories": storage.list_categories(sid),
             "favorite_count": storage.count_export_photos(sid, "favorite") if sid else 0,
+            "hidden_count": storage.count_export_photos(sid, "hidden") if sid else 0,
         }
 
     def add_category(self, source_id, name):
@@ -1974,6 +1996,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             "category": category,
             "categories": storage.list_categories(sid),
             "favorite_count": storage.count_export_photos(sid, "favorite") if sid else 0,
+            "hidden_count": storage.count_export_photos(sid, "hidden") if sid else 0,
         }
 
     def choose_export_folder(self):
@@ -2601,12 +2624,13 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
                 return next_candidate
             index += 1
 
-    def set_item_mark(self, source_id, item_type, item_key, favorite=None, note=None, category=None):
+    def set_item_mark(self, source_id, item_type, item_key, favorite=None, note=None, category=None, hidden=None):
         mark = storage.set_mark(
             str(source_id or ""),
             str(item_type or ""),
             str(item_key or ""),
             favorite=None if favorite is None else bool(favorite),
+            hidden=None if hidden is None else bool(hidden),
             note=None if note is None else str(note or ""),
             category=None if category is None else str(category or "").strip(),
         )
@@ -2835,6 +2859,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         filename = str(payload.get("filename") or "")
         mark = storage.marks_for_items(source_id, "photo", [filename]).get(filename, {})
         payload["favorite"] = bool(mark.get("favorite"))
+        payload["hidden"] = bool(mark.get("hidden"))
         payload["note"] = str(mark.get("note") or "")
         payload["category"] = str(mark.get("category") or "")
 

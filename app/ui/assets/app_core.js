@@ -47,6 +47,7 @@
     searchResults: new Map(),
     categories: [],
     favoriteCount: 0,
+    hiddenCount: 0,
     activeCategory: null,
     categoryLastViewedDates: new Map(),
     categoryPicker: null,
@@ -289,6 +290,7 @@
   const RENDER_AHEAD_PHOTOS = 20;
   const APP_BUILD = 'frame-text-edge-20260718-17';
   const FAVORITE_CATEGORY = '__picscanner_favorite_filter__';
+  const HIDDEN_CATEGORY = '__picscanner_hidden_filter__';
   const DATE_RAIL_LOAD_LIMIT = 5000;
   const INITIAL_PHOTO_LIMIT = 40;
   const PHOTO_LOAD_BATCH = 20;
@@ -778,6 +780,7 @@
     RENDER_AHEAD_PHOTOS,
     APP_BUILD,
     FAVORITE_CATEGORY,
+    HIDDEN_CATEGORY,
     DATE_RAIL_LOAD_LIMIT,
     INITIAL_PHOTO_LIMIT,
     PHOTO_LOAD_BATCH,

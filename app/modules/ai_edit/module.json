@@ -1,0 +1,7 @@
+{
+  "key": "ai_edit",
+  "name": "AI修图",
+  "version": "0.1.0",
+  "description": "LLM tool-calling 修图引擎：参数调整工具集 + 提示词工程 + 上下文管理",
+  "frontend": "ai_edit.js"
+}

@@ -103,8 +103,10 @@ function valueText(key) {
 
 function refresh() {
   const srcParams = PS.state.quickEdit.params;
-  for (const key of Object.keys(srcParams)) {
-    if (params[key] !== srcParams[key]) params[key] = srcParams[key];
+  if (srcParams && typeof srcParams === 'object') {
+    for (const key of Object.keys(srcParams)) {
+      if (params[key] !== srcParams[key]) params[key] = srcParams[key];
+    }
   }
   const srcCollapsed = PS.quickEditCollapsedSections();
   for (const key of Object.keys(srcCollapsed)) {

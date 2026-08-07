@@ -9399,6 +9399,15 @@
     if (opts.resetPan) {
       panX = Number(opts.resetPanX || 0);
       panY = Number(opts.resetPanY || 0);
+    } else if (opts.anchorCenter) {
+      // 以画面中心为锚点：等比收缩平移，视觉上向中心缩放；
+      // centerPullExponent > 1 时回中的拉力更明显
+      const exponent = Number.isFinite(Number(opts.centerPullExponent))
+        ? Math.max(1, Number(opts.centerPullExponent))
+        : 1;
+      const decay = Math.pow(zoom / currentZoom, exponent);
+      panX *= decay;
+      panY *= decay;
     } else if (anchorEvent && stage) {
       const rect = stage.getBoundingClientRect();
       const localX = anchorEvent.clientX - rect.left - rect.width / 2;
@@ -10633,6 +10642,95 @@
       });
     }
     if (!opts.skipOverlay) requestAnimationFrame(updateQuickEditCropOverlay);
+  }
+
+  function captureQuickEditObservation(options) {
+    const opts = options || {};
+    const maxSide = Math.max(320, Math.min(1600, Number(opts.maxSide || 1024)));
+    const timeoutMs = Math.max(2000, Math.min(20000, Number(opts.timeoutMs || 12000)));
+    const el = state.quickEdit.el;
+    const img = el ? el.querySelector('[data-quick-edit-img]') : null;
+    const photoId = Number(state.quickEdit.photo && state.quickEdit.photo.id || 0);
+    const sourceSrc = String(state.quickEdit.sourceSrc || '');
+    if (!state.quickEdit.open || !img || !photoId || !sourceSrc) {
+      return Promise.reject(new Error('当前照片尚未进入可观察的快速调整状态'));
+    }
+
+    const params = quickEditEffectiveParams();
+    const expectedSignature = quickEditRenderSignature(sourceSrc, quickEditPixelSignature(params));
+    clearTimeout(state.quickEdit.previewRenderTimer);
+    state.quickEdit.previewRenderTimer = null;
+    renderQuickEditAdjustedPreview({
+      maxSide,
+      quality: 0.9,
+      qualityKey: 'agent-observation',
+      interactive: false,
+    });
+
+    const startedAt = Date.now();
+    return new Promise((resolve, reject) => {
+      function fail(message) {
+        const details = {
+          photoId,
+          expectedSignature,
+          requestedSignature: String(state.quickEdit.previewRenderRequestSignature || ''),
+          renderedSignature: String(state.quickEdit.previewRenderedSignature || ''),
+          pendingSignature: String(state.quickEdit.previewRenderPendingSignature || ''),
+          rendering: !!state.quickEdit.previewRendering,
+        };
+        console.error('[AiEditAgent] 观察图生成失败', details);
+        reject(new Error(message));
+      }
+
+      function capture() {
+        try {
+          const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('无法创建观察图画布上下文');
+          context.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          if (!dataUrl.startsWith('data:image/')) throw new Error('观察图编码结果无效');
+          resolve(dataUrl);
+        } catch (err) {
+          fail(err && err.message ? err.message : String(err));
+        }
+      }
+
+      function check() {
+        if (!state.quickEdit.open || Number(state.quickEdit.photo && state.quickEdit.photo.id || 0) !== photoId) {
+          fail('Agent 运行期间当前照片已变化');
+          return;
+        }
+        const currentSignature = quickEditRenderSignature(
+          String(state.quickEdit.sourceSrc || ''),
+          quickEditPixelSignature(quickEditEffectiveParams()),
+        );
+        if (currentSignature !== expectedSignature) {
+          fail('Agent 运行期间调整参数已被其他操作修改');
+          return;
+        }
+        if (
+          String(state.quickEdit.previewRenderedSignature || '') === expectedSignature
+          && !state.quickEdit.previewRendering
+          && img.complete
+          && img.naturalWidth > 0
+          && img.naturalHeight > 0
+        ) {
+          requestAnimationFrame(capture);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          fail('等待目标参数对应的预览渲染超时');
+          return;
+        }
+        setTimeout(check, 40);
+      }
+
+      check();
+    });
   }
 
   function loadQuickEditPreview(photo) {
@@ -12144,6 +12242,7 @@
   PS.invalidateQuickEditRenderedPreview = invalidateQuickEditRenderedPreview;
   PS.syncQuickEditControls = syncQuickEditControls;
   PS.applyQuickEditPreview = applyQuickEditPreview;
+  PS.captureQuickEditObservation = captureQuickEditObservation;
   PS.scheduleQuickEditRawDevelopPreview = scheduleQuickEditRawDevelopPreview;
   PS.scheduleQuickEditHistogramRender = scheduleQuickEditHistogramRender;
   PS.refreshQuickEditAfterSourceStageChange = refreshQuickEditAfterSourceStageChange;

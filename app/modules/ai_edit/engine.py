@@ -45,7 +45,8 @@ class LLMEngine:
     # ─── 公开接口 ────────────────────────────────────────────────
 
     def chat(self, user_message: str, conversation: list[dict] | None = None,
-             image_path: str | None = None, image_data_url: str | None = None) -> dict:
+             image_path: str | None = None, image_data_url: str | None = None,
+             on_event=None, should_cancel=None, allow_tools: bool = True) -> dict:
         """处理一轮用户输入，返回完整结果。
 
         Args:
@@ -53,6 +54,11 @@ class LLMEngine:
             conversation: 可选的历史 messages（前端维护），不含 system
             image_path: 原始照片路径（视觉模型开启、无编辑渲染图时使用）
             image_data_url: 编辑后的渲染图 data URL（前端截图，优先使用）
+            on_event: 可选流式回调，接收以下事件：
+                {"type": "delta", "text": str}    最终回复的增量文本
+                {"type": "tools", "tools": [...]} 一轮工具调用执行完毕
+            should_cancel: 可选取消检查函数
+            allow_tools: False 时只允许模型观察并总结，不下发工具定义
 
         Returns:
             {
@@ -64,15 +70,33 @@ class LLMEngine:
         """
         cfg = self._read_config()
         messages = self._build_messages(cfg, user_message, conversation, image_path, image_data_url)
-        tools_schema = self._registry.get_schemas()
+        tools_schema = self._registry.get_schemas() if allow_tools else []
+
+        def _emit(evt: dict) -> None:
+            if on_event is not None:
+                try:
+                    on_event(evt)
+                except Exception as exc:
+                    print(f"[AiEdit] on_event 回调异常: {exc}", flush=True)
+
+        def _on_delta(text: str) -> None:
+            _emit({"type": "delta", "text": text})
 
         tool_records = []
         rounds = 0
-        max_rounds = cfg["max_tool_rounds"]
+        max_rounds = cfg["max_tool_rounds"] if allow_tools else 1
 
         while rounds < max_rounds:
+            if should_cancel is not None and should_cancel():
+                raise EngineError("任务已取消")
             rounds += 1
-            response = self._call_api(cfg, messages, tools_schema)
+            response = self._call_api_stream(
+                cfg,
+                messages,
+                tools_schema,
+                on_delta=_on_delta,
+                should_cancel=should_cancel,
+            )
 
             choice = response["choices"][0]
             msg = choice["message"]
@@ -92,7 +116,10 @@ class LLMEngine:
 
             # 模型请求工具调用
             messages.append(msg)  # assistant message with tool_calls
+            round_records = []
             for tc in msg["tool_calls"]:
+                if should_cancel is not None and should_cancel():
+                    raise EngineError("任务已取消")
                 fn_name = tc["function"]["name"]
                 try:
                     fn_args = json.loads(tc["function"]["arguments"])
@@ -106,12 +133,14 @@ class LLMEngine:
                 except (KeyError, ValueError, Exception) as exc:
                     result_text = f"错误: {exc}"
 
-                tool_records.append({
+                record = {
                     "id": tc.get("id", ""),
                     "name": fn_name,
                     "arguments": fn_args,
                     "result": result_text,
-                })
+                }
+                tool_records.append(record)
+                round_records.append(record)
 
                 # 工具结果回填 messages
                 messages.append({
@@ -119,6 +148,9 @@ class LLMEngine:
                     "tool_call_id": tc.get("id", ""),
                     "content": result_text,
                 })
+
+            # 本轮工具执行完毕 → 通知前端（agent 式活动展示）
+            _emit({"type": "tools", "tools": round_records})
 
         # 超过最大轮次
         return {
@@ -139,7 +171,11 @@ class LLMEngine:
             missing.append("api_key")
         if not cfg["model"]:
             missing.append("model")
-        return {"ready": len(missing) == 0, "missing": missing}
+        return {
+            "ready": len(missing) == 0,
+            "missing": missing,
+            "is_vision": cfg["is_vision"],
+        }
 
     # ─── 内部实现 ────────────────────────────────────────────────
 
@@ -180,14 +216,15 @@ class LLMEngine:
         if conversation:
             messages.extend(conversation)
 
-        # 本轮用户输入（视觉模型开启时附带照片）
-        # 优先用前端传来的编辑后渲染图（image_data_url），否则回退到原始照片文件。
+        # 本轮用户输入（视觉模型开启时必须附带照片）。
         image_url = None
         if cfg["is_vision"]:
             if image_data_url:
                 image_url = self._build_image_from_data_url(image_data_url, cfg["image_max_side"])
             elif image_path:
                 image_url = self._build_image_content(image_path, cfg["image_max_side"])
+            else:
+                raise EngineError("视觉 Agent 缺少当前照片画面")
 
         if image_url:
             user_content = [
@@ -200,15 +237,15 @@ class LLMEngine:
         messages.append({"role": "user", "content": user_content})
         return messages
 
-    def _build_image_content(self, image_path: str, max_side: int) -> str | None:
+    def _build_image_content(self, image_path: str, max_side: int) -> str:
         """读取照片 → 压缩到长边 max_side → base64 data URL（带 mtime 缓存）。
 
-        失败时返回 None（不阻断对话，退化为纯文本）。
+        失败时直接终止本轮，避免模型在没有画面的情况下继续调参。
         """
         try:
             path = str(image_path or "")
             if not path or not os.path.exists(path):
-                return None
+                raise EngineError(f"照片文件不存在: {path}")
             mtime = os.path.getmtime(path)
 
             cached = self._image_cache.get(path)
@@ -230,23 +267,24 @@ class LLMEngine:
             data_url = f"data:image/jpeg;base64,{b64}"
             self._image_cache[path] = (mtime, data_url)
             return data_url
+        except EngineError:
+            raise
         except Exception as exc:
-            print(f"[AiEdit] 图片编码失败（退化为纯文本）: {exc}", flush=True)
-            return None
+            raise EngineError(f"照片编码失败: {exc}") from exc
 
-    def _build_image_from_data_url(self, data_url: str, max_side: int) -> str | None:
+    def _build_image_from_data_url(self, data_url: str, max_side: int) -> str:
         """把前端传来的编辑后渲染图（data URL）压缩到长边 max_side 后返回。
 
         前端截图可能已是预览分辨率，这里统一再压一道，控制传给模型的体积。
-        按内容哈希缓存，相同帧不重复编码。失败返回 None（退化纯文本）。
+        按内容哈希缓存，相同帧不重复编码。失败时直接终止本轮。
         """
         try:
             raw = str(data_url or "")
             if not raw.startswith("data:"):
-                return None
+                raise EngineError("渲染观察图不是 data URL")
             header, _, b64data = raw.partition(",")
             if not b64data:
-                return None
+                raise EngineError("渲染观察图缺少图像数据")
 
             # 内容哈希做缓存键（含 max_side，避免不同尺寸串用）
             cache_key = "dataurl:" + hashlib.md5(
@@ -272,9 +310,10 @@ class LLMEngine:
             result = f"data:image/jpeg;base64,{out_b64}"
             self._image_cache[cache_key] = (0.0, result)
             return result
+        except EngineError:
+            raise
         except Exception as exc:
-            print(f"[AiEdit] 渲染图编码失败（退化为纯文本）: {exc}", flush=True)
-            return None
+            raise EngineError(f"渲染观察图编码失败: {exc}") from exc
 
     @staticmethod
     def _strip_images(messages: list[dict]) -> list[dict]:
@@ -293,8 +332,15 @@ class LLMEngine:
             clean.append(m)
         return clean
 
-    def _call_api(self, cfg: dict, messages: list[dict], tools: list[dict]) -> dict:
-        """调用 OpenAI 兼容 /chat/completions 接口。"""
+    def _call_api_stream(self, cfg: dict, messages: list[dict], tools: list[dict],
+                         on_delta=None, should_cancel=None) -> dict:
+        """调用 OpenAI 兼容 /chat/completions 接口（SSE 流式）。
+
+        逐块解析 data: 行：content 增量实时回调 on_delta；tool_calls 按
+        index 累积碎片（id / function.name / arguments）。最终组装成与非
+        流式响应同构的 {"choices": [{"message": ..., "finish_reason": ...}]}，
+        上层循环逻辑无需感知流式细节。
+        """
         if not cfg["api_base"] or not cfg["api_key"] or not cfg["model"]:
             raise EngineError("LLM 配置不完整（需要 api_base, api_key, model）")
 
@@ -302,12 +348,14 @@ class LLMEngine:
         payload = {
             "model": cfg["model"],
             "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
             "max_tokens": cfg["max_tokens"],
             "temperature": cfg["temperature"],
             "top_p": cfg["top_p"],
+            "stream": True,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
@@ -330,9 +378,53 @@ class LLMEngine:
         else:
             opener = urllib.request.build_opener()
 
+        content = ""
+        tool_acc: dict[int, dict] = {}  # index -> {"id", "name", "arguments"}
+        finish_reason = ""
+
         try:
             with opener.open(req, timeout=cfg["timeout"]) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                for raw_line in resp:
+                    if should_cancel is not None and should_cancel():
+                        raise EngineError("任务已取消")
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    choice0 = choices[0]
+                    delta = choice0.get("delta") or {}
+                    fr = choice0.get("finish_reason")
+                    if fr:
+                        finish_reason = str(fr)
+
+                    piece = delta.get("content")
+                    if piece:
+                        content += piece
+                        if on_delta is not None:
+                            try:
+                                on_delta(piece)
+                            except Exception as exc:
+                                print(f"[AiEdit] on_delta 回调异常: {exc}", flush=True)
+
+                    for tc in delta.get("tool_calls") or []:
+                        idx = int(tc.get("index") or 0)
+                        slot = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        if tc.get("id"):
+                            slot["id"] = str(tc["id"])
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] += str(fn["name"])
+                        if fn.get("arguments"):
+                            slot["arguments"] += str(fn["arguments"])
         except urllib.error.HTTPError as exc:
             error_body = ""
             try:
@@ -345,7 +437,18 @@ class LLMEngine:
         except TimeoutError:
             raise EngineError(f"请求超时（{cfg['timeout']}s）") from None
 
-        if "choices" not in data or not data["choices"]:
-            raise EngineError(f"API 返回格式异常: {json.dumps(data, ensure_ascii=False)[:300]}")
+        msg: dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_acc:
+            msg["tool_calls"] = [
+                {
+                    "id": slot["id"] or f"call_{idx}",
+                    "type": "function",
+                    "function": {"name": slot["name"], "arguments": slot["arguments"]},
+                }
+                for idx, slot in sorted(tool_acc.items())
+            ]
 
-        return data
+        if not content and not tool_acc:
+            raise EngineError("API 流式响应为空（未收到任何有效数据块）")
+
+        return {"choices": [{"message": msg, "finish_reason": finish_reason}]}

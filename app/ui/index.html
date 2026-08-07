@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=modules-20260723-2" />
+  <link rel="stylesheet" href="assets/style.css?v=lightbox-center-zoom-20260805-1" />
   <link rel="stylesheet" href="assets/settings.css?v=settings-alt-exif-20260703-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=batch-edit-tabs-20260717-1" />
@@ -57,35 +57,36 @@
     <main id="workspace" class="workspace hidden">
       <aside class="side">
         <div class="brand-block">
-          <div class="brand-title">PicScanner</div>
-          <div id="current-source" class="brand-sub"></div>
+          <div id="current-source" class="side-path"></div>
         </div>
         <div id="progress-card" class="progress-card">
-          <div class="progress-block">
+          <div id="scan-block" class="progress-block">
             <div class="progress-top">
-              <span id="scan-status">等待扫描</span>
-              <span id="scan-count">0 / 0</span>
+              <span id="scan-status" class="progress-label">等待扫描</span>
+              <button id="scan-all" class="ghost-btn task-btn">扫描所有图片</button>
             </div>
-            <div class="progress-track"><div id="progress-bar"></div></div>
+            <div class="progress-meter">
+              <div class="progress-track"><div id="progress-bar"></div></div>
+              <span id="scan-count" class="progress-count">0 / 0</span>
+            </div>
             <div id="scan-message" class="progress-msg"></div>
           </div>
-          <div class="progress-block">
+          <div id="exif-block" class="progress-block">
             <div class="progress-top">
-              <span id="exif-status">等待 EXIF</span>
-              <span id="exif-count">0 / 0</span>
+              <span id="exif-status" class="progress-label">等待 EXIF</span>
+              <button id="read-exif" class="ghost-btn task-btn">读取 EXIF 统计</button>
             </div>
-            <div class="progress-track"><div id="exif-progress-bar"></div></div>
+            <div class="progress-meter">
+              <div class="progress-track"><div id="exif-progress-bar"></div></div>
+              <span id="exif-count" class="progress-count">0 / 0</span>
+            </div>
             <div id="exif-message" class="progress-msg"></div>
           </div>
-        </div>
-        <div class="side-actions">
-          <button id="scan-all" class="ghost-btn">扫描所有图片</button>
-          <button id="read-exif" class="ghost-btn">读取 EXIF 统计</button>
         </div>
         <div class="category-panel">
           <div class="category-head">
             <div class="section-title">分类</div>
-            <button id="add-category" class="icon-btn category-add" title="新增分类">+</button>
+            <button id="add-category" class="icon-btn category-add" title="新增分类" aria-label="新增分类"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
           </div>
           <div id="category-list" class="category-list"></div>
         </div>
@@ -325,10 +326,10 @@
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/vue/picscanner-vue.js?v=modules-20260723-2"></script>
-  <script src="assets/app_core.js?v=modules-20260723-2"></script>
-  <script src="assets/app_gallery.js?v=modules-20260723-2"></script>
-  <script src="assets/app_lightbox.js?v=modules-20260723-2"></script>
+  <script src="assets/app_core.js?v=sidebar-flat-20260803-3"></script>
+  <script src="assets/app_gallery.js?v=sidebar-flat-20260803-3"></script>
+  <script src="assets/app_lightbox.js?v=lightbox-center-zoom-20260805-1"></script>
   <script src="assets/app_modules.js?v=modules-20260723-2"></script>
-  <script src="assets/app.js?v=modules-20260723-2"></script>
+  <script src="assets/app.js?v=lightbox-center-zoom-20260805-1"></script>
 </body>
 </html>

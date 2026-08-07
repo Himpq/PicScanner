@@ -50,7 +50,10 @@ class ToolRegistry:
         handler = self._handlers.get(name)
         if handler is None:
             raise KeyError(name)
+        snapshot = {"params": self._session.params_snapshot()}
+        history_depth = self._history.depth
         result = handler(arguments, self._session, self._history)
+        self._history.attach_snapshot(snapshot, history_depth)
         return result
 
     def get_tool(self, name: str) -> dict | None:

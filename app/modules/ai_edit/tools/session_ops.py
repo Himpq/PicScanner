@@ -1,4 +1,4 @@
-"""会话操作工具：应用参数到照片、重置、查询当前状态、撤销。"""
+"""会话操作工具：重置、查询当前状态、撤销。"""
 
 from __future__ import annotations
 
@@ -44,53 +44,6 @@ def handle_undo(arguments: dict, session: EditSession, history: OperationHistory
     }
 
 
-def handle_apply_to_photo(arguments: dict, session: EditSession, history: OperationHistory):
-    """将当前参数应用到指定照片（生成渲染指令）。
-
-    实际像素处理由前端 Worker 执行，此处仅生成指令包。
-    """
-    photo_id = arguments.get("photo_id")
-    if not photo_id:
-        raise ValueError("缺少 photo_id")
-
-    params = session.get_params()
-    # 生成渲染指令（前端接收后交给 Worker 处理）
-    render_command = {
-        "type": "ai_edit_render",
-        "photo_id": photo_id,
-        "params": params,
-    }
-    session.mark_applied(photo_id)
-    history.push("apply_to_photo", {"photo_id": photo_id})
-    return {
-        "render_command": render_command,
-        "note": f"已生成照片 {photo_id} 的渲染指令，参数共 {len(params)} 项",
-    }
-
-
-def handle_batch_apply(arguments: dict, session: EditSession, history: OperationHistory):
-    """将当前参数批量应用到多张照片。"""
-    photo_ids = arguments.get("photo_ids")
-    if not photo_ids or not isinstance(photo_ids, list):
-        raise ValueError("缺少 photo_ids 数组")
-
-    params = session.get_params()
-    commands = []
-    for pid in photo_ids:
-        commands.append({
-            "type": "ai_edit_render",
-            "photo_id": pid,
-            "params": params,
-        })
-        session.mark_applied(pid)
-
-    history.push("batch_apply", {"count": len(photo_ids)})
-    return {
-        "render_commands": commands,
-        "note": f"已为 {len(photo_ids)} 张照片生成渲染指令",
-    }
-
-
 # ─── 工具定义 ────────────────────────────────────────────────────
 
 TOOLS = [
@@ -123,35 +76,5 @@ TOOLS = [
             "additionalProperties": False,
         },
         "handler": handle_undo,
-    },
-    {
-        "name": "apply_to_photo",
-        "description": "将当前所有调整参数应用到指定照片，生成渲染指令。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "photo_id": {"type": "string", "description": "目标照片 ID"},
-            },
-            "required": ["photo_id"],
-            "additionalProperties": False,
-        },
-        "handler": handle_apply_to_photo,
-    },
-    {
-        "name": "batch_apply",
-        "description": "将当前参数批量应用到多张照片。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "photo_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "目标照片 ID 列表",
-                },
-            },
-            "required": ["photo_ids"],
-            "additionalProperties": False,
-        },
-        "handler": handle_batch_apply,
     },
 ]

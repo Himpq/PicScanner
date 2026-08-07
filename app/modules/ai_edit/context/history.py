@@ -46,6 +46,13 @@ class OperationHistory:
         """查看最近一步但不弹出。"""
         return self._stack[-1] if self._stack else None
 
+    def attach_snapshot(self, snapshot: dict, start_depth: int):
+        """为一次工具调用新增的历史项补齐调用前快照。"""
+        if len(self._stack) <= start_depth:
+            return
+        for entry in self._stack[start_depth:]:
+            entry.setdefault("snapshot_before", snapshot)
+
     def clear(self):
         self._stack.clear()
 

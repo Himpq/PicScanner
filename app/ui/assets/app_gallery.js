@@ -10,6 +10,7 @@
   const text = PS.text;
   const clamp = PS.clamp;
   const scanStatusLabel = PS.scanStatusLabel;
+  const exifStatusLabel = PS.exifStatusLabel;
   const quickEditPerfLog = PS.quickEditPerfLog;
   const quickEditPerfNow = PS.quickEditPerfNow;
   const quickEditPerfEnabled = PS.quickEditPerfEnabled;
@@ -1961,7 +1962,7 @@
       const exifTotal = Number(st.exif_total_files || stats.exif_pending || 0);
       const exifPct = exifTotal > 0 ? Math.max(0, Math.min(100, exifDone / exifTotal * 100)) : 0;
       els.exifProgressBar.style.width = exifPct.toFixed(1) + '%';
-      els.exifStatus.textContent = scanStatusLabel(exifStatus);
+      els.exifStatus.textContent = exifStatusLabel(exifStatus);
       els.exifCount.textContent = exifDone + ' / ' + exifTotal;
       els.exifMessage.textContent = st.exif_message || '';
 
@@ -1969,6 +1970,10 @@
       els.scanAll.classList.toggle('danger', state.scanRunning);
       els.readExif.textContent = state.exifRunning ? '停止读取 EXIF' : '读取 EXIF 统计';
       els.readExif.classList.toggle('danger', state.exifRunning);
+      els.scanBlock.classList.toggle('step-active', state.scanRunning);
+      els.scanBlock.classList.toggle('step-done', !!state.scanComplete);
+      els.exifBlock.classList.toggle('step-active', state.exifRunning);
+      els.exifBlock.classList.toggle('step-done', exifStatus === 'done');
       const signature = statsSignature(stats);
       const statsChanged = signature !== state.lastStatsSignature;
       if (Date.now() - state.lastScrollAt < 260) return;

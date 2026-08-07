@@ -41,8 +41,12 @@ def _find_module_class(backend):
     return None
 
 
-def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None) -> dict[str, ModuleHandle]:
-    """扫描并加载所有模块，返回 {key: ModuleHandle}。"""
+def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=None) -> dict[str, ModuleHandle]:
+    """扫描并加载所有模块，返回 {key: ModuleHandle}。
+
+    push: 可选回调 push(event: str, data: dict)，模块可用它向前端推送事件
+    （如 LLM 流式输出）。由主 API 提供，内部经 webview evaluate_js 下发。
+    """
     modules: dict[str, ModuleHandle] = {}
     if not MODULES_DIR.is_dir():
         return modules
@@ -75,6 +79,8 @@ def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None) -> di
                 ctx = {"data_dir": data_dir, "storage": storage_ref}
                 if plugin_configs:
                     ctx["config"] = plugin_configs.get_config(key)
+                if push is not None:
+                    ctx["push"] = push
                 instance.setup(ctx)
             raw_methods = instance.api_methods() or {}
             methods = {str(name): fn for name, fn in raw_methods.items() if callable(fn)}

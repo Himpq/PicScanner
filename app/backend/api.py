@@ -123,7 +123,26 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def __init__(self):
         super().__init__()
         self._plugin_configs = PluginConfigStore(DATA_DIR)
-        self._modules = discover_modules(DATA_DIR, storage, plugin_configs=self._plugin_configs)
+        self._modules = discover_modules(
+            DATA_DIR, storage, plugin_configs=self._plugin_configs, push=self._module_push
+        )
+
+    def _module_push(self, event, data):
+        """模块事件推送出口：经 webview evaluate_js 下发到前端调度器。
+
+        供模块后端（工作线程）调用，窗口未就绪时静默丢弃。payload 用
+        json.dumps 序列化（默认 ensure_ascii=True），嵌入 JS 调用安全。
+        """
+        win = self._get_window("")
+        if win is None:
+            return
+        try:
+            payload = json.dumps({"event": str(event or ""), "data": data})
+            win.evaluate_js(
+                "window.PicScannerModules && window.PicScannerModules._onBackendEvent(" + payload + ");"
+            )
+        except Exception as exc:
+            print(f"[PicScannerModules] 事件推送失败: {exc}", flush=True)
 
     def get_modules(self):
         return {

@@ -8,6 +8,7 @@
   const moduleDefs = new Map();
   const moduleMeta = new Map();
   const sourceStages = [];
+  const backendEventHandlers = new Set();
 
   let screenEl = null;
   let moduleTabEl = null;
@@ -93,6 +94,12 @@
         closeModule: () => closeModule(),
         invalidateQuickEdit: () => {
           if (PS.refreshQuickEditAfterSourceStageChange) PS.refreshQuickEditAfterSourceStageChange();
+        },
+        captureQuickEditObservation: (options) => {
+          if (!PS.captureQuickEditObservation) {
+            return Promise.reject(new Error('主编辑器未提供 Agent 观察截图服务'));
+          }
+          return PS.captureQuickEditObservation(options || {});
         },
       },
       store: { getWarp: getEntry, setWarp: setEntry },
@@ -316,6 +323,18 @@
     currentPhoto,
     bootstrap,
     renderDropdown,
+    // 后端事件推送（Python 侧经 evaluate_js 调用 _onBackendEvent）：
+    // payload 形如 {event: 'ai_edit_stream', data: {...}}
+    _onBackendEvent(payload) {
+      backendEventHandlers.forEach((handler) => {
+        try { handler(payload); } catch (err) { console.warn('[PicScannerModules] 事件处理异常:', err); }
+      });
+    },
+    onBackendEvent(handler) {
+      if (typeof handler !== 'function') return () => {};
+      backendEventHandlers.add(handler);
+      return () => backendEventHandlers.delete(handler);
+    },
   };
 
   if (document.readyState === 'loading') {

@@ -383,13 +383,15 @@
     const zoom = clamp(nextZoom, LIGHTBOX_MIN_ZOOM, LIGHTBOX_MAX_ZOOM);
     if (Math.abs(zoom - oldZoom) < 0.0001) return;
     const ratio = zoom / oldZoom;
+    // 缩小时向灯箱中心收缩，不以鼠标位置为锚点
+    const effectiveAnchor = ratio < 1 ? null : anchorEvent;
     let anchorRatioX = 0;
     let anchorRatioY = 0;
-    if (anchorEvent) {
+    if (effectiveAnchor) {
       const sourceEl = comparePaneEl(index);
       const sourceRect = sourceEl ? sourceEl.getBoundingClientRect() : els.lightboxStage.getBoundingClientRect();
-      const sourceLocalX = anchorEvent.clientX - sourceRect.left - sourceRect.width / 2;
-      const sourceLocalY = anchorEvent.clientY - sourceRect.top - sourceRect.height / 2;
+      const sourceLocalX = effectiveAnchor.clientX - sourceRect.left - sourceRect.width / 2;
+      const sourceLocalY = effectiveAnchor.clientY - sourceRect.top - sourceRect.height / 2;
       anchorRatioX = sourceRect.width ? sourceLocalX / (sourceRect.width / 2) : 0;
       anchorRatioY = sourceRect.height ? sourceLocalY / (sourceRect.height / 2) : 0;
     }
@@ -397,7 +399,7 @@
       const before = pane.zoom || 1;
       const after = clamp(before * ratio, LIGHTBOX_MIN_ZOOM, LIGHTBOX_MAX_ZOOM);
       const actualRatio = after / before;
-      if (anchorEvent) {
+      if (effectiveAnchor) {
         const el = comparePaneEl(paneIndex);
         const rect = el ? el.getBoundingClientRect() : els.lightboxStage.getBoundingClientRect();
         const localX = anchorRatioX * rect.width / 2;
@@ -405,8 +407,10 @@
         pane.panX = localX - (localX - pane.panX) * actualRatio;
         pane.panY = localY - (localY - pane.panY) * actualRatio;
       } else {
-        pane.panX *= actualRatio;
-        pane.panY *= actualRatio;
+        // 无锚点（含缩小回中）：缩小时用更快的衰减增强向中心的拉力
+        const panDecay = actualRatio < 1 ? actualRatio * actualRatio : actualRatio;
+        pane.panX *= panDecay;
+        pane.panY *= panDecay;
       }
       pane.zoom = after;
       if (pane.zoom <= 1) {
@@ -843,6 +847,7 @@
     }
     const box = state.lightbox;
     const oldZoom = Number(box.zoom || 1);
+    const zoomingOut = Number.isFinite(Number(nextZoom)) && Number(nextZoom) < oldZoom;
     const view = PS.resolveAnchoredZoomView({
       currentZoom: oldZoom,
       nextZoom,
@@ -850,7 +855,9 @@
       maxZoom: LIGHTBOX_MAX_ZOOM,
       panX: box.panX,
       panY: box.panY,
-      anchorEvent,
+      anchorEvent: zoomingOut ? null : anchorEvent,
+      anchorCenter: zoomingOut,
+      centerPullExponent: zoomingOut ? 2 : 1,
       stage: els.lightboxStage,
       resetAtOrBelowZoom: 1,
     });

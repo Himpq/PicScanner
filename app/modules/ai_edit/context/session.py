@@ -86,6 +86,15 @@ class EditSession:
         """批量设置参数。"""
         self._params.update(updates)
 
+    def replace_params(self, params: dict[str, Any] | None):
+        """用前端当前编辑状态初始化会话，只接受已知参数。"""
+        source = params if isinstance(params, dict) else {}
+        restored = copy.deepcopy(DEFAULT_PARAMS)
+        for key in restored:
+            if key in source:
+                restored[key] = copy.deepcopy(source[key])
+        self._params = restored
+
     # ─── 快照 / 恢复 ────────────────────────────────────────────
 
     def snapshot(self) -> dict[str, Any]:

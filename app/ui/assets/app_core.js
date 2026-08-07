@@ -497,8 +497,21 @@
     reading_exif: '读取 EXIF',
   };
 
+  const EXIF_STATUS_LABELS = {
+    idle: '等待 EXIF',
+    reading_exif: '读取 EXIF',
+    stopping: '停止中',
+    stopped: '已停止',
+    done: '读取完成',
+    failed: '读取失败',
+  };
+
   function scanStatusLabel(status) {
     return STATUS_LABELS[status] || status || '等待扫描';
+  }
+
+  function exifStatusLabel(status) {
+    return EXIF_STATUS_LABELS[status] || status || '等待 EXIF';
   }
 
   const els = {
@@ -525,6 +538,8 @@
     inputModalCancel: document.getElementById('input-modal-cancel'),
     inputModalConfirm: document.getElementById('input-modal-confirm'),
     currentSource: document.getElementById('current-source'),
+    scanBlock: document.getElementById('scan-block'),
+    exifBlock: document.getElementById('exif-block'),
     progressBar: document.getElementById('progress-bar'),
     exifProgressBar: document.getElementById('exif-progress-bar'),
     scanStatus: document.getElementById('scan-status'),
@@ -759,6 +774,7 @@
     joinClean,
     escapeHtml,
     scanStatusLabel,
+    exifStatusLabel,
     quickEditPerfEnabled,
     quickEditPerfNow,
     quickEditPerfLog,
@@ -767,6 +783,7 @@
     STATS_COLORS,
     PROJECT_URL,
     STATUS_LABELS,
+    EXIF_STATUS_LABELS,
     LIGHTBOX_MIN_ZOOM,
     LIGHTBOX_MAX_ZOOM,
     LIGHTBOX_ZOOM_STEP,

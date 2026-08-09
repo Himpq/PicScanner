@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=lightbox-center-zoom-20260805-1" />
+  <link rel="stylesheet" href="assets/style.css?v=stats-tabs-20260808-1" />
   <link rel="stylesheet" href="assets/settings.css?v=settings-alt-exif-20260703-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=batch-edit-tabs-20260717-1" />
@@ -170,41 +170,59 @@
             <div class="toolbar-spacer"></div>
           </div>
           <div class="stats-content">
-            <div id="stats-summary" class="stats-summary"></div>
-            <div id="stats-insights" class="stats-insights"></div>
-            <div class="stats-grid">
-              <section class="stats-panel stats-panel-wide">
-                <h2>焦段范围</h2>
-                <div id="focal-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel stats-panel-tall">
-                <h2>镜头排行</h2>
-                <div id="lens-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel stats-panel-wide">
-                <h2>拍摄时段</h2>
-                <div id="hour-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel">
-                <h2>月份分布</h2>
-                <div id="month-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel">
-                <h2>机身统计</h2>
-                <div id="camera-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel">
-                <h2>光圈分布</h2>
-                <div id="aperture-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel">
-                <h2>ISO 分布</h2>
-                <div id="iso-chart" class="stats-chart"></div>
-              </section>
-              <section class="stats-panel">
-                <h2>快门分布</h2>
-                <div id="shutter-chart" class="stats-chart"></div>
-              </section>
+            <div id="stats-tabs" class="stats-tabs" role="tablist" aria-label="统计分页">
+              <button class="stats-tab active" type="button" data-stats-tab="overview">概览</button>
+              <button class="stats-tab" type="button" data-stats-tab="gear">器材</button>
+              <button class="stats-tab" type="button" data-stats-tab="params">拍摄参数</button>
+              <button class="stats-tab" type="button" data-stats-tab="time">时间</button>
+            </div>
+            <div id="stats-pane-overview" class="stats-pane active" data-stats-pane="overview">
+              <div id="stats-summary" class="stats-summary"></div>
+              <div id="stats-insights" class="stats-insights"></div>
+            </div>
+            <div id="stats-pane-gear" class="stats-pane" data-stats-pane="gear">
+              <div class="stats-grid stats-grid-gear">
+                <section class="stats-panel">
+                  <h2>镜头排行</h2>
+                  <div id="lens-chart" class="stats-chart"></div>
+                </section>
+                <section class="stats-panel">
+                  <h2>机身统计</h2>
+                  <div id="camera-chart" class="stats-chart"></div>
+                </section>
+              </div>
+            </div>
+            <div id="stats-pane-params" class="stats-pane" data-stats-pane="params">
+              <div class="stats-grid stats-grid-params">
+                <section class="stats-panel">
+                  <h2>焦段范围</h2>
+                  <div id="focal-chart" class="stats-chart"></div>
+                </section>
+                <section class="stats-panel">
+                  <h2>光圈分布</h2>
+                  <div id="aperture-chart" class="stats-chart"></div>
+                </section>
+                <section class="stats-panel">
+                  <h2>ISO 分布</h2>
+                  <div id="iso-chart" class="stats-chart"></div>
+                </section>
+                <section class="stats-panel">
+                  <h2>快门分布</h2>
+                  <div id="shutter-chart" class="stats-chart"></div>
+                </section>
+              </div>
+            </div>
+            <div id="stats-pane-time" class="stats-pane" data-stats-pane="time">
+              <div class="stats-grid stats-grid-time">
+                <section class="stats-panel">
+                  <h2>拍摄时段</h2>
+                  <div id="hour-chart" class="stats-chart"></div>
+                </section>
+                <section class="stats-panel">
+                  <h2>月份分布</h2>
+                  <div id="month-chart" class="stats-chart"></div>
+                </section>
+              </div>
             </div>
           </div>
         </section>
@@ -326,8 +344,8 @@
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/vue/picscanner-vue.js?v=modules-20260723-2"></script>
-  <script src="assets/app_core.js?v=sidebar-flat-20260803-3"></script>
-  <script src="assets/app_gallery.js?v=sidebar-flat-20260803-3"></script>
+  <script src="assets/app_core.js?v=stats-tabs-20260808-1"></script>
+  <script src="assets/app_gallery.js?v=stats-tabs-20260808-1"></script>
   <script src="assets/app_lightbox.js?v=lightbox-center-zoom-20260805-1"></script>
   <script src="assets/app_modules.js?v=modules-20260723-2"></script>
   <script src="assets/app.js?v=lightbox-center-zoom-20260805-1"></script>

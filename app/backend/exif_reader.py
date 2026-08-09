@@ -51,6 +51,20 @@ def _display(value: Any) -> str | None:
     return text or None
 
 
+# 视为"未知镜头"的占位值：'----' 常见于 EXIF LensSpecification 无有效数据时
+# exifread 的 printable 输出；与统计端 UNKNOWN_LENS_SQL 的口径保持一致。
+UNKNOWN_LENS_VALUES = {"?", "----"}
+
+
+def _normalize_lens(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = str(text).strip()
+    if not cleaned or cleaned in UNKNOWN_LENS_VALUES:
+        return None
+    return cleaned
+
+
 def _ratio_to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -190,13 +204,15 @@ def read_metadata(path: str | Path) -> dict:
 
     make = _display(_tag(tags, "Image Make"))
     model = _display(_tag(tags, "Image Model"))
-    lens = _display(
-        _tag(
-            tags,
-            "EXIF LensModel",
-            "Image LensModel",
-            "MakerNote LensModel",
-            "EXIF LensSpecification",
+    lens = _normalize_lens(
+        _display(
+            _tag(
+                tags,
+                "EXIF LensModel",
+                "Image LensModel",
+                "MakerNote LensModel",
+                "EXIF LensSpecification",
+            )
         )
     )
     f_number = _ratio_to_float(_tag(tags, "EXIF FNumber", "EXIF ApertureValue"))

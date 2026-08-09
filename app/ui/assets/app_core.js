@@ -605,6 +605,7 @@
     closeStats: document.getElementById('close-stats'),
     statsSource: document.getElementById('stats-source'),
     statsStorageList: document.getElementById('stats-storage-list'),
+    statsTabs: document.getElementById('stats-tabs'),
     statsSummary: document.getElementById('stats-summary'),
     statsInsights: document.getElementById('stats-insights'),
     hourChart: document.getElementById('hour-chart'),

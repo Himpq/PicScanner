@@ -18,6 +18,9 @@ RAW_EXTENSIONS = {
 }
 JPG_EXTENSIONS = {".jpg", ".jpeg"}
 ACTIVE_SESSION_STATUSES = {"created", "discovering", "scanning", "stopping"}
+# 未知镜头的统一判定（与前端 cleanChartName 一致：空/纯空白、'?'、'----' 均视为未知）。
+# 镜头统计（排行榜）不计入未知镜头；{field} 为镜头列名占位符。
+UNKNOWN_LENS_SQL = "TRIM(COALESCE({field}, '')) NOT IN ('', '?', '----')"
 PHOTO_COLUMNS = [
     "id",
     "session_id",
@@ -1829,8 +1832,15 @@ class Storage:
             )
             pending = max(0, total - complete - failed)
 
-            def group(field: str, limit: int = 18) -> list[dict]:
-                group_where = "WHERE source_id=?" if source_id else ("WHERE root_path=?" if root_path else "")
+            def group(field: str, limit: int = 18, exclude_unknown_lens: bool = False) -> list[dict]:
+                conds: list[str] = []
+                if source_id:
+                    conds.append("source_id=?")
+                elif root_path:
+                    conds.append("root_path=?")
+                if exclude_unknown_lens:
+                    conds.append(UNKNOWN_LENS_SQL.format(field=field))
+                group_where = ("WHERE " + " AND ".join(conds)) if conds else ""
                 rows = conn.execute(
                     f"""
                     SELECT COALESCE(NULLIF({field}, ''), '?') AS name, COUNT(*) AS count
@@ -1860,7 +1870,7 @@ class Storage:
                 "exif_pending": pending,
                 "by_format": group("format"),
                 "by_model": group("model"),
-                "by_lens": group("lens_model"),
+                "by_lens": group("lens_model", exclude_unknown_lens=True),
                 "by_aperture": group("aperture_bucket"),
                 "by_focal_bucket": group("focal_bucket"),
                 "by_iso_bucket": group("iso_bucket"),
@@ -1919,7 +1929,7 @@ class Storage:
             by_month_args = list(scope_args)
             by_lens_sql, by_lens_args = group_query(
                 "COALESCE(NULLIF(p.lens_model, ''), '?')",
-                extra="AND p.exif_status='complete'",
+                extra="AND p.exif_status='complete' AND " + UNKNOWN_LENS_SQL.format(field="p.lens_model"),
                 limit=12,
             )
             by_focal_sql, by_focal_args = group_query(

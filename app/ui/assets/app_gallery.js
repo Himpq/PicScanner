@@ -1545,6 +1545,7 @@
     els.statsScreen._enterTimer = setTimeout(() => {
       els.statsScreen.classList.remove('entering');
     }, 420);
+    setStatsTab(state.statsTab || 'overview');
     renderStatsWindow();
   }
 
@@ -1552,6 +1553,17 @@
     state.statsOpen = false;
     hideChartTooltip();
     closePanelScreen(els.statsScreen, options);
+  }
+
+  function setStatsTab(key) {
+    state.statsTab = key;
+    if (!els.statsTabs) return;
+    els.statsTabs.querySelectorAll('.stats-tab').forEach((btn) => {
+      btn.classList.toggle('active', String(btn.dataset.statsTab || '') === key);
+    });
+    els.statsScreen.querySelectorAll('.stats-pane').forEach((pane) => {
+      pane.classList.toggle('active', String(pane.dataset.statsPane || '') === key);
+    });
   }
 
   function renderStatsWindow() {
@@ -1893,6 +1905,11 @@
       positionChartTooltip(ev);
     });
     els.statsScreen.addEventListener('mouseleave', hideChartTooltip);
+    els.statsTabs.addEventListener('click', (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('.stats-tab') : null;
+      if (!btn || !btn.dataset.statsTab) return;
+      setStatsTab(btn.dataset.statsTab);
+    });
   }
 
   function hideChartTooltip() {

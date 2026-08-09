@@ -4159,28 +4159,85 @@ h1 {
   line-height: 1.45;
 }
 
+.stats-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.075);
+}
+
+.stats-tab {
+  position: relative;
+  height: 36px;
+  padding: 0 18px;
+  border: 0;
+  background: transparent;
+  color: rgba(255,255,255,0.50);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  cursor: default;
+  transition: color .16s ease, background-color .16s ease;
+}
+
+.stats-tab:hover {
+  color: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.06);
+}
+
+.stats-tab.active {
+  color: #fff;
+}
+
+.stats-tab::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.stats-tab.active::after {
+  background: #ffb817;
+}
+
+.stats-pane {
+  display: none;
+}
+
+.stats-pane.active {
+  display: block;
+}
+
 .stats-grid {
-  gap: 18px 18px;
+  gap: 18px;
+}
+
+.stats-grid-gear {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+}
+
+.stats-grid-params {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats-grid-time {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .stats-grid .stats-panel {
-  grid-column: span 3;
-  min-height: 190px;
+  grid-column: auto;
+  min-height: 220px;
   border: 0;
   border-top: 1px solid rgba(255,255,255,0.10);
   border-radius: 0;
   background: transparent;
   padding: 14px 0 0;
   box-shadow: none;
-}
-
-.stats-grid .stats-panel-wide {
-  grid-column: span 7;
-}
-
-.stats-grid .stats-panel-tall {
-  grid-column: span 5;
-  grid-row: auto;
 }
 
 .stats-panel h2 {
@@ -4192,6 +4249,10 @@ h1 {
 
 .stats-chart {
   min-height: 150px;
+}
+
+.stats-pane .stats-chart {
+  min-height: 230px;
 }
 
 .rank-chart {
@@ -4375,13 +4436,6 @@ h1 {
   .stats-insights {
     grid-template-columns: 1fr;
   }
-
-  .stats-grid .stats-panel,
-  .stats-grid .stats-panel-wide,
-  .stats-grid .stats-panel-tall {
-    grid-column: span 6;
-    grid-row: auto;
-  }
 }
 
 @media (max-width: 900px) {
@@ -4397,11 +4451,17 @@ h1 {
     padding: 18px;
   }
 
-  .stats-summary-card,
-  .stats-grid .stats-panel,
-  .stats-grid .stats-panel-wide,
-  .stats-grid .stats-panel-tall {
+  .stats-summary-card {
     grid-column: 1 / -1;
+  }
+
+  .stats-tabs {
+    flex-wrap: wrap;
+  }
+
+  .stats-grid-gear,
+  .stats-grid-params {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

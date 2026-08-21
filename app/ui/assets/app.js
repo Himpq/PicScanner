@@ -4448,6 +4448,7 @@
   }
 
   const QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE = 'short-edge-anchor-v1';
+  const QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE = 'axis-percent-anchor-v1';
 
   function quickEditNormalizeFrameTextWeight(value) {
     const n = Number(value || 560);
@@ -4503,12 +4504,18 @@
       + quickEditCanvasFrameTextFamily(layer && layer.fontFamily);
   }
 
+  function quickEditNormalizeFrameTextCoordinateSpace(value) {
+    const space = String(value || '');
+    if (space === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE) return QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE;
+    return QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE;
+  }
+
   function quickEditNewFrameTextLayer() {
     return {
       id: 'frame-text-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
       text: '{filename}  {shutter_speed}  f/{aperture}  ISO {iso}',
       position: 'bottom-center',
-      coordinateSpace: QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE,
+      coordinateSpace: QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE,
       x: 0,
       y: 0,
       fontFamily: 'system-ui',
@@ -4528,7 +4535,7 @@
       id: String(raw.id || ('frame-text-' + index + '-' + Date.now().toString(36))),
       text: String(raw.text || ''),
       position,
-      coordinateSpace: QUICK_EDIT_FRAME_TEXT_COORDINATE_SPACE,
+      coordinateSpace: quickEditNormalizeFrameTextCoordinateSpace(raw.coordinateSpace || raw.coordinate_space),
       x: quickEditNormalizeFrameTextOffset(raw.x !== undefined ? raw.x : raw.offsetX),
       y: quickEditNormalizeFrameTextOffset(raw.y !== undefined ? raw.y : raw.offsetY),
       fontFamily: quickEditNormalizeFrameTextFamily(raw.fontFamily || raw.font_family),
@@ -4567,6 +4574,7 @@
   }
 
   const QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE = 'short-edge-anchor-v1';
+  const QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE = 'axis-percent-anchor-v1';
 
   function quickEditNormalizeFrameImageAnchor(value) {
     return quickEditGeometryApi().normalizeImageLayerAnchor(value);
@@ -4679,6 +4687,12 @@
     return '';
   }
 
+  function quickEditNormalizeFrameImageCoordinateSpace(value) {
+    const space = String(value || '');
+    if (space === QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE) return QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE;
+    return QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE;
+  }
+
   function quickEditNewFrameImageLayer(asset, dataUrl) {
     const assetId = quickEditNormalizeFrameAssetId(asset && asset.id);
     return {
@@ -4687,7 +4701,7 @@
       name: quickEditFrameAssetName(assetId, asset && asset.name),
       mime: String(asset && asset.mime || ''),
       src: String(dataUrl || ''),
-      coordinateSpace: QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE,
+      coordinateSpace: QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE,
       anchor: 'center',
       x: 0,
       y: 0,
@@ -4702,8 +4716,10 @@
     const raw = layer && typeof layer === 'object' ? layer : {};
     const assetId = quickEditNormalizeFrameAssetId(raw.assetId || raw.asset_id);
     const name = quickEditFrameAssetName(assetId, raw.name);
-    let coordinateSpace = String(raw.coordinateSpace || raw.coordinate_space || '') === QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE
-      ? QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE
+    const rawSpace = String(raw.coordinateSpace || raw.coordinate_space || '');
+    let coordinateSpace = rawSpace === QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE
+      || rawSpace === QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE
+      ? rawSpace
       : '';
     let anchor = coordinateSpace ? (quickEditNormalizeFrameImageAnchor(raw.anchor) || 'center') : '';
     let x = quickEditNormalizeFrameImageOffset(raw.x);
@@ -5681,8 +5697,11 @@
     const contentBasis = Math.max(1, Math.min(contentWidth, contentHeight));
     const size = quickEditScaledFrameTextSize(layer, contentBasis, displayBasis);
     const defaultInset = Math.max(1, 12 * quickEditFrameTextBasisScale(contentBasis, displayBasis));
-    const offsetX = contentBasis * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
-    const offsetY = contentBasis * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
+    const axis = quickEditNormalizeFrameTextCoordinateSpace(layer && layer.coordinateSpace) === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE;
+    const offsetBasisX = axis ? contentWidth : contentBasis;
+    const offsetBasisY = axis ? contentHeight : contentBasis;
+    const offsetX = offsetBasisX * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
+    const offsetY = offsetBasisY * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
     const constrain = (placement) => Object.assign({}, placement, {
       x: clamp(Number(placement.x || 0), 0, canvasWidth),
       y: clamp(Number(placement.y || 0), size / 2, canvasHeight - size / 2),
@@ -5749,6 +5768,7 @@
       outerTop: -top,
       outerRight: contentWidth + right,
       outerBottom: contentHeight + bottom,
+      coordinateSpace: quickEditNormalizeFrameImageCoordinateSpace(layer && layer.coordinateSpace),
       sizePercent: quickEditNormalizeFrameImageSize(layer && layer.size),
       aspectRatio,
       rotationDegrees: quickEditNormalizeFrameImageRotation(layer && layer.rotation),
@@ -6517,8 +6537,11 @@
 
   function quickEditFrameLayerPlacement(position, layer, frameConfig, metrics) {
     const base = quickEditFrameLayerAnchor(position, layer, frameConfig, metrics);
-    const offsetX = Math.min(base.contentWidth, base.contentHeight) * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
-    const offsetY = Math.min(base.contentWidth, base.contentHeight) * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
+    const axis = quickEditNormalizeFrameTextCoordinateSpace(layer && layer.coordinateSpace) === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE;
+    const basisX = axis ? Math.max(1, base.contentWidth) : Math.min(base.contentWidth, base.contentHeight);
+    const basisY = axis ? Math.max(1, base.contentHeight) : Math.min(base.contentWidth, base.contentHeight);
+    const offsetX = basisX * quickEditNormalizeFrameTextOffset(layer && layer.x) / 100;
+    const offsetY = basisY * quickEditNormalizeFrameTextOffset(layer && layer.y) / 100;
     return {
       x: clamp(base.x + offsetX, base.outerLeft, base.outerRight).toFixed(2) + 'px',
       y: clamp(base.y + offsetY, base.outerTop + base.size / 2, base.outerBottom - base.size / 2).toFixed(2) + 'px',
@@ -6597,9 +6620,11 @@
     const actualX = Number.parseFloat(node.style.left || '');
     const actualY = Number.parseFloat(node.style.top || '');
     if (!Number.isFinite(actualX) || !Number.isFinite(actualY)) return false;
-    const coordinateBasis = Math.min(base.contentWidth, base.contentHeight);
-    const x = quickEditNormalizeFrameTextOffset((actualX - base.x) / coordinateBasis * 100);
-    const y = quickEditNormalizeFrameTextOffset((actualY - base.y) / coordinateBasis * 100);
+    const axis = quickEditNormalizeFrameTextCoordinateSpace(layer.coordinateSpace) === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE;
+    const basisX = axis ? Math.max(1, base.contentWidth) : Math.min(base.contentWidth, base.contentHeight);
+    const basisY = axis ? Math.max(1, base.contentHeight) : Math.min(base.contentWidth, base.contentHeight);
+    const x = quickEditNormalizeFrameTextOffset((actualX - base.x) / basisX * 100);
+    const y = quickEditNormalizeFrameTextOffset((actualY - base.y) / basisY * 100);
     if (Math.abs(x - layer.x) < 0.0005 && Math.abs(y - layer.y) < 0.0005) return false;
     const layers = quickEditFrameTextLayers();
     const index = layers.findIndex((item) => item.id === layer.id);
@@ -6737,12 +6762,18 @@
     if (overlay) overlay.innerHTML = '';
   }
 
-  function quickEditApplyLayerSnap(layerId, framePreview, ev, coordinateBasis, kind) {
+  function quickEditApplyLayerSnap(layerId, framePreview, ev, offsetBasis, kind) {
     if (!framePreview) return;
     if (ev && ev.altKey) {
       quickEditClearSnapGuides(framePreview);
       return;
     }
+    const basis = offsetBasis && typeof offsetBasis === 'object'
+      ? { x: Math.max(0.000001, Number(offsetBasis.x || 1)), y: Math.max(0.000001, Number(offsetBasis.y || 1)) }
+      : (() => {
+        const value = Math.max(0.000001, Number(offsetBasis || 1));
+        return { x: value, y: value };
+      })();
     const attr = kind === 'text' ? 'quickEditFrameTextPreview' : 'quickEditFrameImagePreview';
     const selector = kind === 'text' ? '[data-quick-edit-frame-text-preview]' : '[data-quick-edit-frame-image-preview]';
     const node = Array.from(framePreview.querySelectorAll(selector)).find((item) => item.dataset[attr] === String(layerId || '')) || null;
@@ -6756,8 +6787,8 @@
     if (snap.dx || snap.dy) {
       const current = kind === 'text' ? quickEditFrameTextLayerById(layerId) : quickEditFrameImageLayerById(layerId);
       if (current) {
-        const deltaXPercent = quickEditGeometryApi().screenDeltaToPercent(snap.dx, coordinateBasis);
-        const deltaYPercent = quickEditGeometryApi().screenDeltaToPercent(snap.dy, coordinateBasis);
+        const deltaXPercent = quickEditGeometryApi().screenDeltaToPercent(snap.dx, basis.x);
+        const deltaYPercent = quickEditGeometryApi().screenDeltaToPercent(snap.dy, basis.y);
         if (kind === 'text') {
           updateQuickEditFrameTextLayer(layerId, {
             x: Number(current.x || 0) + deltaXPercent,
@@ -6773,6 +6804,14 @@
       }
     }
     quickEditRenderSnapGuides(framePreview, snap.guideX, snap.guideY);
+  }
+
+  function quickEditFrameOffsetBasis(layer, basisX, basisY) {
+    const width = Math.max(1, Number(basisX || 1));
+    const height = Math.max(1, Number(basisY || 1));
+    const space = layer && (layer.coordinateSpace || '');
+    const axis = space === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE || space === QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE;
+    return axis ? { x: width, y: height } : { x: Math.min(width, height), y: Math.min(width, height) };
   }
 
   function startQuickEditFrameTextDrag(ev, layerId) {
@@ -6797,6 +6836,7 @@
       basisX,
       basisY,
       coordinateBasis,
+      offsetBasis: quickEditFrameOffsetBasis(layer, basisX, basisY),
       boundaryClampCount: 0,
     };
     ev.preventDefault();
@@ -6816,14 +6856,15 @@
     const framePreview = el ? el.querySelector('[data-quick-edit-frame-preview]') : null;
     if (!layer || !framePreview) return;
     const coordinateBasis = Math.max(1, Number(drag.coordinateBasis || 1));
+    const offsetBasis = drag.offsetBasis || { x: coordinateBasis, y: coordinateBasis };
     const geometry = quickEditGeometryApi();
     // 期望位置由“起始偏移 + 鼠标总位移”绝对推得，吸附只修正渲染位置；
     // 这样鼠标移出吸附阈值后图层能立即跟随，不会被“钉死”在参考线上。
-    const desiredX = Number(drag.startLayerX || 0) + geometry.screenDeltaToPercent(Number(ev.clientX || 0) - Number(drag.startClientX || 0), coordinateBasis);
-    const desiredY = Number(drag.startLayerY || 0) + geometry.screenDeltaToPercent(Number(ev.clientY || 0) - Number(drag.startClientY || 0), coordinateBasis);
+    const desiredX = Number(drag.startLayerX || 0) + geometry.screenDeltaToPercent(Number(ev.clientX || 0) - Number(drag.startClientX || 0), offsetBasis.x);
+    const desiredY = Number(drag.startLayerY || 0) + geometry.screenDeltaToPercent(Number(ev.clientY || 0) - Number(drag.startClientY || 0), offsetBasis.y);
     updateQuickEditFrameTextLayer(drag.layerId, { x: desiredX, y: desiredY }, { skipRender: true });
     if (quickEditCanonicalizeFrameTextLayerOffset(drag.layerId)) drag.boundaryClampCount += 1;
-    quickEditApplyLayerSnap(drag.layerId, framePreview, ev, coordinateBasis, 'text');
+    quickEditApplyLayerSnap(drag.layerId, framePreview, ev, offsetBasis, 'text');
   }
 
   function endQuickEditFrameTextDrag(ev) {
@@ -6861,6 +6902,7 @@
       outerTop: -metrics.frameTop,
       outerRight: metrics.contentWidth + metrics.frameRight,
       outerBottom: metrics.contentHeight + metrics.frameBottom,
+      coordinateSpace: quickEditNormalizeFrameImageCoordinateSpace(layer && layer.coordinateSpace),
       sizePercent: quickEditNormalizeFrameImageSize(layer && layer.size),
       aspectRatio,
       rotationDegrees: quickEditNormalizeFrameImageRotation(layer && layer.rotation),
@@ -6877,7 +6919,7 @@
     const x = quickEditNormalizeFrameImageOffset(placement.offsetXPercent);
     const y = quickEditNormalizeFrameImageOffset(placement.offsetYPercent);
     const anchor = placement.anchor ? quickEditNormalizeFrameImageAnchor(placement.anchor) : layer.anchor;
-    const coordinateSpace = anchor ? QUICK_EDIT_FRAME_IMAGE_COORDINATE_SPACE : layer.coordinateSpace;
+    const coordinateSpace = quickEditNormalizeFrameImageCoordinateSpace(layer.coordinateSpace);
     if (
       Math.abs(x - layer.x) < 0.0005
       && Math.abs(y - layer.y) < 0.0005
@@ -6913,6 +6955,7 @@
       contentWidth: placement.metrics.contentWidth,
       contentHeight: placement.metrics.contentHeight,
       anchor,
+      coordinateSpace: quickEditNormalizeFrameImageCoordinateSpace(layer.coordinateSpace),
     });
     quickEditWriteFrameImageCanonicalOffset(layer.id, offsets);
     return quickEditFrameImageLayerById(layer.id) || layer;
@@ -6991,6 +7034,7 @@
       basisX,
       basisY,
       coordinateBasis,
+      offsetBasis: quickEditFrameOffsetBasis(layer, basisX, basisY),
       boundaryClampCount: 0,
     };
     ev.preventDefault();
@@ -7011,12 +7055,13 @@
     const aspectRatio = layer ? quickEditCachedFrameAssetAspectRatio(layer.assetId) : 0;
     if (!layer || !framePreview || !(aspectRatio > 0)) return;
     const coordinateBasis = Math.max(1, Number(drag.coordinateBasis || 1));
+    const offsetBasis = drag.offsetBasis || { x: coordinateBasis, y: coordinateBasis };
     const geometry = quickEditGeometryApi();
     // 与文本层一致：期望位置由“起始偏移 + 鼠标总位移”绝对推得，吸附只修正渲染位置，
     // 避免图层被吸附参考线钉死。
     const desired = Object.assign({}, layer, {
-      x: Number(drag.startLayerX || 0) + geometry.screenDeltaToPercent(Number(ev.clientX || 0) - Number(drag.startClientX || 0), coordinateBasis),
-      y: Number(drag.startLayerY || 0) + geometry.screenDeltaToPercent(Number(ev.clientY || 0) - Number(drag.startClientY || 0), coordinateBasis),
+      x: Number(drag.startLayerX || 0) + geometry.screenDeltaToPercent(Number(ev.clientX || 0) - Number(drag.startClientX || 0), offsetBasis.x),
+      y: Number(drag.startLayerY || 0) + geometry.screenDeltaToPercent(Number(ev.clientY || 0) - Number(drag.startClientY || 0), offsetBasis.y),
     });
     const placement = quickEditFrameImagePreviewPlacement(desired, framePreview, aspectRatio);
     if (Math.abs(placement.offsetXPercent - desired.x) >= 0.0005 || Math.abs(placement.offsetYPercent - desired.y) >= 0.0005) {
@@ -7026,7 +7071,7 @@
       x: placement.offsetXPercent,
       y: placement.offsetYPercent,
     }, { skipRender: true });
-    quickEditApplyLayerSnap(drag.layerId, framePreview, ev, coordinateBasis, 'image');
+    quickEditApplyLayerSnap(drag.layerId, framePreview, ev, offsetBasis, 'image');
   }
 
   function endQuickEditFrameImageDrag(ev) {
@@ -7313,6 +7358,12 @@
       + '<label><span>X</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.x + '" data-quick-edit-frame-text-x="' + layerId + '" /></label>'
       + '<label><span>Y</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.y + '" data-quick-edit-frame-text-y="' + layerId + '" /></label>'
       + '</div>'
+      + '<label class="quick-edit-frame-space"><span>坐标基准</span>'
+      + '<select data-quick-edit-frame-text-space="' + layerId + '" title="按轴百分比：X 相对内容宽度、Y 相对内容高度，缩放/换图时贴边不漂移">'
+      + '<option value="short-edge-anchor-v1"' + (layer.coordinateSpace !== QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE ? ' selected' : '') + '>短边基准</option>'
+      + '<option value="axis-percent-anchor-v1"' + (layer.coordinateSpace === QUICK_EDIT_FRAME_TEXT_AXIS_COORDINATE_SPACE ? ' selected' : '') + '>按轴百分比</option>'
+      + '</select>'
+      + '</label>'
       + '<div class="quick-edit-frame-text-font-row">'
       + '<label><span>FontFamily</span><input type="text" maxlength="80" autocomplete="off" value="' + escapeHtml(layer.fontFamily) + '" data-quick-edit-frame-text-family="' + layerId + '" /></label>'
       + '<label><span>字号</span><input type="text" inputmode="numeric" pattern="[0-9]*" value="' + layer.size + '" data-quick-edit-frame-text-size="' + layerId + '" /></label>'
@@ -7349,6 +7400,12 @@
         + '<label><span>X</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.x + '" data-quick-edit-frame-image-x="' + layerId + '" /></label>'
         + '<label><span>Y</span><input type="text" inputmode="decimal" pattern="-?[0-9]*[.]?[0-9]*" value="' + layer.y + '" data-quick-edit-frame-image-y="' + layerId + '" /></label>'
         + '</div>'
+        + '<label class="quick-edit-frame-space"><span>坐标基准</span>'
+        + '<select data-quick-edit-frame-image-space="' + layerId + '" title="按轴百分比：X 相对内容宽度、Y 相对内容高度，缩放/换图时贴边不漂移">'
+        + '<option value="short-edge-anchor-v1"' + (layer.coordinateSpace !== QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE ? ' selected' : '') + '>短边基准</option>'
+        + '<option value="axis-percent-anchor-v1"' + (layer.coordinateSpace === QUICK_EDIT_FRAME_IMAGE_AXIS_COORDINATE_SPACE ? ' selected' : '') + '>按轴百分比</option>'
+        + '</select>'
+        + '</label>'
         + '<div class="quick-edit-frame-image-controls">'
         + '<label><span>大小</span><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="' + layer.size + '" data-quick-edit-frame-image-size="' + layerId + '" /></label>'
         + '<label><span>透明</span><input type="text" inputmode="numeric" pattern="[0-9]*" value="' + layer.opacity + '" data-quick-edit-frame-image-opacity="' + layerId + '" /></label>'
@@ -8738,6 +8795,8 @@
             updateQuickEditFrameTextLayer(layerId, { color }, { skipRender: true });
             syncQuickEditFrameTextColorControl(layerId, color);
           }
+        } else if (target.dataset.quickEditFrameTextSpace) {
+          return;
         } else {
           commitQuickEditFrameTextNumericInput(target, { emptyValue: undefined });
         }
@@ -8745,6 +8804,10 @@
       frameTextList.addEventListener('change', (ev) => {
         const target = ev.target;
         if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameTextSpace) {
+          updateQuickEditFrameTextLayer(target.dataset.quickEditFrameTextSpace, { coordinateSpace: String(target.value || '') });
+          return;
+        }
         if (target.dataset.quickEditFrameTextColorInput) {
           const layerId = String(target.dataset.quickEditFrameTextColorInput || '');
           const layer = quickEditFrameTextLayerById(layerId);
@@ -8787,11 +8850,16 @@
       frameImageList.addEventListener('input', (ev) => {
         const target = ev.target;
         if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameImageSpace) return;
         commitQuickEditFrameImageNumericInput(target, { emptyValue: undefined });
       });
       frameImageList.addEventListener('change', (ev) => {
         const target = ev.target;
         if (!target || !target.dataset) return;
+        if (target.dataset.quickEditFrameImageSpace) {
+          updateQuickEditFrameImageLayer(target.dataset.quickEditFrameImageSpace, { coordinateSpace: String(target.value || '') });
+          return;
+        }
         commitQuickEditFrameImageNumericInput(target, { normalizeInput: true });
       });
       frameImageList.addEventListener('keydown', (ev) => {

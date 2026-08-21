@@ -1480,7 +1480,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def _quick_edit_clean_frame_image_layers(layers) -> list[dict]:
         clean = []
         used_ids = set()
-        coordinate_space_name = "short-edge-anchor-v1"
+        coordinate_space_names = {"short-edge-anchor-v1", "axis-percent-anchor-v1"}
         allowed_anchors = {
             "top-left", "top-center", "top-right",
             "center-left", "center", "center-right",
@@ -1544,8 +1544,8 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             }
             coordinate_space = str(layer.get("coordinateSpace") or layer.get("coordinate_space") or "").strip()
             anchor = str(layer.get("anchor") or "").strip()
-            if coordinate_space == coordinate_space_name and anchor in allowed_anchors:
-                item["coordinateSpace"] = coordinate_space_name
+            if coordinate_space in coordinate_space_names and anchor in allowed_anchors:
+                item["coordinateSpace"] = coordinate_space
                 item["anchor"] = anchor
             clean.append(item)
             if len(clean) >= 12:
@@ -1556,7 +1556,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def _quick_edit_clean_frame_text_layers(layers) -> list[dict]:
         clean = []
         used_ids = set()
-        coordinate_space_name = "short-edge-anchor-v1"
+        coordinate_space_names = {"short-edge-anchor-v1", "axis-percent-anchor-v1"}
         allowed_positions = {"top-center", "bottom-center", "bottom-left", "bottom-right"}
         for layer in layers if isinstance(layers, list) else []:
             if not isinstance(layer, dict):
@@ -1611,8 +1611,8 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
                 "enabled": layer.get("enabled") is not False,
             }
             coordinate_space = str(layer.get("coordinateSpace") or layer.get("coordinate_space") or "").strip()
-            if coordinate_space == coordinate_space_name:
-                item["coordinateSpace"] = coordinate_space_name
+            if coordinate_space in coordinate_space_names:
+                item["coordinateSpace"] = coordinate_space
             clean.append(item)
             if len(clean) >= 12:
                 break

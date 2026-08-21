@@ -137,17 +137,29 @@
     return closest;
   }
 
+  const AXIS_PERCENT_COORDINATE_SPACE = 'axis-percent-anchor-v1';
+
+  function imageLayerOffsetBasis(coordinateSpace, contentWidth, contentHeight) {
+    const width = Math.max(0.000001, contentWidth);
+    const height = Math.max(0.000001, contentHeight);
+    if (coordinateSpace === AXIS_PERCENT_COORDINATE_SPACE) {
+      return { x: width, y: height };
+    }
+    const basis = Math.min(width, height);
+    return { x: basis, y: basis };
+  }
+
   function imageLayerOffsetsForPoint(options) {
     const opts = options || {};
     const contentWidth = Math.max(0.000001, finite(opts.contentWidth, 1));
     const contentHeight = Math.max(0.000001, finite(opts.contentHeight, 1));
     const anchor = normalizeImageLayerAnchor(opts.anchor) || 'center';
     const point = imageLayerAnchorPoint(anchor, contentWidth, contentHeight);
-    const basis = Math.min(contentWidth, contentHeight);
+    const basis = imageLayerOffsetBasis(opts.coordinateSpace, contentWidth, contentHeight);
     return {
       anchor,
-      offsetXPercent: (finite(opts.x) - point.x) / basis * 100,
-      offsetYPercent: (finite(opts.y) - point.y) / basis * 100,
+      offsetXPercent: (finite(opts.x) - point.x) / basis.x * 100,
+      offsetYPercent: (finite(opts.y) - point.y) / basis.y * 100,
     };
   }
 
@@ -162,6 +174,7 @@
     const anchor = normalizeImageLayerAnchor(opts.anchor) || 'center';
     const anchorPoint = imageLayerAnchorPoint(anchor, contentWidth, contentHeight);
     const contentBasis = Math.min(contentWidth, contentHeight);
+    const offsetBasis = imageLayerOffsetBasis(opts.coordinateSpace, contentWidth, contentHeight);
     const sizePercent = Math.max(0.000001, finite(opts.sizePercent, 18));
     const aspectRatio = Math.max(0.000001, finite(opts.aspectRatio, 1));
     let width = Math.max(0.000001, Math.min(contentWidth, contentHeight) * sizePercent / 100);
@@ -179,11 +192,11 @@
     height *= fitScale;
     boundsWidth *= fitScale;
     boundsHeight *= fitScale;
-    const rawX = anchorPoint.x + contentBasis * finite(opts.offsetXPercent) / 100;
-    const rawY = anchorPoint.y + contentBasis * finite(opts.offsetYPercent) / 100;
+    const rawX = anchorPoint.x + offsetBasis.x * finite(opts.offsetXPercent) / 100;
+    const rawY = anchorPoint.y + offsetBasis.y * finite(opts.offsetYPercent) / 100;
     const x = constrainedAxis(rawX, outerLeft + boundsWidth / 2, outerRight - boundsWidth / 2);
     const y = constrainedAxis(rawY, outerTop + boundsHeight / 2, outerBottom - boundsHeight / 2);
-    const offsets = imageLayerOffsetsForPoint({ x, y, contentWidth, contentHeight, anchor });
+    const offsets = imageLayerOffsetsForPoint({ x, y, contentWidth, contentHeight, anchor, coordinateSpace: opts.coordinateSpace });
     return {
       x,
       y,
@@ -213,5 +226,6 @@
     closestImageLayerAnchor,
     imageLayerOffsetsForPoint,
     imageLayerPlacement,
+    axisPercentCoordinateSpace: AXIS_PERCENT_COORDINATE_SPACE,
   });
 });

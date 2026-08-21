@@ -1,24 +1,65 @@
+/* ============================================================
+   PicScanner 设置页 · 浅色工具风（参照经典 iTunes）
+   仅作用于 .settings-screen 内部；图库等其余界面不受影响。
+   ============================================================ */
+
 .settings-screen {
-  grid-template-columns: 264px minmax(0, 1fr);
-  background: #050506;
+  --st-chrome: #ececec;        /* 侧栏 / 工具条铬色 */
+  --st-content: #ffffff;       /* 内容区底色 */
+  --st-line-strong: #cfcfcf;   /* 结构边框 */
+  --st-hairline: #e4e4e4;      /* 行分隔线 */
+  --st-text: #1d1d1f;
+  --st-muted: #6e6e73;
+  --st-faint: #86868b;
+  --st-accent: #3072e4;
+  background: var(--st-content);
 }
 
+.settings-screen {
+  grid-template-columns: 216px minmax(0, 1fr);
+}
+
+/* ---------- 侧栏 ---------- */
+
 .settings-side {
-  background: #08080a;
-  padding: 20px 14px;
+  background: var(--st-chrome);
+  border-right: 1px solid var(--st-line-strong);
+  padding: 16px 10px;
+}
+
+.settings-side .brand-block {
+  padding: 2px 8px 12px;
+}
+
+.settings-side .brand-title {
+  color: var(--st-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.settings-side .brand-sub {
+  margin-top: 2px;
+  color: var(--st-faint);
+  font-size: 10px;
+  letter-spacing: .05em;
 }
 
 .settings-nav {
-  gap: 6px;
-  margin-top: 16px;
+  gap: 2px;
+  margin-top: 10px;
 }
 
 .settings-nav button {
-  min-height: 34px;
+  min-height: 26px;
   height: auto;
-  border-radius: 6px;
-  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 10px;
   display: block;
+  background: transparent;
+  color: var(--st-text);
+  font-size: 12.5px;
+  text-align: left;
 }
 
 .settings-nav button span {
@@ -28,133 +69,142 @@
   white-space: nowrap;
 }
 
-.settings-nav button span {
-  color: rgba(255,255,255,0.84);
-  font-size: 13px;
-  font-weight: 700;
-}
-
 .settings-nav button:hover {
-  border-color: transparent;
-  background: rgba(255,255,255,0.05);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .settings-nav button.active {
-  background: rgba(224,164,90,0.12);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--st-accent);
+  color: #fff;
 }
 
 .settings-nav button.active span {
-  color: #ffffff;
+  color: #fff;
 }
 
+/* ---------- 主区与工具条 ---------- */
+
 .settings-main {
-  background: #050506;
+  background: var(--st-content);
 }
 
 .settings-toolbar {
-  background: rgba(8,8,10,0.96);
+  background: var(--st-chrome);
+  border-bottom: 1px solid var(--st-line-strong);
+}
+
+.settings-screen .ghost-btn {
+  min-height: 24px;
+  border: 1px solid #b9b9b9;
+  border-radius: 4px;
+  background: linear-gradient(#ffffff, #f3f3f3);
+  color: var(--st-text);
+  font-size: 12px;
+  padding: 0 12px;
+}
+
+.settings-screen .ghost-btn:hover {
+  background: linear-gradient(#fdfdfd, #e9e9e9);
+  border-color: #a8a8a8;
 }
 
 .settings-content {
-  padding: 24px clamp(20px, 3vw, 34px) 34px;
+  padding: 18px clamp(16px, 2.5vw, 28px) 32px;
 }
 
 .settings-content h2 {
-  margin: 0 0 16px;
-  font-size: 24px;
+  margin: 0 0 12px;
+  color: var(--st-text);
+  font-size: 20px;
   line-height: 1.15;
-  letter-spacing: 0;
+  font-weight: 700;
 }
 
 .settings-body {
-  max-width: 1080px;
+  max-width: 880px;
 }
+
+/* ---------- 布局栈 ---------- */
 
 .settings-stack {
   min-width: 0;
   display: grid;
-  gap: 30px;
+  gap: 22px;
 }
 
-/* 区块不再套盒子：靠留白与分隔线分层 */
+/* ---------- 来源概要 ---------- */
 
 .settings-hero {
   min-width: 0;
   display: grid;
-  gap: 12px;
-  padding: 0 0 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  gap: 10px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--st-hairline);
 }
 
 .settings-hero-copy {
   min-width: 0;
   display: grid;
-  align-content: center;
-  gap: 7px;
+  align-content: start;
+  gap: 3px;
 }
 
-.settings-hero-copy h3,
-.settings-panel-head h3,
-.settings-shortcut-group h3 {
-  margin: 0;
-  color: rgba(255,255,255,0.94);
-  font-size: 16px;
-  line-height: 1.25;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.settings-hero-copy p,
-.settings-hero-copy small,
-.settings-panel-head p {
-  min-width: 0;
-  color: rgba(255,255,255,0.54);
-  font-size: 12px;
-  line-height: 1.45;
+.settings-hero-copy p {
+  color: var(--st-text);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.settings-hero-copy p {
-  color: rgba(255,255,255,0.88);
-  font-size: 15px;
-  font-weight: 600;
-  white-space: nowrap;
+.settings-hero-copy small {
+  color: var(--st-muted);
+  font-size: 11px;
 }
 
 .settings-hero-actions {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .settings-action {
   min-width: 0;
-  min-height: 32px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255,255,255,0.86);
+  min-height: 24px;
+  border: 1px solid #b9b9b9;
+  border-radius: 4px;
+  background: linear-gradient(#ffffff, #f3f3f3);
+  color: var(--st-text);
   display: inline-flex;
   align-items: center;
-  padding: 0 14px;
+  padding: 0 13px;
+  font-size: 12px;
   cursor: default;
 }
 
 .settings-action:hover {
-  border-color: rgba(255,255,255,0.24);
-  background: rgba(255,255,255,0.04);
+  background: linear-gradient(#fdfdfd, #e9e9e9);
+  border-color: #a5a5a5;
+}
+
+.settings-action:active {
+  background: #e2e2e2;
 }
 
 .settings-action.primary {
-  border-color: rgba(224,164,90,0.55);
-  background: rgba(224,164,90,0.13);
+  border-color: #2a66cf;
+  background: linear-gradient(#4b8df0, #2f6fe0);
+  color: #fff;
+}
+
+.settings-action.primary:hover {
+  background: linear-gradient(#4384ea, #2a67d6);
 }
 
 .settings-action:disabled {
-  opacity: .48;
+  opacity: .45;
 }
 
 .settings-action span,
@@ -165,34 +215,35 @@
   white-space: nowrap;
 }
 
-.settings-action span {
-  font-size: 13px;
-  font-weight: 700;
-}
+/* ---------- 状态摘要行 ---------- */
 
 .settings-metrics {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px 18px;
-  padding: 4px 0 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--st-hairline);
 }
 
 .settings-metric {
   min-width: 0;
   min-height: 0;
-  padding: 0;
+  padding: 2px 14px 2px 0;
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: 3px;
+}
+
+.settings-metric + .settings-metric {
+  border-left: 1px solid var(--st-hairline);
+  padding-left: 14px;
 }
 
 .settings-metric small,
 .settings-metric span {
   min-width: 0;
-  color: rgba(255,255,255,0.46);
-  font-size: 11px;
+  color: var(--st-muted);
+  font-size: 10.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -200,45 +251,59 @@
 
 .settings-metric strong {
   min-width: 0;
-  color: rgba(255,255,255,0.94);
-  font-size: 18px;
-  line-height: 1.1;
-  font-weight: 800;
+  color: var(--st-text);
+  font-size: 15px;
+  line-height: 1.15;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ---------- 分组框 ---------- */
+
 .settings-panel {
   min-width: 0;
+  border: 1px solid var(--st-line-strong);
+  border-radius: 6px;
+  background: #fff;
   overflow: hidden;
 }
 
 .settings-panel-head {
   min-width: 0;
-  padding: 0 0 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
-}
-
-.settings-panel-head h3 {
-  font-size: 13px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.62);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--st-hairline);
+  background: #fafafa;
 }
 
 .settings-panel-head > div {
   min-width: 0;
-  display: grid;
-  gap: 4px;
+}
+
+.settings-panel-head h3 {
+  margin: 0;
+  color: var(--st-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.settings-panel-head p {
+  margin: 2px 0 0;
+  color: var(--st-faint);
+  font-size: 11px;
 }
 
 .settings-panel-body {
   min-width: 0;
   display: grid;
   gap: 0;
-  padding: 4px 0 0;
+  padding: 0;
 }
+
+/* ---------- 行条目 ---------- */
 
 .settings-rows {
   min-width: 0;
@@ -248,22 +313,23 @@
 
 .settings-row-item {
   min-width: 0;
-  min-height: 44px;
-  border: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  border-radius: 0;
-  background: transparent;
+  min-height: 31px;
+  border-bottom: 1px solid var(--st-hairline);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  padding: 9px 0;
+  padding: 5px 12px;
+}
+
+.settings-row-item:last-child {
+  border-bottom: 0;
 }
 
 .settings-row-item > div {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 1px;
 }
 
 .settings-row-item strong,
@@ -276,86 +342,38 @@
 }
 
 .settings-row-item strong {
-  color: rgba(255,255,255,0.86);
-  font-size: 13px;
+  color: var(--st-text);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .settings-row-item small {
-  color: rgba(255,255,255,0.46);
+  color: var(--st-muted);
   font-size: 11px;
 }
 
 .settings-row-item > span {
-  color: rgba(255,255,255,0.85);
+  color: var(--st-muted);
   font-size: 12px;
-  font-weight: 700;
 }
 
-.settings-range-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 78px auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.settings-range-row input[type="range"] {
-  width: 100%;
-  height: 24px;
-  margin: 0;
-  background: transparent;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.settings-range-row input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.16);
-}
-
-.settings-range-row input[type="range"]::-webkit-slider-thumb {
-  width: 15px;
-  height: 15px;
-  border: 2px solid #eef1ff;
-  border-radius: 50%;
-  background: #111116;
-  margin-top: -5px;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.settings-range-row output {
-  min-width: 0;
-  height: 32px;
-  border: 1px solid rgba(255,255,255,0.09);
-  border-radius: 8px;
-  background: #0f0f13;
-  color: rgba(255,255,255,0.86);
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
+/* ---------- 开关行 ---------- */
 
 .settings-switch-row {
   min-width: 0;
-  min-height: 44px;
-  border: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  border-radius: 0;
-  background: transparent;
+  min-height: 31px;
+  border-bottom: 1px solid var(--st-hairline);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 40px;
   gap: 12px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 5px 12px;
 }
 
 .settings-switch-row > span {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 1px;
 }
 
 .settings-switch-row strong,
@@ -366,12 +384,13 @@
 }
 
 .settings-switch-row strong {
-  color: rgba(255,255,255,0.86);
-  font-size: 13px;
+  color: var(--st-text);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .settings-switch-row small {
-  color: rgba(255,255,255,0.46);
+  color: var(--st-muted);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -384,117 +403,258 @@
 
 .settings-switch-row i {
   position: relative;
-  width: 40px;
-  height: 22px;
-  border: 1px solid rgba(255,255,255,0.16);
+  width: 34px;
+  height: 19px;
+  border: 1px solid #bdbdbd;
   border-radius: 999px;
-  background: rgba(255,255,255,0.06);
+  background: #d8d8d8;
 }
 
 .settings-switch-row i::after {
   content: "";
   position: absolute;
-  left: 3px;
-  top: 3px;
-  width: 14px;
-  height: 14px;
+  left: 2px;
+  top: 2px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.72);
-  transition: transform .15s ease, background .15s ease;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform .15s ease;
 }
 
 .settings-switch-row input:checked + i {
-  border-color: rgba(224,164,90,0.58);
-  background: rgba(224,164,90,0.20);
+  border-color: #2a66cf;
+  background: var(--st-accent);
 }
 
 .settings-switch-row input:checked + i::after {
-  transform: translateX(18px);
-  background: #dfe6ff;
+  transform: translateX(15px);
 }
+
+/* ---------- 滑杆行 ---------- */
+
+.settings-range-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+}
+
+.settings-range-row input[type="range"] {
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.settings-range-row input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: #c9c9c9;
+}
+
+.settings-range-row input[type="range"]::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  border: 1px solid #adadad;
+  border-radius: 50%;
+  background: linear-gradient(#ffffff, #ededed);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  margin-top: -5.5px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.settings-range-row output {
+  min-width: 0;
+  color: var(--st-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- 内联工具行 ---------- */
 
 .settings-inline-tools {
   min-width: 0;
-  min-height: 40px;
-  border: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  border-radius: 0;
-  background: transparent;
+  min-height: 30px;
+  border-bottom: 1px solid var(--st-hairline);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 5px 12px;
 }
 
 .settings-inline-tools span {
   min-width: 0;
-  color: rgba(255,255,255,0.58);
+  color: var(--st-muted);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ---------- 快捷键页 ---------- */
+
 .settings-shortcut-group {
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .settings-shortcut-group + .settings-shortcut-group {
-  padding-top: 12px;
-  border-top: 1px solid rgba(255,255,255,0.07);
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--st-hairline);
+}
+
+.settings-shortcut-group h3 {
+  margin: 0 0 4px;
+  color: var(--st-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
 }
 
 .settings-shortcut-row {
   min-width: 0;
-  min-height: 36px;
-  border: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  border-radius: 0;
-  background: transparent;
+  min-height: 27px;
+  border-bottom: 1px solid var(--st-hairline);
   display: grid;
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  padding: 7px 10px;
+  padding: 3px 2px;
 }
 
 .settings-shortcut-keys {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
 }
 
 .settings-shortcut-row kbd {
-  min-width: 26px;
-  height: 24px;
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 6px;
-  background: #15151b;
-  color: rgba(255,255,255,0.84);
+  min-width: 22px;
+  height: 19px;
+  border: 1px solid #c3c3c3;
+  border-radius: 4px;
+  background: linear-gradient(#ffffff, #f4f4f4);
+  box-shadow: 0 1px 0 #dcdcdc;
+  color: var(--st-text);
   display: inline-grid;
   place-items: center;
-  padding: 0 7px;
+  padding: 0 6px;
   font: inherit;
   font-size: 11px;
-  font-weight: 700;
 }
 
 .settings-shortcut-row > span:last-child {
   min-width: 0;
-  color: rgba(255,255,255,0.74);
+  color: var(--st-text);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ---------- 导出页 ---------- */
+
+.settings-screen .export-card {
+  border: 1px solid var(--st-line-strong);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.settings-screen .export-row,
+.settings-screen .export-path-row {
+  border-color: var(--st-hairline);
+  color: var(--st-text);
+}
+
+.settings-screen .export-status {
+  color: var(--st-muted);
+}
+
+.settings-screen .export-template-input,
+.settings-screen .export-path {
+  border: 1px solid #bcbcbc;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--st-text);
+  font-size: 12px;
+}
+
+.settings-screen .export-template-input:focus,
+.settings-screen .export-path:focus {
+  outline: none;
+  border-color: var(--st-accent);
+  box-shadow: 0 0 0 2px rgba(48, 114, 228, 0.25);
+}
+
+.settings-screen .export-token-list code {
+  border: 1px solid #dcdcdc;
+  border-radius: 4px;
+  background: #f5f5f7;
+  color: #3a3a3e;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+}
+
+/* ---------- 存储页来源列表 ---------- */
+
+.settings-main .storage-list {
+  margin-top: 10px;
+}
+
+.settings-main .storage-row {
+  border: 1px solid var(--st-line-strong);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--st-text);
+}
+
+.settings-main .storage-cover {
+  border: 1px solid var(--st-hairline);
+}
+
+.settings-main .storage-path {
+  color: var(--st-text);
+}
+
+.settings-main .storage-id,
+.settings-main .storage-source-id,
+.settings-main .storage-counts {
+  color: var(--st-muted);
+  font-size: 11px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+/* ---------- 关于页 ---------- */
+
 .settings-about-panel {
+  min-width: 0;
   display: grid;
   gap: 12px;
+}
+
+.about-title {
+  color: var(--st-text);
+}
+
+.about-version,
+.about-author {
+  color: var(--st-muted);
+}
+
+.about-link {
+  color: var(--st-accent);
 }
 
 .about-meta {
@@ -503,18 +663,29 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  color: rgba(255,255,255,0.56);
+  color: var(--st-muted);
   font-size: 12px;
 }
 
 .about-meta b {
   min-width: 0;
-  color: rgba(255,255,255,0.84);
+  color: var(--st-text);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- 其他 ---------- */
+
+.settings-empty {
+  color: var(--st-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ---------- 窄屏适配 ---------- */
 
 @media (max-width: 920px) {
   .settings-screen {
@@ -524,18 +695,19 @@
 
   .settings-side {
     border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 12px;
+    border-bottom: 1px solid var(--st-line-strong);
+    padding: 10px;
   }
 
   .settings-nav {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     overflow: auto;
   }
 
   .settings-nav button {
-    min-width: 150px;
+    min-width: 88px;
+    text-align: center;
   }
 
   .settings-hero {
@@ -544,12 +716,18 @@
 
   .settings-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 0;
+  }
+
+  .settings-metric:nth-child(odd) {
+    border-left: 0;
+    padding-left: 0;
   }
 }
 
 @media (max-width: 620px) {
   .settings-content {
-    padding: 18px 14px 26px;
+    padding: 14px 12px 24px;
   }
 
   .settings-hero-actions,

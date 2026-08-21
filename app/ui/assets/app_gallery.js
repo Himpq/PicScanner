@@ -803,19 +803,13 @@
 
   function renderSettingsNav() {
     els.settingsNav.innerHTML = '';
-    SETTINGS_TABS.forEach((tab, index) => {
+    SETTINGS_TABS.forEach((tab) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.dataset.settingsTab = tab.key;
-      const marker = document.createElement('b');
-      marker.textContent = String(index + 1).padStart(2, '0');
       const label = document.createElement('span');
       label.textContent = tab.label;
-      const hint = document.createElement('small');
-      hint.textContent = tab.hint || '';
-      btn.appendChild(marker);
       btn.appendChild(label);
-      btn.appendChild(hint);
       btn.classList.toggle('active', tab.key === state.settingsTab);
       btn.addEventListener('click', () => setSettingsTab(tab.key));
       els.settingsNav.appendChild(btn);
@@ -1038,25 +1032,18 @@
 
     const info = document.createElement('div');
     info.className = 'settings-hero-copy';
-    const eyebrow = document.createElement('span');
-    eyebrow.className = 'settings-eyebrow';
-    eyebrow.textContent = '当前图库';
-    const title = document.createElement('h3');
-    title.textContent = state.currentRootPath ? '正在浏览的照片来源' : '还没有打开图库';
     const path = document.createElement('p');
-    path.textContent = state.currentRootPath || '从来源页选择一个文件夹后，这里会显示扫描和 EXIF 状态。';
+    path.textContent = state.currentRootPath || '还没有打开图库，用「更换来源」选择文件夹。';
     const scope = document.createElement('small');
-    scope.textContent = state.currentRootPath ? activeScopeLabel() + (state.currentSourceId ? ' · 来源 ' + state.currentSourceId : '') : '等待选择来源';
-    info.appendChild(eyebrow);
-    info.appendChild(title);
+    scope.textContent = state.currentRootPath ? activeScopeLabel() : '';
     info.appendChild(path);
-    info.appendChild(scope);
+    if (scope.textContent) info.appendChild(scope);
 
     const actions = document.createElement('div');
     actions.className = 'settings-hero-actions';
     actions.appendChild(settingsAction(
       state.scanRunning ? '停止扫描' : (state.scanComplete ? '检查新增图片' : '扫描图库'),
-      state.currentRootPath ? '更新当前来源' : '需要先选择图库',
+      '',
       () => {
         toggleScanAll();
         showToast(state.scanRunning ? '已请求停止扫描' : '已请求开始扫描');
@@ -1065,7 +1052,7 @@
     ));
     actions.appendChild(settingsAction(
       state.exifRunning ? '停止 EXIF' : '读取 EXIF',
-      state.currentRootPath ? '补全拍摄参数' : '需要先选择图库',
+      '',
       () => {
         toggleExifRead();
         showToast(state.exifRunning ? '已请求停止 EXIF 读取' : '已请求读取 EXIF');
@@ -1074,11 +1061,11 @@
     ));
     actions.appendChild(settingsAction(
       '统计视图',
-      '查看拍摄习惯',
+      '',
       openStatsPage,
       { disabled: !state.currentRootPath },
     ));
-    actions.appendChild(settingsAction('更换来源', '回到来源页', PS.showSourceChooser));
+    actions.appendChild(settingsAction('更换来源', '', PS.showSourceChooser));
 
     hero.appendChild(info);
     hero.appendChild(actions);
@@ -1089,12 +1076,14 @@
     metrics.appendChild(renderSettingsMetric('扫描状态', els.scanStatus.textContent || '等待扫描', els.scanCount.textContent || '0 / 0'));
     metrics.appendChild(renderSettingsMetric('EXIF 状态', els.exifStatus.textContent || '等待 EXIF', els.exifCount.textContent || '0 / 0'));
     metrics.appendChild(renderSettingsMetric('已载入', compactNumber(state.dates.length) + ' 天', compactNumber(loadedPhotoTotal()) + ' 张照片'));
-    metrics.appendChild(renderSettingsMetric('照片墙密度', state.galleryItemSize + ' px', 'Ctrl + 滚轮也可调整'));
+    metrics.appendChild(renderSettingsMetric('照片墙密度', state.galleryItemSize + ' px', ''));
     wrap.appendChild(metrics);
 
     const preset = currentExportPreset();
     const quickSections = PS.quickEditCollapsedSections();
-    const snapshot = createSettingsPanel('偏好快照', '常用开关集中看一眼，具体调整在对应栏目里。');
+    const prefGroups = ['tone', 'color', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut'];
+    const foldedGroups = prefGroups.filter((key) => quickSections[key]).length;
+    const snapshot = createSettingsPanel('当前偏好', '');
     renderSettingsRows(snapshot.body, [
       {
         title: '导出预设',
@@ -1103,18 +1092,12 @@
       },
       {
         title: '灯箱参数面板',
-        detail: state.lightboxInfoDetailsCollapsed ? '详细参数默认折叠' : '详细参数默认展开',
+        detail: '',
         value: state.lightboxInfoPreferredVisible ? '默认显示' : '默认隐藏',
       },
       {
         title: '快速调整面板',
-        detail: '影调 ' + (quickSections.tone ? '折叠' : '展开')
-          + ' · 饱和度&色温 ' + (quickSections.color ? '折叠' : '展开')
-          + ' · 效果 ' + (quickSections.effects ? '折叠' : '展开')
-          + ' · 黑白混色 ' + (quickSections.blackWhite ? '折叠' : '展开')
-          + ' · 色调分离 ' + (quickSections.splitTone ? '折叠' : '展开')
-          + ' · HSL ' + (quickSections.hsl ? '折叠' : '展开')
-          + ' · LUT ' + (quickSections.lut ? '折叠' : '展开'),
+        detail: foldedGroups ? foldedGroups + ' / ' + prefGroups.length + ' 组折叠' : '全部展开',
         value: '已记忆',
       },
     ]);

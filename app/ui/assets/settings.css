@@ -35,7 +35,7 @@
   place-items: center;
   color: rgba(255,255,255,0.46);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 
@@ -50,7 +50,7 @@
 .settings-nav button span {
   color: rgba(255,255,255,0.84);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .settings-nav button small {
@@ -60,13 +60,13 @@
 
 .settings-nav button:hover,
 .settings-nav button.active {
-  border-color: rgba(142,168,255,0.26);
+  border-color: rgba(224,164,90,0.26);
   background: #111116;
 }
 
 .settings-nav button.active b {
-  border-color: rgba(142,168,255,0.48);
-  background: rgba(142,168,255,0.14);
+  border-color: rgba(224,164,90,0.48);
+  background: rgba(224,164,90,0.14);
   color: #d9e1ff;
 }
 
@@ -125,7 +125,7 @@
 .settings-eyebrow {
   color: #9fb2ff;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: 800;
 }
 
 .settings-hero-copy h3,
@@ -135,7 +135,7 @@
   color: rgba(255,255,255,0.94);
   font-size: 16px;
   line-height: 1.25;
-  font-weight: 760;
+  font-weight: 800;
   letter-spacing: 0;
 }
 
@@ -184,8 +184,8 @@
 }
 
 .settings-action.primary {
-  border-color: rgba(142,168,255,0.38);
-  background: rgba(142,168,255,0.14);
+  border-color: rgba(224,164,90,0.38);
+  background: rgba(224,164,90,0.14);
 }
 
 .settings-action:disabled {
@@ -202,7 +202,7 @@
 
 .settings-action span {
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .settings-action small {
@@ -241,7 +241,7 @@
   color: rgba(255,255,255,0.94);
   font-size: 18px;
   line-height: 1.1;
-  font-weight: 760;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -319,7 +319,7 @@
 .settings-row-item > span {
   color: #d9e1ff;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .settings-range-row {
@@ -434,8 +434,8 @@
 }
 
 .settings-switch-row input:checked + i {
-  border-color: rgba(142,168,255,0.58);
-  background: rgba(142,168,255,0.20);
+  border-color: rgba(224,164,90,0.58);
+  background: rgba(224,164,90,0.20);
 }
 
 .settings-switch-row input:checked + i::after {
@@ -508,7 +508,7 @@
   padding: 0 7px;
   font: inherit;
   font-size: 11px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .settings-shortcut-row > span:last-child {
@@ -538,7 +538,7 @@
 .about-meta b {
   min-width: 0;
   color: rgba(255,255,255,0.84);
-  font-weight: 650;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

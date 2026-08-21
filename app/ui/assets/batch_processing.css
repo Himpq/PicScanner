@@ -103,7 +103,7 @@
 .batch-selection-run {
   background: #ffb817;
   color: #17130a;
-  font-weight: 760;
+  font-weight: 800;
 }
 
 .batch-selection-clear {
@@ -520,7 +520,7 @@
 .batch-field-heading b {
   color: rgba(255, 255, 255, 0.9);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 800;
 }
 
 .batch-field-heading span {
@@ -549,7 +549,7 @@
 .batch-output-group-title b {
   color: rgba(255, 255, 255, 0.9);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 800;
 }
 
 .batch-output-group-title span {
@@ -567,7 +567,7 @@
 .batch-processing-field > .quick-edit-save-label {
   color: rgba(255, 255, 255, 0.72);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .batch-picker .quick-edit-save-format-menu {

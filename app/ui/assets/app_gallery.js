@@ -1796,7 +1796,7 @@
     const total = data.reduce((sum, row) => sum + row.count, 0);
     const circumference = 2 * Math.PI * 64;
     let offset = 0;
-    const colors = ['#8ea8ff', '#62d6aa', '#6ed6ff', '#c39bff', '#9ad36a', '#7db5ff', '#b7c7ff', '#6fcfbd'];
+    const colors = ['#e0a45a', '#62d6aa', '#6ed6ff', '#c39bff', '#9ad36a', '#7db5ff', '#b7c7ff', '#6fcfbd'];
     const segments = data.map((row, index) => {
       const length = row.count / total * circumference;
       const dash = length.toFixed(2) + ' ' + (circumference - length).toFixed(2);

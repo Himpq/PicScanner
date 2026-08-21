@@ -7,7 +7,6 @@ function readSnapshot() {
   const st = PS.state;
   return {
     currentRootPath: st.currentRootPath,
-    currentSourceId: st.currentSourceId,
     scanRunning: st.scanRunning,
     scanComplete: st.scanComplete,
     exifRunning: st.exifRunning,
@@ -20,13 +19,15 @@ function readSnapshot() {
     photosText: PS.compactNumber(PS.loadedPhotoTotal()) + ' 张照片',
     galleryItemSize: st.galleryItemSize,
     exportPreset: PS.currentExportPreset(),
-    lightboxCollapsed: st.lightboxInfoDetailsCollapsed,
     lightboxVisible: st.lightboxInfoPreferredVisible,
     quickSections: PS.quickEditCollapsedSections(),
   };
 }
 
 const snap = ref(readSnapshot());
+
+const prefGroups = ['tone', 'color', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut'];
+const foldedGroups = computed(() => prefGroups.filter((key) => snap.value.quickSections[key]).length);
 
 function refresh() {
   snap.value = readSnapshot();
@@ -51,51 +52,27 @@ function onOpenStats() {
 function onChangeSource() {
   PS.showSourceChooser();
 }
-
-const quickSectionsDetail = computed(() => {
-  const q = snap.value.quickSections;
-  const f = (v) => (v ? '折叠' : '展开');
-  return (
-    '影调 ' + f(q.tone) +
-    ' · 饱和度&色温 ' + f(q.color) +
-    ' · 效果 ' + f(q.effects) +
-    ' · 黑白混色 ' + f(q.blackWhite) +
-    ' · 色调分离 ' + f(q.splitTone) +
-    ' · HSL ' + f(q.hsl) +
-    ' · LUT ' + f(q.lut)
-  );
-});
 </script>
 
 <template>
   <div class="settings-stack">
     <section class="settings-hero">
       <div class="settings-hero-copy">
-        <span class="settings-eyebrow">当前图库</span>
-        <h3>{{ snap.currentRootPath ? '正在浏览的照片来源' : '还没有打开图库' }}</h3>
-        <p>{{ snap.currentRootPath || '从来源页选择一个文件夹后，这里会显示扫描和 EXIF 状态。' }}</p>
-        <small>{{
-          snap.currentRootPath
-            ? snap.scopeLabel + (snap.currentSourceId ? ' · 来源 ' + snap.currentSourceId : '')
-            : '等待选择来源'
-        }}</small>
+        <p>{{ snap.currentRootPath || '还没有打开图库，用「更换来源」选择文件夹。' }}</p>
+        <small v-if="snap.currentRootPath">{{ snap.scopeLabel }}</small>
       </div>
       <div class="settings-hero-actions">
         <button type="button" class="settings-action primary" :disabled="!snap.currentRootPath" @click="onScanToggle">
           <span>{{ snap.scanRunning ? '停止扫描' : snap.scanComplete ? '检查新增图片' : '扫描图库' }}</span>
-          <small>{{ snap.currentRootPath ? '更新当前来源' : '需要先选择图库' }}</small>
         </button>
         <button type="button" class="settings-action" :disabled="!snap.currentRootPath" @click="onExifToggle">
           <span>{{ snap.exifRunning ? '停止 EXIF' : '读取 EXIF' }}</span>
-          <small>{{ snap.currentRootPath ? '补全拍摄参数' : '需要先选择图库' }}</small>
         </button>
         <button type="button" class="settings-action" :disabled="!snap.currentRootPath" @click="onOpenStats">
           <span>统计视图</span>
-          <small>查看拍摄习惯</small>
         </button>
         <button type="button" class="settings-action" @click="onChangeSource">
           <span>更换来源</span>
-          <small>回到来源页</small>
         </button>
       </div>
     </section>
@@ -119,15 +96,13 @@ const quickSectionsDetail = computed(() => {
       <div class="settings-metric">
         <small>照片墙密度</small>
         <strong>{{ snap.galleryItemSize }} px</strong>
-        <span>Ctrl + 滚轮也可调整</span>
       </div>
     </section>
 
     <section class="settings-panel">
       <div class="settings-panel-head">
         <div>
-          <h3>偏好快照</h3>
-          <p>常用开关集中看一眼，具体调整在对应栏目里。</p>
+          <h3>当前偏好</h3>
         </div>
       </div>
       <div class="settings-panel-body">
@@ -142,14 +117,13 @@ const quickSectionsDetail = computed(() => {
           <div class="settings-row-item">
             <div>
               <strong>灯箱参数面板</strong>
-              <small>{{ snap.lightboxCollapsed ? '详细参数默认折叠' : '详细参数默认展开' }}</small>
             </div>
             <span>{{ snap.lightboxVisible ? '默认显示' : '默认隐藏' }}</span>
           </div>
           <div class="settings-row-item">
             <div>
               <strong>快速调整面板</strong>
-              <small>{{ quickSectionsDetail }}</small>
+              <small>{{ foldedGroups ? foldedGroups + ' / ' + prefGroups.length + ' 组折叠' : '全部展开' }}</small>
             </div>
             <span>已记忆</span>
           </div>

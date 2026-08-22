@@ -41,7 +41,6 @@ const groups = [
       <div class="settings-panel-head">
         <div>
           <h3>快捷键</h3>
-          <p>这里只展示现有键位，本次不提供键位修改。</p>
         </div>
       </div>
       <div class="settings-panel-body">

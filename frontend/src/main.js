@@ -4,7 +4,6 @@ import ShortcutsSettings from './settings/ShortcutsSettings.vue';
 import AboutSettings from './settings/AboutSettings.vue';
 import ExportSettings from './settings/ExportSettings.vue';
 import InterfaceSettings from './settings/InterfaceSettings.vue';
-import BasicSettings from './settings/BasicSettings.vue';
 import LightboxInfoContent from './lightbox/LightboxInfoContent.vue';
 import QuickEditSliders from './quickedit/QuickEditSliders.vue';
 
@@ -14,7 +13,6 @@ const COMPONENTS = {
   about: AboutSettings,
   export: ExportSettings,
   interface: InterfaceSettings,
-  basic: BasicSettings,
 };
 
 let app = null;

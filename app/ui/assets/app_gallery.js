@@ -16,7 +16,6 @@
   const quickEditPerfEnabled = PS.quickEditPerfEnabled;
   const SORT_OPTIONS = PS.SORT_OPTIONS;
   const SETTINGS_TABS = PS.SETTINGS_TABS;
-  const STATS_COLORS = PS.STATS_COLORS;
   const PROJECT_URL = PS.PROJECT_URL;
   const LIGHTBOX_MIN_ZOOM = PS.LIGHTBOX_MIN_ZOOM;
   const LIGHTBOX_MAX_ZOOM = PS.LIGHTBOX_MAX_ZOOM;
@@ -808,6 +807,7 @@
       btn.type = 'button';
       btn.dataset.settingsTab = tab.key;
       const label = document.createElement('span');
+      label.className = 'settings-nav-label';
       label.textContent = tab.label;
       btn.appendChild(label);
       btn.classList.toggle('active', tab.key === state.settingsTab);
@@ -894,14 +894,9 @@
 
   function renderSettingsBody() {
     const tab = currentSettingsTab();
-    els.settingsTitle.textContent = tab.label;
     if (window.PicScannerVue) window.PicScannerVue.unmount();
     els.settingsBody.innerHTML = '';
     if (window.PicScannerVue && window.PicScannerVue.mount(tab.key, els.settingsBody)) {
-      return;
-    }
-    if (tab.key === 'basic') {
-      renderBasicSettings();
       return;
     }
     if (tab.key === 'interface') {
@@ -966,145 +961,6 @@
     return '分类：' + state.activeCategory;
   }
 
-  function settingsAction(label, detail, onClick, options) {
-    const opts = options || {};
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = opts.primary ? 'settings-action primary' : 'settings-action';
-    btn.disabled = !!opts.disabled;
-    const title = document.createElement('span');
-    title.textContent = label;
-    const small = document.createElement('small');
-    small.textContent = detail || '';
-    btn.appendChild(title);
-    if (detail) btn.appendChild(small);
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      onClick();
-      setTimeout(() => {
-        if (state.settingsOpen && state.settingsTab === 'basic') renderSettingsBody();
-      }, 320);
-    });
-    return btn;
-  }
-
-  function renderSettingsMetric(label, value, meta) {
-    const item = document.createElement('div');
-    item.className = 'settings-metric';
-    const small = document.createElement('small');
-    small.textContent = label;
-    const strong = document.createElement('strong');
-    strong.textContent = value;
-    const span = document.createElement('span');
-    span.textContent = meta || '';
-    item.appendChild(small);
-    item.appendChild(strong);
-    if (meta) item.appendChild(span);
-    return item;
-  }
-
-  function renderSettingsRows(body, rows) {
-    const list = document.createElement('div');
-    list.className = 'settings-rows';
-    rows.forEach((row) => {
-      const item = document.createElement('div');
-      item.className = 'settings-row-item';
-      const left = document.createElement('div');
-      const title = document.createElement('strong');
-      title.textContent = row.title;
-      const detail = document.createElement('small');
-      detail.textContent = row.detail || '';
-      left.appendChild(title);
-      if (row.detail) left.appendChild(detail);
-      const value = document.createElement('span');
-      value.textContent = row.value || '';
-      item.appendChild(left);
-      item.appendChild(value);
-      list.appendChild(item);
-    });
-    body.appendChild(list);
-  }
-
-  function renderBasicSettings() {
-    const wrap = settingsStack();
-    const hero = document.createElement('section');
-    hero.className = 'settings-hero';
-
-    const info = document.createElement('div');
-    info.className = 'settings-hero-copy';
-    const path = document.createElement('p');
-    path.textContent = state.currentRootPath || '还没有打开图库，用「更换来源」选择文件夹。';
-    const scope = document.createElement('small');
-    scope.textContent = state.currentRootPath ? activeScopeLabel() : '';
-    info.appendChild(path);
-    if (scope.textContent) info.appendChild(scope);
-
-    const actions = document.createElement('div');
-    actions.className = 'settings-hero-actions';
-    actions.appendChild(settingsAction(
-      state.scanRunning ? '停止扫描' : (state.scanComplete ? '检查新增图片' : '扫描图库'),
-      '',
-      () => {
-        toggleScanAll();
-        showToast(state.scanRunning ? '已请求停止扫描' : '已请求开始扫描');
-      },
-      { primary: true, disabled: !state.currentRootPath },
-    ));
-    actions.appendChild(settingsAction(
-      state.exifRunning ? '停止 EXIF' : '读取 EXIF',
-      '',
-      () => {
-        toggleExifRead();
-        showToast(state.exifRunning ? '已请求停止 EXIF 读取' : '已请求读取 EXIF');
-      },
-      { disabled: !state.currentRootPath },
-    ));
-    actions.appendChild(settingsAction(
-      '统计视图',
-      '',
-      openStatsPage,
-      { disabled: !state.currentRootPath },
-    ));
-    actions.appendChild(settingsAction('更换来源', '', PS.showSourceChooser));
-
-    hero.appendChild(info);
-    hero.appendChild(actions);
-    wrap.appendChild(hero);
-
-    const metrics = document.createElement('section');
-    metrics.className = 'settings-metrics';
-    metrics.appendChild(renderSettingsMetric('扫描状态', els.scanStatus.textContent || '等待扫描', els.scanCount.textContent || '0 / 0'));
-    metrics.appendChild(renderSettingsMetric('EXIF 状态', els.exifStatus.textContent || '等待 EXIF', els.exifCount.textContent || '0 / 0'));
-    metrics.appendChild(renderSettingsMetric('已载入', compactNumber(state.dates.length) + ' 天', compactNumber(loadedPhotoTotal()) + ' 张照片'));
-    metrics.appendChild(renderSettingsMetric('照片墙密度', state.galleryItemSize + ' px', ''));
-    wrap.appendChild(metrics);
-
-    const preset = currentExportPreset();
-    const quickSections = PS.quickEditCollapsedSections();
-    const prefGroups = ['tone', 'color', 'effects', 'blackWhite', 'splitTone', 'hsl', 'lut'];
-    const foldedGroups = prefGroups.filter((key) => quickSections[key]).length;
-    const snapshot = createSettingsPanel('当前偏好', '');
-    renderSettingsRows(snapshot.body, [
-      {
-        title: '导出预设',
-        detail: preset.destination || '尚未指定固定目录',
-        value: preset.enabled ? '已启用' : '导出时询问',
-      },
-      {
-        title: '灯箱参数面板',
-        detail: '',
-        value: state.lightboxInfoPreferredVisible ? '默认显示' : '默认隐藏',
-      },
-      {
-        title: '快速调整面板',
-        detail: foldedGroups ? foldedGroups + ' / ' + prefGroups.length + ' 组折叠' : '全部展开',
-        value: '已记忆',
-      },
-    ]);
-    wrap.appendChild(snapshot.panel);
-    els.settingsBody.appendChild(wrap);
-  }
-
   function appendSettingsSwitch(body, title, detail, checked, onChange) {
     const label = document.createElement('label');
     label.className = 'settings-switch-row';
@@ -1131,9 +987,11 @@
   function renderInterfaceSettings() {
     const wrap = settingsStack();
 
-    const gallery = createSettingsPanel('照片墙密度', '调整缩略图基础尺寸，适合在大量照片和精挑细看之间切换。');
+    const gallery = createSettingsPanel('图库');
     const rangeRow = document.createElement('div');
     rangeRow.className = 'settings-range-row';
+    const rangeLabel = document.createElement('span');
+    rangeLabel.textContent = '缩略图大小';
     const range = document.createElement('input');
     range.type = 'range';
     range.min = '112';
@@ -1158,24 +1016,25 @@
       readout.value = String(state.galleryItemSize);
       readout.textContent = state.galleryItemSize + ' px';
     });
+    rangeRow.appendChild(rangeLabel);
     rangeRow.appendChild(range);
     rangeRow.appendChild(readout);
     rangeRow.appendChild(reset);
     gallery.body.appendChild(rangeRow);
     wrap.appendChild(gallery.panel);
 
-    const lightbox = createSettingsPanel('照片参数面板', '控制灯箱里参数面板的默认显示方式；位置和尺寸仍可在灯箱中拖拽记忆。');
+    const lightbox = createSettingsPanel('灯箱');
     appendSettingsSwitch(
       lightbox.body,
       '打开灯箱时显示参数',
-      '关闭后仍可用灯箱右上角 i 按钮临时打开。',
+      '',
       state.lightboxInfoPreferredVisible,
       (checked) => PS.setLightboxInfoVisible(checked),
     );
     appendSettingsSwitch(
       lightbox.body,
       '详细参数默认折叠',
-      '只保留快门、光圈、ISO 等摘要，展开后看完整 EXIF。',
+      '',
       state.lightboxInfoDetailsCollapsed,
       (checked) => PS.setLightboxInfoDetailsCollapsed(checked),
     );
@@ -1206,54 +1065,54 @@
     lightbox.body.appendChild(layout);
     wrap.appendChild(lightbox.panel);
 
-    const quick = createSettingsPanel('快速调整面板', '记住复杂工具区的折叠状态，让打开 Q 调整时更贴近你的工作流。');
+    const quick = createSettingsPanel('快速调整 · 默认折叠');
     const sections = PS.quickEditCollapsedSections();
     appendSettingsSwitch(
       quick.body,
-      '影调区默认折叠',
-      '适合主要处理色彩或细节时减少面板高度。',
+      '影调',
+      '',
       sections.tone,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { tone: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      '饱和度&色温区默认折叠',
-      '适合只处理明暗层次时减少干扰。',
+      '饱和度与色温',
+      '',
       sections.color,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { color: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      '效果区默认折叠',
-      '适合暂时不使用暗角等氛围效果时减少面板高度。',
+      '效果',
+      '',
       sections.effects,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { effects: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      '黑白混色区默认折叠',
-      '适合只做彩色照片时减少面板高度。',
+      '黑白混色',
+      '',
       sections.blackWhite,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { blackWhite: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      '色调分离区默认折叠',
-      '适合只做基础色彩或 HSL 微调时减少面板高度。',
+      '色调分离',
+      '',
       sections.splitTone,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { splitTone: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      'HSL 区默认折叠',
-      '适合只做基础曝光、色温、曲线时减少干扰。',
+      'HSL',
+      '',
       sections.hsl,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { hsl: checked })),
     );
     appendSettingsSwitch(
       quick.body,
-      'LUT 区默认折叠',
-      'LUT 库很大时可以让快速调整界面更清爽。',
+      'LUT',
+      '',
       sections.lut,
       (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { lut: checked })),
     );
@@ -1263,7 +1122,7 @@
 
   function renderShortcutsSettings() {
     const wrap = settingsStack();
-    const intro = createSettingsPanel('快捷键', '这里只展示现有键位，本次不提供键位修改。');
+    const intro = createSettingsPanel('快捷键');
     const groups = [
       {
         title: '图库',
@@ -1327,19 +1186,23 @@
   }
 
   function renderAboutSettings() {
-    const panel = document.createElement('div');
-    panel.className = 'about-panel settings-about-panel';
-    panel.innerHTML = [
-      '<div class="about-title"><span>PicScanner</span><span class="about-version">v1.0.1</span></div>',
-      '<div class="about-author">Himpq developed with Codex</div>',
-      '<div class="about-meta"><span>构建</span><b>' + PS.escapeHtml(APP_BUILD) + '</b></div>',
-      '<button id="open-project-url" class="about-link" type="button"></button>',
+    const wrap = settingsStack();
+    const panel = createSettingsPanel('关于', '');
+    panel.body.innerHTML = [
+      '<div class="settings-row-item">' +
+      '<div><strong>PicScanner <span class="about-version">v1.0.1</span></strong><small>Himpq developed with Codex</small></div>' +
+      '<span>构建 ' + PS.escapeHtml(APP_BUILD || '--') + '</span>' +
+      '</div>',
+      '<div class="settings-row-item">' +
+      '<div><strong>项目主页</strong><small>' + PS.escapeHtml(PROJECT_URL) + '</small></div>' +
+      '<div class="settings-row-controls"><button id="open-project-url" class="ghost-btn" type="button">打开</button></div>' +
+      '</div>',
     ].join('');
-    panel.querySelector('#open-project-url').textContent = PROJECT_URL;
-    panel.querySelector('#open-project-url').addEventListener('click', () => {
+    panel.body.querySelector('#open-project-url').addEventListener('click', () => {
       call('open_external_url', PROJECT_URL).catch(console.warn);
     });
-    els.settingsBody.appendChild(panel);
+    wrap.appendChild(panel);
+    els.settingsBody.appendChild(wrap);
   }
 
   function exportPresetPayload(overrides) {
@@ -1363,28 +1226,28 @@
 
   function renderExportSettings() {
     const preset = currentExportPreset();
-    const wrap = document.createElement('div');
-    wrap.className = 'export-settings';
-    wrap.innerHTML = [
-      '<section class="export-card">',
-      '<label class="export-switch"><input id="export-preset-enabled" type="checkbox"> <span>启用导出预设</span></label>',
-      '<div class="export-row">',
-      '<label>自动导出目录</label>',
-      '<div class="export-path-row">',
-      '<div id="export-preset-path" class="export-path"></div>',
-      '<button id="export-preset-folder" class="ghost-btn" type="button">选择目录</button>',
-      '<button id="export-preset-clear" class="ghost-btn" type="button">清空</button>',
+    const wrap = settingsStack();
+    const panel = createSettingsPanel('导出预设');
+    panel.body.innerHTML = [
+      '<label class="settings-switch-row">' +
+      '<span><strong>启用导出预设</strong></span>' +
+      '<input id="export-preset-enabled" type="checkbox"><i aria-hidden="true"></i>' +
+      '</label>',
+      '<div class="settings-row-item">' +
+      '<div><strong>自动导出目录</strong><small id="export-preset-status"></small></div>' +
+      '<div class="settings-row-controls">' +
+      '<span id="export-preset-path" class="settings-path-chip"></span>' +
+      '<button id="export-preset-folder" class="ghost-btn" type="button">选择目录</button>' +
+      '<button id="export-preset-clear" class="ghost-btn" type="button">清空</button>' +
+      '</div>' +
       '</div>',
+      '<div class="settings-row-item settings-row-stacked">' +
+      '<div><strong>命名模板</strong></div>' +
+      '<input id="export-preset-template" class="settings-text-input" type="text" spellcheck="false">' +
       '</div>',
-      '<div class="export-row">',
-      '<label for="export-preset-template">命名模板</label>',
-      '<input id="export-preset-template" class="export-template-input" type="text" spellcheck="false">',
+      '<div class="settings-token-row">' +
+      '<code>{origin_name}</code><code>{date}</code><code>{Y}</code><code>{M}</code><code>{D}</code><code>{len_name}</code><code>{aperture}</code><code>{iso}</code><code>{shutter}</code>' +
       '</div>',
-      '<div class="export-token-list">',
-      '<code>{origin_name}</code><code>{date}</code><code>{Y}</code><code>{M}</code><code>{D}</code><code>{len_name}</code><code>{aperture}</code><code>{iso}</code><code>{shutter}</code>',
-      '</div>',
-      '<div id="export-preset-status" class="export-status"></div>',
-      '</section>',
     ].join('');
     els.settingsBody.appendChild(wrap);
 
@@ -1553,7 +1416,6 @@
     els.statsStorageList.className = 'storage-list compact';
     els.statsStorageList.textContent = '读取中...';
     els.statsSummary.innerHTML = '';
-    els.statsInsights.innerHTML = '';
     [
       els.hourChart,
       els.monthChart,
@@ -1573,7 +1435,6 @@
       });
       const stats = res.statistics || {};
       renderStatsSummary(stats);
-      renderStatsInsights(stats);
       renderRankChart(els.focalChart, sortFocalBuckets(stats.by_focal_bucket || []), { limit: 8, ordered: true });
       renderRankChart(els.lensChart, stats.by_lens || [], { limit: 8 });
       renderHourChart(els.hourChart, stats.by_hour || []);
@@ -1586,7 +1447,6 @@
       els.statsStorageList.className = 'settings-empty';
       els.statsStorageList.textContent = String(err);
       els.statsSummary.innerHTML = '';
-      els.statsInsights.innerHTML = '';
       [
         els.hourChart,
         els.monthChart,
@@ -1622,7 +1482,9 @@
   }
 
   function statsColor(index) {
-    return STATS_COLORS[Math.abs(Number(index || 0)) % STATS_COLORS.length];
+    const alphas = [0.92, 0.78, 0.64, 0.52, 0.42, 0.34, 0.28, 0.22];
+    const a = alphas[Math.abs(Number(index || 0)) % alphas.length];
+    return 'rgba(224,164,90,' + a + ')';
   }
 
   function renderStatsSummary(stats) {
@@ -1634,39 +1496,19 @@
     const lens = topChartRow(stats.by_lens);
     const aperture = topChartRow(stats.by_aperture);
     const iso = topChartRow(stats.by_iso_bucket);
-    const cards = [
-      { label: '照片总数', value: compactNumber(total), meta: '当前图库', accent: statsColor(0) },
-      { label: 'EXIF 完成', value: completePct + '%', meta: compactNumber(complete) + ' 已读 / ' + compactNumber(pending) + ' 待读', progress: completePct, accent: statsColor(1) },
-      { label: '常用焦段', value: focal ? focal.name : '未知', meta: focal ? rowPercent(focal, complete) : '暂无数据', progress: focal ? rowPercentValue(focal, complete) : 0, accent: statsColor(2) },
-      { label: '常用镜头', value: lens ? lens.name : '未知', meta: lens ? rowPercent(lens, complete) : '暂无数据', progress: lens ? rowPercentValue(lens, complete) : 0, accent: statsColor(3) },
-      { label: '常用光圈', value: aperture ? aperture.name : '未知', meta: aperture ? rowPercent(aperture, complete) : '暂无数据', progress: aperture ? rowPercentValue(aperture, complete) : 0, accent: statsColor(4) },
-      { label: '常用 ISO', value: iso ? iso.name : '未知', meta: iso ? rowPercent(iso, complete) : '暂无数据', progress: iso ? rowPercentValue(iso, complete) : 0, accent: statsColor(5) },
+    const cells = [
+      { label: '照片总数', value: compactNumber(total), meta: '当前图库' },
+      { label: 'EXIF 完成', value: completePct + '%', meta: compactNumber(complete) + ' 已读 / ' + compactNumber(pending) + ' 待读' },
+      { label: '常用焦段', value: focal ? focal.name : '未知', meta: focal ? rowPercent(focal, complete) : '暂无数据' },
+      { label: '常用镜头', value: lens ? lens.name : '未知', meta: lens ? rowPercent(lens, complete) : '暂无数据' },
+      { label: '常用光圈', value: aperture ? aperture.name : '未知', meta: aperture ? rowPercent(aperture, complete) : '暂无数据' },
+      { label: '常用 ISO', value: iso ? iso.name : '未知', meta: iso ? rowPercent(iso, complete) : '暂无数据' },
     ];
-    els.statsSummary.innerHTML = cards.map((card) => (
-      '<div class="stats-summary-card" style="--stats-accent:' + card.accent + '">' +
-      '<span>' + PS.escapeHtml(card.label) + '</span>' +
-      '<strong>' + PS.escapeHtml(card.value) + '</strong>' +
-      '<em>' + PS.escapeHtml(card.meta) + '</em>' +
-      (typeof card.progress === 'number'
-        ? '<div class="stats-summary-meter"><div style="width:' + clamp(card.progress, 0, 100) + '%"></div></div>'
-        : '') +
-      '</div>'
-    )).join('');
-  }
-
-  function renderStatsInsights(stats) {
-    const complete = Number(stats.exif_complete || 0);
-    const focal = topChartRow(stats.by_focal_bucket);
-    const lens = topChartRow(stats.by_lens);
-    const hour = topChartRow(stats.by_hour);
-    const pieces = [];
-    if (focal) pieces.push('主要焦段集中在 ' + focal.name + '，占已读 EXIF 的 ' + rowPercent(focal, complete));
-    if (lens) pieces.push('最常用镜头是 ' + lens.name + '，共 ' + compactNumber(lens.count) + ' 张');
-    if (hour) pieces.push('拍摄高峰在 ' + hour.name + ' 左右');
-    if (!pieces.length) pieces.push('读取 EXIF 后会生成拍摄习惯洞察');
-    els.statsInsights.innerHTML = pieces.map((item, index) => (
-      '<div class="stats-insight" style="--stats-accent:' + statsColor(index + 1) + '">' +
-      '<span aria-hidden="true"></span><p>' + PS.escapeHtml(item) + '</p>' +
+    els.statsSummary.innerHTML = cells.map((cell) => (
+      '<div class="stats-summary-item">' +
+      '<span>' + PS.escapeHtml(cell.label) + '</span>' +
+      '<strong>' + PS.escapeHtml(cell.value) + '</strong>' +
+      '<em>' + PS.escapeHtml(cell.meta) + '</em>' +
       '</div>'
     )).join('');
   }
@@ -1722,7 +1564,7 @@
     const max = data.reduce((best, row) => Math.max(best, row.count), 1);
     target.innerHTML = '<div class="distribution-chart">' + data.map((row, index) => {
       const width = Math.max(4, row.count / max * 100);
-      const color = statsColor(index + 2);
+      const color = statsColor(index);
       const tip = PS.escapeHtml(row.name + ' · ' + row.count + ' 张');
       return '<div class="distribution-row" data-chart-tip="' + tip + '">' +
         '<span>' + PS.escapeHtml(row.name) + '</span>' +
@@ -1746,7 +1588,7 @@
     target.innerHTML = '<div class="hour-rhythm">' + data.map((row) => {
       const height = Math.max(6, row.count / max * 100);
       const hour = row.name.slice(0, 2);
-      const color = statsColor(Math.floor(Number(hour) / 4));
+      const color = statsColor(row.count === max ? 0 : 1);
       const showLabel = ['00', '06', '12', '18', '23'].includes(hour);
       return '<div class="hour-cell" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '">' +
         '<div class="hour-bar"><div style="height:' + height.toFixed(1) + '%;background:' + color + '"></div></div>' +
@@ -1761,40 +1603,12 @@
       renderEmptyChart(target);
       return;
     }
-    target.innerHTML = '<div class="month-chart">' + data.map((row, index) => {
-      const color = statsColor(index);
+    target.innerHTML = '<div class="month-chart">' + data.map((row) => {
       const label = row.name.slice(2).replace('-', '/');
-      return '<div class="month-cell" style="border-bottom-color:' + color + '" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '">' +
+      return '<div class="month-cell" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '">' +
         '<span>' + PS.escapeHtml(label) + '</span><b>' + row.count + '</b>' +
         '</div>';
     }).join('') + '</div>';
-  }
-
-  function renderDonutChart(target, rows) {
-    const data = chartRows(rows, 8);
-    if (!data.length) {
-      renderEmptyChart(target);
-      return;
-    }
-    const total = data.reduce((sum, row) => sum + row.count, 0);
-    const circumference = 2 * Math.PI * 64;
-    let offset = 0;
-    const colors = ['#e0a45a', '#62d6aa', '#6ed6ff', '#c39bff', '#9ad36a', '#7db5ff', '#b7c7ff', '#6fcfbd'];
-    const segments = data.map((row, index) => {
-      const length = row.count / total * circumference;
-      const dash = length.toFixed(2) + ' ' + (circumference - length).toFixed(2);
-      const segment = '<circle class="donut-segment" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '" cx="92" cy="92" r="64" stroke="' + colors[index % colors.length] + '" stroke-dasharray="' + dash + '" stroke-dashoffset="' + (-offset).toFixed(2) + '"></circle>';
-      offset += length;
-      return segment;
-    }).join('');
-    const legend = data.map((row, index) => {
-      const percent = Math.round(row.count / total * 100);
-      return '<div class="chart-legend-row" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '"><span style="--swatch:' + colors[index % colors.length] + '"></span><b>' + PS.escapeHtml(row.name) + '</b><em>' + percent + '%</em></div>';
-    }).join('');
-    target.innerHTML = '<div class="donut-chart"><svg viewBox="0 0 184 184" role="img">' +
-      '<circle class="donut-base" cx="92" cy="92" r="64"></circle>' + segments +
-      '<text class="donut-total" x="92" y="88">' + total + '</text><text class="donut-caption" x="92" y="108">张</text>' +
-      '</svg><div class="chart-legend">' + legend + '</div></div>';
   }
 
   function focalBucketOrder(name) {

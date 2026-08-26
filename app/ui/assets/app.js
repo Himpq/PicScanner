@@ -28,7 +28,6 @@
   const quickEditPerfLog = PS.quickEditPerfLog;
   const SORT_OPTIONS = PS.SORT_OPTIONS;
   const SETTINGS_TABS = PS.SETTINGS_TABS;
-  const STATS_COLORS = PS.STATS_COLORS;
   const PROJECT_URL = PS.PROJECT_URL;
   const STATUS_LABELS = PS.STATUS_LABELS;
   const LIGHTBOX_MIN_ZOOM = PS.LIGHTBOX_MIN_ZOOM;
@@ -10873,7 +10872,7 @@
       if (!res || !res.success || !res.photo || !loadedUrl) {
         throw new Error(res && res.message ? res.message : '无法生成高清预览');
       }
-      const merged = PS.mergeLightboxCachePhoto(photoId, Object.assign({}, cachedPhoto, res.photo));
+      const merged = PS.mergeLightboxCachePhoto(photoId, PS.mergePhotoPreserve(cachedPhoto, res.photo));
       state.quickEdit.photo = merged;
       renderQuickEditMeta(merged, 'ready');
       loadQuickEditPreview(merged);

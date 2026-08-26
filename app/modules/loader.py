@@ -41,7 +41,7 @@ def _find_module_class(backend):
     return None
 
 
-def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=None) -> dict[str, ModuleHandle]:
+def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=None, scanner_ref=None) -> dict[str, ModuleHandle]:
     """扫描并加载所有模块，返回 {key: ModuleHandle}。
 
     push: 可选回调 push(event: str, data: dict)，模块可用它向前端推送事件
@@ -81,6 +81,8 @@ def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=
                     ctx["config"] = plugin_configs.get_config(key)
                 if push is not None:
                     ctx["push"] = push
+                if scanner_ref is not None:
+                    ctx["scanner"] = scanner_ref
                 instance.setup(ctx)
             raw_methods = instance.api_methods() or {}
             methods = {str(name): fn for name, fn in raw_methods.items() if callable(fn)}

@@ -72,7 +72,7 @@
     settingsOpen: false,
     settingsReturnTarget: 'workspace',
     statsOpen: false,
-    settingsTab: 'basic',
+    settingsTab: 'interface',
     sourceStages: new Map(),
     openModuleKey: '',
     previewQueue: [],
@@ -473,15 +473,12 @@
   ];
 
   const SETTINGS_TABS = [
-    { key: 'basic', label: '总览', hint: '当前图库与任务' },
     { key: 'interface', label: '界面', hint: '缩略图与参数面板' },
     { key: 'export', label: '导出', hint: '目录与命名模板' },
     { key: 'storage', label: '存储', hint: '已登记来源' },
     { key: 'shortcuts', label: '快捷键', hint: '查看现有键位' },
     { key: 'about', label: '关于', hint: '版本与项目' },
   ];
-
-  const STATS_COLORS = ['#8fa2d8', '#67b99a', '#d3ad4e', '#66b3cf', '#d88976', '#ad8ad7'];
 
   const PROJECT_URL = 'https://github.com/Himpq/PicScanner';
 
@@ -599,7 +596,6 @@
     settingsScreen: document.getElementById('settings-screen'),
     closeSettings: document.getElementById('close-settings'),
     settingsNav: document.getElementById('settings-nav'),
-    settingsTitle: document.getElementById('settings-title'),
     settingsBody: document.getElementById('settings-body'),
     statsScreen: document.getElementById('stats-screen'),
     closeStats: document.getElementById('close-stats'),
@@ -607,7 +603,6 @@
     statsStorageList: document.getElementById('stats-storage-list'),
     statsTabs: document.getElementById('stats-tabs'),
     statsSummary: document.getElementById('stats-summary'),
-    statsInsights: document.getElementById('stats-insights'),
     hourChart: document.getElementById('hour-chart'),
     monthChart: document.getElementById('month-chart'),
     lensChart: document.getElementById('lens-chart'),
@@ -781,7 +776,6 @@
     quickEditPerfLog,
     SORT_OPTIONS,
     SETTINGS_TABS,
-    STATS_COLORS,
     PROJECT_URL,
     STATUS_LABELS,
     EXIF_STATUS_LABELS,

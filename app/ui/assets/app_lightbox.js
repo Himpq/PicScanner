@@ -19,6 +19,24 @@
   const LIGHTBOX_INFO_MIN_HEIGHT = PS.LIGHTBOX_INFO_MIN_HEIGHT;
   const LIGHTBOX_INFO_MAX_HEIGHT = PS.LIGHTBOX_INFO_MAX_HEIGHT;
 
+  function mergePhotoPreserve(prev, next) {
+    const out = Object.assign({}, prev || {});
+    if (!next || typeof next !== 'object') return out;
+    Object.keys(next).forEach((key) => {
+      const value = next[key];
+      if (value === null || value === undefined) return;
+      if (typeof value === 'string') {
+        // note/category 允许清空（空字符串是有意义的删除）
+        if (value === '' && key !== 'note' && key !== 'category') return;
+        if (value.trim() === '' && key !== 'note' && key !== 'category') return;
+      }
+      if ((key === 'width' || key === 'height' || key === 'focal_length' || key === 'focal_length_35mm') && Number(value) === 0) return;
+      if (typeof value === 'number' && !Number.isFinite(value)) return;
+      out[key] = value;
+    });
+    return out;
+  }
+
   function formatZoomValue(zoom) {
     return zoom.toFixed(2) + '×';
   }
@@ -161,7 +179,8 @@
     const pane = state.compare.panes[index];
     if (!pane || !photo) return null;
     const photoId = PS.comparePhotoId(photo);
-    const merged = Object.assign({}, photoId ? (state.photoCache.get(photoId) || {}) : {}, pane.photo || {}, photo);
+    let merged = mergePhotoPreserve(photoId ? (state.photoCache.get(photoId) || {}) : {}, pane.photo || {});
+    merged = mergePhotoPreserve(merged, photo);
     pane.photo = merged;
     if (photoId) {
       state.photoCache.set(photoId, merged);
@@ -210,10 +229,14 @@
 
   function mergeLightboxCachePhoto(photoId, nextPhoto) {
     const current = state.photoCache.get(photoId) || {};
-    const merged = Object.assign({}, current, nextPhoto || {});
+    const merged = mergePhotoPreserve(current, nextPhoto || {});
     state.photoCache.set(photoId, merged);
+    // 同时更新 exifCache，避免后续打开直接命中被清空的旧数据
+    if (state.exifCache.has(photoId) && nextPhoto) {
+      state.exifCache.set(photoId, mergePhotoPreserve(state.exifCache.get(photoId) || {}, nextPhoto || {}));
+    }
     if (state.lightbox.photo && Number(state.lightbox.photo.id || 0) === photoId) {
-      state.lightbox.photo = Object.assign({}, state.lightbox.photo, merged);
+      state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
       updateLightboxInfo(state.lightbox.photo);
     }
     state.compare.panes.forEach((pane, index) => {
@@ -337,7 +360,7 @@
         if (!isCurrent()) return;
         const loadedUrl = res && res.photo ? (res.photo.lightbox_url || res.photo.original_url || '') : '';
         if (!res || !res.success || !res.photo || !loadedUrl) throw new Error(res && res.message ? res.message : '无法生成高清预览');
-        const merged = Object.assign({}, cachedPhoto, res.photo);
+        const merged = mergePhotoPreserve(cachedPhoto, res.photo);
         state.photoCache.set(photoId, merged);
         mergeComparePanePhoto(index, merged);
         PS.renderComparePanel();
@@ -941,9 +964,10 @@
         if (!res || !res.success || !res.photo || !loadedUrl) {
           throw new Error(res && res.message ? res.message : '无法生成高清预览');
         }
-        const merged = Object.assign({}, cachedPhoto, res.photo);
+        const merged = mergePhotoPreserve(cachedPhoto, res.photo);
         state.photoCache.set(photoId, merged);
-        state.lightbox.photo = merged;
+        // 保留当前灯箱中已有的完整 EXIF，避免被预览接口的空字段覆盖
+        state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
         const card = els.gallery.querySelector('[data-photo-id="' + photoId + '"]');
         if (card) {
           const img = card.querySelector('img[data-photo-id]');
@@ -1244,18 +1268,22 @@
 
     const cached = state.exifCache.get(photo.id);
     if (cached) {
-      state.lightbox.photo = cached;
-      updateLightboxInfo(cached);
+      const mergedCached = mergePhotoPreserve(state.photoCache.get(Number(photo.id)) || photo, cached);
+      state.photoCache.set(Number(photo.id), mergedCached);
+      state.lightbox.photo = mergedCached;
+      updateLightboxInfo(mergedCached);
       updateLightboxView();
       updateLightboxNavButtons();
       return;
     }
     call('get_photo_exif', photo.id).then((res) => {
       if (!res || !res.success || !state.lightbox.photo || state.lightbox.photo.id !== photo.id) return;
-      state.exifCache.set(photo.id, res.photo);
-      state.photoCache.set(Number(photo.id), res.photo);
-      state.lightbox.photo = res.photo;
-      updateLightboxInfo(res.photo);
+      const prev = state.photoCache.get(Number(photo.id)) || state.lightbox.photo || {};
+      const merged = mergePhotoPreserve(prev, res.photo);
+      state.photoCache.set(Number(photo.id), merged);
+      state.exifCache.set(photo.id, merged);
+      state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
+      updateLightboxInfo(state.lightbox.photo);
       updateLightboxView();
       updateLightboxNavButtons();
     }).catch(console.warn);
@@ -1532,6 +1560,7 @@
   PS.loadCompareExif = loadCompareExif;
   PS.lightboxLocalUrl = lightboxLocalUrl;
   PS.lightboxSourceUrl = lightboxSourceUrl;
+  PS.mergePhotoPreserve = mergePhotoPreserve;
   PS.mergeLightboxCachePhoto = mergeLightboxCachePhoto;
   PS.warmLightboxCache = warmLightboxCache;
   PS.comparePaneFromEvent = comparePaneFromEvent;

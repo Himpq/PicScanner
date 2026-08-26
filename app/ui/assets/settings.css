@@ -1,123 +1,51 @@
 /* ============================================================
-   PicScanner 设置页 · 工具风主题（iTunes 结构 × 应用深色）
-   颜色全部走语义变量；换主题 = 换一组变量值。
-   当前默认深色；.settings-screen.light 为预留浅色方案。
+   PicScanner 设置页 · 顶部标签 + 居中单列
+   与统计页同一套标签语言：顶栏下划线标签，内容列居中，
+   面板 = 1px 描边圆角卡，行 = 发丝线分隔，正文 14px。
    ============================================================ */
 
 .settings-screen {
-  /* —— 深色（当前）—— */
-  --st-chrome: #2a2a2e;          /* 侧栏 / 工具条 */
-  --st-content: #19191b;         /* 内容区 */
-  --st-panel: #212124;           /* 分组框底 */
-  --st-panel-head: #2a2a2e;      /* 分组标题条 */
-  --st-line-strong: #3d3d43;     /* 结构边框 */
-  --st-hairline: #2f2f34;        /* 行分隔线 */
-  --st-text: #eaeaec;
-  --st-muted: #a0a0a7;
-  --st-faint: #76767d;
-  --st-accent: #e0a45a;          /* 应用主色：暖琥珀 */
-  --st-accent-deep: #b97f36;
-  --st-on-accent: #241505;       /* 琥珀底上的文字 */
-  --st-accent-ring: rgba(224, 164, 90, 0.32);
-  --st-btn-top: #34343a;
-  --st-btn-bottom: #29292e;
-  --st-btn-border: #47474d;
-  --st-btn-hover-top: #3c3c43;
-  --st-btn-hover-bottom: #2f2f35;
-  --st-btn-border-hover: #55555c;
-  --st-btn-active: #232327;
-  --st-primary-top: #efb46c;
-  --st-primary-bottom: #d18f3f;
-  --st-primary-border: #9c6924;
-  --st-input-bg: #141416;
-  --st-kbd-face-top: #34343a;
-  --st-kbd-face-bottom: #2b2b30;
-  --st-kbd-edge: #131315;
-  --st-hover-wash: rgba(255, 255, 255, 0.055);
-  background: var(--st-content);
+  --st-hairline: rgba(255, 255, 255, 0.055);
+  background: var(--bg);
 }
 
-/* —— 浅色方案（后续做主题切换时启用）——
-.settings-screen.light {
-  --st-chrome: #ececec;
-  --st-content: #ffffff;
-  --st-panel: #ffffff;
-  --st-panel-head: #fafafa;
-  --st-line-strong: #cfcfcf;
-  --st-hairline: #e4e4e4;
-  --st-text: #1d1d1f;
-  --st-muted: #6e6e73;
-  --st-faint: #86868b;
-  --st-accent: #3072e4;
-  --st-accent-deep: #2a63cc;
-  --st-on-accent: #ffffff;
-  --st-accent-ring: rgba(48, 114, 228, 0.25);
-  --st-btn-top: #ffffff;
-  --st-btn-bottom: #f3f3f3;
-  --st-btn-border: #b9b9b9;
-  --st-btn-hover-top: #fdfdfd;
-  --st-btn-hover-bottom: #e9e9e9;
-  --st-btn-border-hover: #a5a5a5;
-  --st-btn-active: #e2e2e2;
-  --st-primary-top: #4b8df0;
-  --st-primary-bottom: #2f6fe0;
-  --st-primary-border: #2a66cf;
-  --st-input-bg: #ffffff;
-  --st-kbd-face-top: #ffffff;
-  --st-kbd-face-bottom: #f4f4f4;
-  --st-kbd-edge: #dcdcdc;
-  --st-hover-wash: rgba(0, 0, 0, 0.06);
-}
-*/
+/* ---------- 顶栏（返回 + 标签） ---------- */
 
-.settings-screen {
-  grid-template-columns: 216px minmax(0, 1fr);
-}
-
-/* ---------- 侧栏 ---------- */
-
-.settings-side {
-  background: var(--st-chrome);
-  border-right: 1px solid var(--st-line-strong);
-  padding: 16px 10px;
-}
-
-.settings-side .brand-block {
-  padding: 2px 8px 12px;
-}
-
-.settings-side .brand-title {
-  color: var(--st-text);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.settings-side .brand-sub {
-  margin-top: 2px;
-  color: var(--st-faint);
-  font-size: 10px;
-  letter-spacing: .05em;
+.settings-topbar {
+  flex: none;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .settings-nav {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
   gap: 2px;
-  margin-top: 10px;
 }
 
 .settings-nav button {
-  min-height: 26px;
+  position: relative;
   height: auto;
+  min-height: 0;
+  width: auto;
   border: 0;
-  border-radius: 4px;
-  padding: 4px 10px;
-  display: block;
+  border-radius: 0;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
   background: transparent;
-  color: var(--st-text);
-  font-size: 13px;
-  text-align: left;
+  color: rgba(255, 255, 255, 0.50);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: color .16s ease, background-color .16s ease;
 }
 
-.settings-nav button span {
+.settings-nav .settings-nav-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -125,59 +53,42 @@
 }
 
 .settings-nav button:hover {
-  background: var(--st-hover-wash);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .settings-nav button.active {
-  background: var(--st-accent);
-  color: var(--st-on-accent);
-  font-weight: 600;
+  color: #fff;
 }
 
-.settings-nav button.active span {
-  color: var(--st-on-accent);
+.settings-nav button::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: transparent;
 }
 
-/* ---------- 主区与工具条 ---------- */
-
-.settings-main {
-  background: var(--st-content);
+.settings-nav button.active::after {
+  background: var(--accent);
 }
 
-.settings-toolbar {
-  background: var(--st-chrome);
-  border-bottom: 1px solid var(--st-line-strong);
-}
+/* ---------- 滚动区与居中内容列 ---------- */
 
-.settings-screen .ghost-btn {
-  min-height: 24px;
-  border: 1px solid var(--st-btn-border);
-  border-radius: 4px;
-  background: linear-gradient(var(--st-btn-top), var(--st-btn-bottom));
-  color: var(--st-text);
-  font-size: 12.5px;
-  padding: 0 12px;
-}
-
-.settings-screen .ghost-btn:hover {
-  background: linear-gradient(var(--st-btn-hover-top), var(--st-btn-hover-bottom));
-  border-color: var(--st-btn-border-hover);
-}
-
-.settings-content {
-  padding: 18px clamp(16px, 2.5vw, 28px) 32px;
-}
-
-.settings-content h2 {
-  margin: 0 0 12px;
-  color: var(--st-text);
-  font-size: 20px;
-  line-height: 1.15;
-  font-weight: 700;
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
 }
 
 .settings-body {
-  max-width: 880px;
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 24px 20px 44px;
 }
 
 /* ---------- 布局栈 ---------- */
@@ -185,154 +96,22 @@
 .settings-stack {
   min-width: 0;
   display: grid;
-  gap: 22px;
+  gap: 12px;
 }
 
-/* ---------- 来源概要 ---------- */
-
-.settings-hero {
-  min-width: 0;
-  display: grid;
-  gap: 10px;
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--st-hairline);
-}
-
-.settings-hero-copy {
-  min-width: 0;
-  display: grid;
-  align-content: start;
-  gap: 3px;
-}
-
-.settings-hero-copy p {
-  color: var(--st-text);
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.settings-hero-copy small {
-  color: var(--st-muted);
-  font-size: 11px;
-}
-
-.settings-hero-actions {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.settings-action {
-  min-width: 0;
-  min-height: 24px;
-  border: 1px solid var(--st-btn-border);
-  border-radius: 4px;
-  background: linear-gradient(var(--st-btn-top), var(--st-btn-bottom));
-  color: var(--st-text);
-  display: inline-flex;
-  align-items: center;
-  padding: 0 13px;
-  font-size: 12.5px;
-  cursor: default;
-}
-
-.settings-action:hover {
-  background: linear-gradient(var(--st-btn-hover-top), var(--st-btn-hover-bottom));
-  border-color: var(--st-btn-border-hover);
-}
-
-.settings-action:active {
-  background: var(--st-btn-active);
-}
-
-.settings-action.primary {
-  border-color: var(--st-primary-border);
-  background: linear-gradient(var(--st-primary-top), var(--st-primary-bottom));
-  color: var(--st-on-accent);
-  font-weight: 600;
-}
-
-.settings-action.primary:hover {
-  filter: brightness(1.05);
-}
-
-.settings-action:disabled {
-  opacity: .45;
-}
-
-.settings-action span,
-.settings-action small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---------- 状态摘要行 ---------- */
-
-.settings-metrics {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--st-hairline);
-}
-
-.settings-metric {
-  min-width: 0;
-  min-height: 0;
-  padding: 2px 14px 2px 0;
-  display: grid;
-  align-content: start;
-  gap: 3px;
-}
-
-.settings-metric + .settings-metric {
-  border-left: 1px solid var(--st-hairline);
-  padding-left: 14px;
-}
-
-.settings-metric small,
-.settings-metric span {
-  min-width: 0;
-  color: var(--st-muted);
-  font-size: 10.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-metric strong {
-  min-width: 0;
-  color: var(--st-text);
-  font-size: 16px;
-  line-height: 1.15;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---------- 分组框 ---------- */
+/* ---------- 分组面板（标题内嵌）---------- */
 
 .settings-panel {
   min-width: 0;
-  border: 1px solid var(--st-line-strong);
-  border-radius: 6px;
-  background: var(--st-panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
   overflow: hidden;
 }
 
 .settings-panel-head {
   min-width: 0;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--st-hairline);
-  background: var(--st-panel-head);
+  padding: 13px 16px 9px;
 }
 
 .settings-panel-head > div {
@@ -341,16 +120,9 @@
 
 .settings-panel-head h3 {
   margin: 0;
-  color: var(--st-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-
-.settings-panel-head p {
-  margin: 2px 0 0;
-  color: var(--st-faint);
-  font-size: 11px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .settings-panel-body {
@@ -362,31 +134,31 @@
 
 /* ---------- 行条目 ---------- */
 
-.settings-rows {
+.settings-rows,
+.settings-row-item,
+.settings-switch-row {
   min-width: 0;
-  display: grid;
-  gap: 0;
 }
 
 .settings-row-item {
-  min-width: 0;
-  min-height: 34px;
+  min-height: 50px;
   border-bottom: 1px solid var(--st-hairline);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
-  padding: 5px 12px;
+  padding: 10px 16px;
 }
 
-.settings-row-item:last-child {
+.settings-row-item:last-child,
+.settings-panel-body > *:last-child {
   border-bottom: 0;
 }
 
 .settings-row-item > div {
   min-width: 0;
   display: grid;
-  gap: 1px;
+  gap: 2px;
 }
 
 .settings-row-item strong,
@@ -399,38 +171,120 @@
 }
 
 .settings-row-item strong {
-  color: var(--st-text);
-  font-size: 13px;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 500;
 }
 
+.settings-row-item strong .about-version {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .settings-row-item small {
-  color: var(--st-muted);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .settings-row-item > span {
-  color: var(--st-muted);
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 标签在上、控件在下的整行 */
+.settings-row-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.settings-row-controls {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-row-controls .ghost-btn {
+  height: 30px;
+  padding: 0 12px;
   font-size: 13px;
+  flex: none;
+}
+
+.settings-path-chip {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--st-hairline);
+  border-radius: 7px;
+  padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.settings-path-chip.empty {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.settings-text-input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  padding: 0 11px;
+  font-size: 13px;
+  outline: none;
+}
+
+.settings-text-input:focus {
+  border-color: rgba(224, 164, 90, 0.56);
+  background: rgba(224, 164, 90, 0.08);
+}
+
+.settings-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 12px;
+}
+
+.settings-token-row code {
+  border: 1px solid var(--st-hairline);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11.5px;
 }
 
 /* ---------- 开关行 ---------- */
 
 .settings-switch-row {
-  min-width: 0;
-  min-height: 34px;
+  min-height: 50px;
   border-bottom: 1px solid var(--st-hairline);
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 40px;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
-  padding: 5px 12px;
+  padding: 10px 16px;
+  cursor: default;
 }
 
 .settings-switch-row > span {
   min-width: 0;
   display: grid;
-  gap: 1px;
+  gap: 2px;
 }
 
 .settings-switch-row strong,
@@ -438,18 +292,13 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-switch-row strong {
-  color: var(--st-text);
-  font-size: 13px;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 500;
-}
-
-.settings-switch-row small {
-  color: var(--st-muted);
-  font-size: 11px;
-  line-height: 1.35;
 }
 
 .settings-switch-row input {
@@ -460,11 +309,12 @@
 
 .settings-switch-row i {
   position: relative;
-  width: 34px;
-  height: 19px;
-  border: 1px solid var(--st-line-strong);
+  width: 38px;
+  height: 21px;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  background: #38383e;
+  background: #26262b;
+  transition: background .15s ease, border-color .15s ease;
 }
 
 .settings-switch-row i::after {
@@ -472,8 +322,8 @@
   position: absolute;
   left: 2px;
   top: 2px;
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: #c9c9ce;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
@@ -481,27 +331,60 @@
 }
 
 .settings-switch-row input:checked + i {
-  border-color: var(--st-accent-deep);
-  background: var(--st-accent);
+  border-color: rgba(224, 164, 90, 0.8);
+  background: var(--accent);
 }
 
 .settings-switch-row input:checked + i::after {
-  transform: translateX(15px);
+  transform: translateX(17px);
   background: #fff7ec;
 }
 
-/* ---------- 滑杆行 ---------- */
+/* ---------- 滑杆行：标签一行，滑杆整行在下 ---------- */
 
 .settings-range-row {
   min-width: 0;
+  padding: 12px 16px 14px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 60px auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "label meta reset"
+    "slider slider slider";
+  gap: 10px 12px;
   align-items: center;
-  padding: 9px 12px;
+  border-bottom: 1px solid var(--st-hairline);
+}
+
+.settings-range-row:last-child,
+.settings-panel-body > .settings-range-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-range-row > span {
+  grid-area: label;
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.settings-range-row output {
+  grid-area: meta;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.settings-range-row .ghost-btn {
+  grid-area: reset;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .settings-range-row input[type="range"] {
+  grid-area: slider;
   width: 100%;
   height: 22px;
   margin: 0;
@@ -513,12 +396,12 @@
 .settings-range-row input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   border-radius: 999px;
-  background: var(--st-line-strong);
+  background: #2c2c31;
 }
 
 .settings-range-row input[type="range"]::-webkit-slider-thumb {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   border: 1px solid #585860;
   border-radius: 50%;
   background: linear-gradient(#3f3f46, #2e2e33);
@@ -528,39 +411,31 @@
   -webkit-appearance: none;
 }
 
-.settings-range-row > span {
-  color: var(--st-text);
-  font-size: 13px;
-}
-
-.settings-range-row output {
-  min-width: 0;
-  color: var(--st-text);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
 /* ---------- 内联工具行 ---------- */
 
 .settings-inline-tools {
   min-width: 0;
-  min-height: 34px;
-  border-bottom: 1px solid var(--st-hairline);
+  min-height: 50px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  padding: 5px 12px;
+  padding: 10px 16px;
 }
 
 .settings-inline-tools span {
   min-width: 0;
-  color: var(--st-muted);
-  font-size: 13px;
+  color: var(--text);
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-inline-tools .ghost-btn {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 /* ---------- 快捷键页 ---------- */
@@ -569,31 +444,40 @@
   min-width: 0;
   display: grid;
   gap: 0;
+  padding: 0 16px;
 }
 
-.settings-shortcut-group + .settings-shortcut-group {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--st-hairline);
+.settings-shortcut-group:last-child {
+  padding-bottom: 10px;
 }
 
 .settings-shortcut-group h3 {
-  margin: 0 0 4px;
-  color: var(--st-muted);
-  font-size: 11px;
+  margin: 0;
+  padding: 11px 0 6px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 12.5px;
   font-weight: 700;
-  letter-spacing: .04em;
+}
+
+.settings-shortcut-group + .settings-shortcut-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--st-hairline);
 }
 
 .settings-shortcut-row {
   min-width: 0;
-  min-height: 27px;
+  min-height: 38px;
   border-bottom: 1px solid var(--st-hairline);
   display: grid;
-  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(150px, 250px) minmax(0, 1fr);
+  gap: 14px;
   align-items: center;
-  padding: 3px 2px;
+  padding: 4px 0;
+}
+
+.settings-shortcut-group .settings-shortcut-row:last-child {
+  border-bottom: 0;
 }
 
 .settings-shortcut-keys {
@@ -604,204 +488,92 @@
 }
 
 .settings-shortcut-row kbd {
-  min-width: 22px;
-  height: 19px;
-  border: 1px solid var(--st-btn-border);
-  border-radius: 4px;
-  background: linear-gradient(var(--st-kbd-face-top), var(--st-kbd-face-bottom));
-  box-shadow: 0 1px 0 var(--st-kbd-edge);
-  color: var(--st-text);
+  min-width: 24px;
+  height: 23px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  color: var(--text);
   display: inline-grid;
   place-items: center;
-  padding: 0 6px;
+  padding: 0 7px;
   font: inherit;
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .settings-shortcut-row > span:last-child {
   min-width: 0;
-  color: var(--st-text);
-  font-size: 13px;
+  color: var(--text);
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ---------- 导出页 ---------- */
-
-.settings-screen .export-card {
-  border: 1px solid var(--st-line-strong);
-  border-radius: 6px;
-  background: var(--st-panel);
-}
-
-.settings-screen .export-row,
-.settings-screen .export-path-row {
-  border-color: var(--st-hairline);
-  color: var(--st-text);
-}
-
-.settings-screen .export-status {
-  color: var(--st-muted);
-}
-
-.settings-screen .export-template-input,
-.settings-screen .export-path {
-  border: 1px solid var(--st-btn-border);
-  border-radius: 4px;
-  background: var(--st-input-bg);
-  color: var(--st-text);
-  font-size: 12px;
-}
-
-.settings-screen .export-template-input:focus,
-.settings-screen .export-path:focus {
-  outline: none;
-  border-color: var(--st-accent);
-  box-shadow: 0 0 0 2px var(--st-accent-ring);
-}
-
-.settings-screen .export-token-list code {
-  border: 1px solid var(--st-line-strong);
-  border-radius: 4px;
-  background: var(--st-input-bg);
-  color: var(--st-muted);
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 11px;
 }
 
 /* ---------- 存储页来源列表 ---------- */
 
-.settings-main .storage-list {
-  margin-top: 10px;
-}
-
-.settings-main .storage-row {
-  border: 1px solid var(--st-line-strong);
-  border-radius: 6px;
-  background: var(--st-panel);
-  color: var(--st-text);
-}
-
-.settings-main .storage-cover {
-  border: 1px solid var(--st-hairline);
-}
-
-.settings-main .storage-path {
-  color: var(--st-text);
-}
-
-.settings-main .storage-id,
-.settings-main .storage-source-id,
-.settings-main .storage-counts {
-  color: var(--st-muted);
-  font-size: 11px;
-  font-family: Consolas, "Courier New", monospace;
-}
-
-/* ---------- 关于页 ---------- */
-
-.settings-about-panel {
-  min-width: 0;
+.settings-body .storage-list {
   display: grid;
-  gap: 12px;
-}
-
-.about-title {
-  color: var(--st-text);
-}
-
-.about-version,
-.about-author {
-  color: var(--st-muted);
-}
-
-.about-link {
-  color: var(--st-accent);
-}
-
-.about-meta {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
-  align-items: center;
-  color: var(--st-muted);
-  font-size: 12px;
 }
 
-.about-meta b {
-  min-width: 0;
-  color: var(--st-text);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.settings-body .storage-row {
+  min-height: 92px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  grid-template-columns: 148px minmax(0, 1fr);
+}
+
+.settings-body .storage-cover {
+  border-right: 1px solid var(--st-hairline);
+}
+
+.settings-body .storage-info {
+  padding: 12px 16px 12px 10px;
+  gap: 6px;
+}
+
+.settings-body .storage-info .storage-path {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.settings-body .storage-id,
+.settings-body .storage-source-id,
+.settings-body .storage-counts {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 /* ---------- 其他 ---------- */
 
 .settings-empty {
-  color: var(--st-muted);
-  font-size: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
   text-align: center;
   padding: 24px 0;
 }
 
 /* ---------- 窄屏适配 ---------- */
 
-@media (max-width: 920px) {
-  .settings-screen {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .settings-side {
-    border-right: 0;
-    border-bottom: 1px solid var(--st-line-strong);
-    padding: 10px;
+@media (max-width: 720px) {
+  .settings-topbar {
+    gap: 6px;
+    padding: 0 10px;
   }
 
   .settings-nav {
-    display: flex;
-    gap: 4px;
     overflow: auto;
+    scrollbar-width: none;
   }
 
-  .settings-nav button {
-    min-width: 88px;
-    text-align: center;
-  }
-
-  .settings-hero {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px 0;
-  }
-
-  .settings-metric:nth-child(odd) {
-    border-left: 0;
-    padding-left: 0;
-  }
-}
-
-@media (max-width: 620px) {
-  .settings-content {
-    padding: 14px 12px 24px;
-  }
-
-  .settings-hero-actions,
-  .settings-metrics,
-  .settings-range-row,
-  .settings-inline-tools,
-  .settings-shortcut-row {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-row-item {
-    grid-template-columns: 1fr;
+  .settings-body {
+    padding: 18px 14px 32px;
   }
 }

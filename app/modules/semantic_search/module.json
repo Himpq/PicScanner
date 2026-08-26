@@ -1,0 +1,7 @@
+{
+  "key": "semantic_search",
+  "name": "语义搜索",
+  "version": "0.1.0",
+  "description": "基于 Chinese-CLIP 的语义搜图（EXIF 下方等待式向量扫描）",
+  "frontend": "semantic_search.js"
+}

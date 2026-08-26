@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { call } from '../bridge.js';
+import SettingsSwitch from './SettingsSwitch.vue';
 
 const DEFAULT_TEMPLATE = '{origin_name}';
 const TOKENS = ['{origin_name}', '{date}', '{Y}', '{M}', '{D}', '{len_name}', '{aperture}', '{iso}', '{shutter}'];
@@ -79,8 +80,8 @@ function clearFolder() {
   save({ destination: '' });
 }
 
-function onEnabledChange() {
-  save({ enabled: enabled.value });
+function onEnabledChange(value) {
+  save({ enabled: value === true });
 }
 
 function onTemplateBlur() {
@@ -98,34 +99,45 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="export-settings">
-    <section class="export-card">
-      <label class="export-switch">
-        <input type="checkbox" v-model="enabled" @change="onEnabledChange" /> <span>启用导出预设</span>
-      </label>
-      <div class="export-row">
-        <label>自动导出目录</label>
-        <div class="export-path-row">
-          <div class="export-path" :class="{ empty: !destination }">{{ destination || '未设置' }}</div>
-          <button class="ghost-btn" type="button" @click="chooseFolder">选择目录</button>
-          <button class="ghost-btn" type="button" @click="clearFolder">清空</button>
+  <div class="settings-stack">
+    <section class="settings-panel">
+      <div class="settings-panel-head">
+        <div>
+          <h3>导出预设</h3>
         </div>
       </div>
-      <div class="export-row">
-        <label>命名模板</label>
-        <input
-          class="export-template-input"
-          type="text"
-          spellcheck="false"
-          v-model="template"
-          @blur="onTemplateBlur"
-          @keydown="onTemplateKeydown"
+      <div class="settings-panel-body">
+        <SettingsSwitch
+          title="启用导出预设"
+          :modelValue="enabled"
+          @update:modelValue="onEnabledChange"
         />
+        <div class="settings-row-item">
+          <div>
+            <strong>自动导出目录</strong>
+            <small>{{ status || statusHint }}</small>
+          </div>
+          <div class="settings-row-controls">
+            <span class="settings-path-chip" :class="{ empty: !destination }">{{ destination || '未设置' }}</span>
+            <button type="button" class="ghost-btn" @click="chooseFolder">选择目录</button>
+            <button type="button" class="ghost-btn" @click="clearFolder">清空</button>
+          </div>
+        </div>
+        <div class="settings-row-item settings-row-stacked">
+          <div><strong>命名模板</strong></div>
+          <input
+            class="settings-text-input"
+            type="text"
+            spellcheck="false"
+            v-model="template"
+            @blur="onTemplateBlur"
+            @keydown="onTemplateKeydown"
+          />
+        </div>
+        <div class="settings-token-row">
+          <code v-for="token in TOKENS" :key="token">{{ token }}</code>
+        </div>
       </div>
-      <div class="export-token-list">
-        <code v-for="token in TOKENS" :key="token">{{ token }}</code>
-      </div>
-      <div class="export-status">{{ status || statusHint }}</div>
     </section>
   </div>
 </template>

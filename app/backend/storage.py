@@ -1758,6 +1758,20 @@ class Storage:
             row = conn.execute(f"SELECT COUNT(*) AS c FROM photos {where}", args).fetchone()
             return int(row["c"] or 0)
 
+    def iter_indexable_photos(self, source_id: str | None = None, root_path: str | None = None) -> list[dict]:
+        """供向量/索引类插件使用：返回可索引照片的最小引用集。
+
+        过滤 renderable 且未隐藏的照片，返回 [{id, source_id, path, relative_path, mtime, size}, ...]。
+        """
+        display_filter = self._display_filter("p")
+        root_filter, args = self._source_where(source_id, root_path, "p")
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT p.id, p.source_id, p.path, p.relative_path, p.mtime, p.size FROM photos AS p WHERE {display_filter}{root_filter}",
+                args,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def pending_exif_photos(
         self,
         root_path: str | None = None,

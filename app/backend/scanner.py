@@ -41,6 +41,7 @@ class ScannerManager:
         self._scan_stop = threading.Event()
         self._exif_stop = threading.Event()
         self._state = self._initial_state()
+        self._scan_finished_hooks: list = []
 
     def _initial_state(self) -> dict:
         return {
@@ -86,6 +87,18 @@ class ScannerManager:
             self._state["running"] = bool(
                 self._state.get("scan_running") or self._state.get("exif_running")
             )
+
+    def on_scan_finished(self, callback) -> None:
+        """注册扫描完成钩子。回调签名：callback(root_path, source_id, status)。通用扩展点，任何插件可用。"""
+        if callable(callback):
+            self._scan_finished_hooks.append(callback)
+
+    def _invoke_scan_finished(self, root_path: str, source_id: str, status: str) -> None:
+        for cb in list(self._scan_finished_hooks):
+            try:
+                cb(root_path, source_id, status)
+            except Exception:
+                traceback.print_exc()
 
     def _root_is_scanning(self, root_path: str, source_id: str | None = None) -> bool:
         with self._lock:
@@ -259,6 +272,7 @@ class ScannerManager:
                     message=f"扫描已停止：本次新增 {added} 张",
                     finished=True,
                 )
+                self._invoke_scan_finished(root_text, source_id, "stopped")
                 return
 
             status = "done" if exhausted else "paused"
@@ -284,6 +298,7 @@ class ScannerManager:
                 message=message,
                 finished=True,
             )
+            self._invoke_scan_finished(root_text, source_id, status)
         except Exception as exc:
             traceback.print_exc()
             self._set_state(
@@ -294,6 +309,7 @@ class ScannerManager:
                 message=str(exc),
             )
             storage.update_session(session_id, status="failed", message=str(exc), finished=True)
+            self._invoke_scan_finished(root_text, source_id, "failed")
 
     def _run_exif(self, root_path: str, source_id: str) -> None:
         processed = 0

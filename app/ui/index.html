@@ -1,11 +1,11 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=warm-accent-2" />
-  <link rel="stylesheet" href="assets/settings.css?v=settings-polish-1" />
+  <link rel="stylesheet" href="assets/style.css?v=native-stats-1" />
+  <link rel="stylesheet" href="assets/settings.css?v=settings-tabs-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=warm-accent-1" />
 </head>
@@ -137,23 +137,13 @@
       </nav>
 
       <section id="settings-screen" class="settings-screen hidden">
-        <aside class="settings-side">
-          <div class="brand-block">
-            <div class="brand-title">设置</div>
-            <div class="brand-sub">PicScanner</div>
-          </div>
-          <div id="settings-nav" class="settings-nav"></div>
-        </aside>
-        <section class="settings-main">
-          <div class="settings-toolbar">
-            <button id="close-settings" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
-            <div class="toolbar-spacer"></div>
-          </div>
-          <div class="settings-content">
-            <h2 id="settings-title"></h2>
-            <div id="settings-body" class="settings-body"></div>
-          </div>
-        </section>
+        <div class="settings-topbar">
+          <button id="close-settings" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
+          <nav id="settings-nav" class="settings-nav" aria-label="设置分页"></nav>
+        </div>
+        <div class="settings-scroll">
+          <div id="settings-body" class="settings-body"></div>
+        </div>
       </section>
 
       <section id="stats-screen" class="stats-screen hidden">
@@ -178,7 +168,6 @@
             </div>
             <div id="stats-pane-overview" class="stats-pane active" data-stats-pane="overview">
               <div id="stats-summary" class="stats-summary"></div>
-              <div id="stats-insights" class="stats-insights"></div>
             </div>
             <div id="stats-pane-gear" class="stats-pane" data-stats-pane="gear">
               <div class="stats-grid stats-grid-gear">
@@ -343,11 +332,11 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=settings-polish-1"></script>
-  <script src="assets/app_core.js?v=stats-tabs-20260808-1"></script>
-  <script src="assets/app_gallery.js?v=flat-settings-1"></script>
+  <script src="assets/vue/picscanner-vue.js?v=settings-compact-1"></script>
+  <script src="assets/app_core.js?v=settings-tabs-1"></script>
+  <script src="assets/app_gallery.js?v=settings-tabs-1"></script>
   <script src="assets/app_lightbox.js?v=lightbox-center-zoom-20260805-1"></script>
   <script src="assets/app_modules.js?v=modules-20260723-2"></script>
-  <script src="assets/app.js?v=frame-axis-space-20260819-1"></script>
+  <script src="assets/app.js?v=native-stats-1"></script>
 </body>
 </html>

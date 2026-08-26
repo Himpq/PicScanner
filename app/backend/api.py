@@ -124,7 +124,7 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         super().__init__()
         self._plugin_configs = PluginConfigStore(DATA_DIR)
         self._modules = discover_modules(
-            DATA_DIR, storage, plugin_configs=self._plugin_configs, push=self._module_push
+            DATA_DIR, storage, plugin_configs=self._plugin_configs, push=self._module_push, scanner_ref=scanner
         )
 
     def _module_push(self, event, data):

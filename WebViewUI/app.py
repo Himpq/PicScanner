@@ -13,6 +13,8 @@ app.py - WebViewApp 主类
     app.run()
 """
 
+import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -170,6 +172,19 @@ class WebViewApp:
         win.events.shown += self._on_shown
         win.events.loaded += self._on_loaded
 
+        def _on_closed():
+            print("[WebViewUI] 主窗口已关闭，准备退出", flush=True)
+            # 延迟一点再 _exit，让 WebView2 完成原生清理，避免“卡一下”
+            def _delayed_exit():
+                time.sleep(0.25)
+                os._exit(0)
+            threading.Thread(target=_delayed_exit, daemon=True).start()
+
+        try:
+            win.events.closed += _on_closed
+        except Exception:
+            pass
+
         try:
             webview.start(
                 debug=devtools_enabled,
@@ -179,6 +194,8 @@ class WebViewApp:
         except TypeError:
             # 老版本 pywebview 不支持 storage_path
             webview.start(debug=devtools_enabled, private_mode=False)
+        print("[WebViewUI] webview 循环结束，退出", flush=True)
+        os._exit(0)
 
     @staticmethod
     def _append_webview2_arg(arg):

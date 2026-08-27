@@ -124,17 +124,23 @@ class WebViewApp:
     def run(self):
         """创建主窗口并启动 webview 事件循环（阻塞）。"""
         devtools_enabled = self.devtools
+        # 即便未显式开启 devtools，也始终启用远程调试端口：
+        # WebView2 的 OpenDevToolsWindow() 必须在带 --remote-debugging-port
+        # 的 environment 下创建，否则调用会失败/挂起（表现为 F12 卡死窗口）。
+        # 因此 debug 端口是 F12 直开 DevTools 的硬性前提。
+        try:
+            devtools_port = int(config.get("devtools_port", 9222) or 9222)
+        except Exception:
+            devtools_port = 9222
+        args = [f"--remote-debugging-port={devtools_port}"]
+        if devtools_enabled and str(config.get("devtools_auto_open", False)).strip().lower() in {"1", "true", "on", "yes"}:
+            args.append("--auto-open-devtools-for-tabs")
+        for a in args:
+            self._append_webview2_arg(a)
         if devtools_enabled:
-            try:
-                devtools_port = int(config.get("devtools_port", 9222) or 9222)
-            except Exception:
-                devtools_port = 9222
-            args = [f"--remote-debugging-port={devtools_port}"]
-            if str(config.get("devtools_auto_open", False)).strip().lower() in {"1", "true", "on", "yes"}:
-                args.append("--auto-open-devtools-for-tabs")
-            for a in args:
-                self._append_webview2_arg(a)
             print(f"[WebViewUI] devtools enabled, inspect: http://127.0.0.1:{devtools_port}")
+        else:
+            print(f"[WebViewUI] remote-debugging-port bound to {devtools_port} (F12 DevTools available, debug logs off)")
 
         entry_url, is_url = self._resolve_entry()
 
@@ -182,6 +188,15 @@ class WebViewApp:
 
         try:
             win.events.closed += _on_closed
+        except Exception:
+            pass
+
+        # 关闭 pywebview 在 debug 模式下“启动时自动弹出 DevTools”的行为。
+        # 我们仍保留 debug=devtools_enabled，以便 CoreWebView2 的
+        # AreDevToolsEnabled 为 True（F12 才能打开 DevTools），
+        # 但启动时不自动弹窗。
+        try:
+            webview.settings['OPEN_DEVTOOLS_IN_DEBUG'] = False
         except Exception:
             pass
 

@@ -848,14 +848,9 @@
       ev.stopPropagation();
       try {
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_devtools === 'function') {
-          window.pywebview.api.open_devtools().then((r) => {
-            try { console.log('[F12] open_devtools', r); } catch {}
-            if (r && r.need_restart) alert('DevTools 已开启，需重启 PicScanner 后再按 F12');
-          }).catch((e) => { try { console.warn('F12 failed', e); } catch {} });
+          window.pywebview.api.open_devtools().catch(()=>{});
         } else if (typeof call === 'function') {
-          call('open_devtools').then((r) => {
-            if (r && r.need_restart) alert('DevTools 已开启，需重启 PicScanner 后再按 F12');
-          }).catch(()=>{});
+          call('open_devtools').catch(()=>{});
         }
       } catch {}
     }

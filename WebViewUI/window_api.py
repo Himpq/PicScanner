@@ -240,68 +240,89 @@ class WindowApi:
         return self._do_maximize(win)
 
     def open_devtools(self):
-        """F12 打开 DevTools — 优先原生，失败则提示开启 debug 重启。"""
-        # 尝试原生（需在 UI 线程）
+        """F12 打开 DevTools — 优先原生（需在 UI 线程），失败给出明确原因。
+
+        注意：本方法**严禁**在调用线程上同步 sleep 等待 CoreWebView2 就绪，
+        否则会阻塞 pywebview 的消息循环，导致整个窗口卡死。
+        CoreWebView2 的就绪检查统一放到 UI 线程的 Invoke 回调里执行。
+        """
+        win = self._get_window("")
+        if win is None:
+            return {"success": False, "message": "window not found"}
+
         try:
             import webview.platforms.winforms as _wf
             from System import Action
 
-            win = self._get_window("")
-            if win is not None:
-                form = _wf.BrowserView.instances.get(getattr(win, "uid", None))
-                if form is not None and getattr(form, "browser", None) is not None:
+            form = _wf.BrowserView.instances.get(getattr(win, "uid", None))
+            if form is None or getattr(form, "browser", None) is None:
+                return {"success": False, "message": "webview not ready"}
+
+            def _open_on_ui():
+                try:
                     wv = getattr(form.browser, "webview", None)
                     core = getattr(wv, "CoreWebView2", None) if wv is not None else None
-                    # 若 CoreWebView2 尚未就绪，稍后重试一次
                     if core is None:
-                        import time as _t
+                        # CoreWebView2 仍未初始化，交给异步重试，不直接失败卡住。
+                        print("[F12] CoreWebView2 not ready yet")
+                        self._retry_open_devtools(form)
+                        return
+                    if hasattr(core, "OpenDevToolsWindow"):
+                        core.OpenDevToolsWindow()
+                        print("[F12] OpenDevToolsWindow() called")
+                except Exception as e:
+                    print(f"[F12] OpenDevToolsWindow failed: {e}")
 
-                        for _ in range(10):
-                            _t.sleep(0.15)
-                            try:
-                                wv2 = getattr(form.browser, "webview", None)
-                                core2 = getattr(wv2, "CoreWebView2", None) if wv2 is not None else None
-                                if core2 is not None:
-                                    core = core2
-                                    break
-                            except Exception:
-                                pass
-                    if core is not None and hasattr(core, "OpenDevToolsWindow"):
-                        def _open():
-                            try:
-                                core.OpenDevToolsWindow()
-                            except Exception as e:
-                                # 可能是 debug 未启用，尝试通过环境变量启用后提示重启
-                                try:
-                                    print(f"[F12] OpenDevToolsWindow failed: {e}")
-                                except Exception:
-                                    pass
-
-                        try:
-                            if bool(getattr(form, "InvokeRequired", False)):
-                                form.BeginInvoke(Action(_open))
-                            else:
-                                _open()
-                            return {"success": True, "mode": "native"}
-                        except Exception as e:
-                            print(f"[F12] BeginInvoke failed: {e}")
+            if bool(getattr(form, "InvokeRequired", False)):
+                form.BeginInvoke(Action(_open_on_ui))
+            else:
+                _open_on_ui()
+            return {"success": True, "mode": "native"}
         except Exception as e:
             print(f"[F12] native attempt failed: {e}")
+            return {"success": False, "message": str(e)}
 
-        # 原生失败：提示需开启 devtools 后重启，不再跳 Edge
-        try:
-            from .config import config as _cfg
+    def _retry_open_devtools(self, form, _attempt=0, _max=20):
+        """异步（线程）轮询 CoreWebView2 就绪后，再回到 UI 线程打开 DevTools。
+
+        所有等待都在独立后台线程进行，绝不阻塞 pywebview 主消息循环。
+        """
+        import threading
+
+        if _attempt >= _max:
+            print("[F12] CoreWebView2 still not ready after retries")
+            return
+
+        def _worker():
+            import time as _t
 
             try:
-                _cfg.set("devtools_enabled", True)
-                _cfg.set("devtools_auto_open", False)
+                wv = getattr(form.browser, "webview", None) if getattr(form, "browser", None) is not None else None
+                core = getattr(wv, "CoreWebView2", None) if wv is not None else None
             except Exception:
-                pass
-            msg = "DevTools 未启用，已自动开启 devtools_enabled，请重启 PicScanner 后再按 F12"
-            print(f"[F12] {msg}")
-            return {"success": False, "message": msg, "need_restart": True}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+                core = None
+            if core is not None:
+                def _open():
+                    try:
+                        if hasattr(core, "OpenDevToolsWindow"):
+                            core.OpenDevToolsWindow()
+                            print("[F12] OpenDevToolsWindow() called (after retry)")
+                    except Exception as e:
+                        print(f"[F12] OpenDevToolsWindow failed (retry): {e}")
+
+                try:
+                    if bool(getattr(form, "InvokeRequired", False)):
+                        form.BeginInvoke(Action(_open))
+                    else:
+                        _open()
+                except Exception as e:
+                    print(f"[F12] BeginInvoke failed (retry): {e}")
+                return
+            # 未就绪：稍后继续
+            _t.sleep(0.2)
+            self._retry_open_devtools(form, _attempt + 1, _max)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── 多窗口工厂 ────────────────────────────────────────────
     def create_child_window(self, opts):

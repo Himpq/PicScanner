@@ -14,6 +14,7 @@ import StatsScreen from './islands/StatsScreen.vue';
 import LightboxShell from './islands/LightboxShell.vue';
 import QuickEditShell from './islands/QuickEditShell.vue';
 import BatchModulesShell from './islands/BatchModulesShell.vue';
+import DateRailIsland from './islands/DateRailIsland.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -42,6 +43,7 @@ let statsScreenApp = null;
 let lightboxShellApp = null;
 let quickEditShellApp = null;
 let batchModulesShellApp = null;
+let dateRailIslandApp = null;
 
 // 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
 // 注意：在 index.html 既定加载顺序下，Vue 包先于 app_core.js 求值，而 window.PS
@@ -179,6 +181,16 @@ window.PicScannerVue = {
   unmountBatchModulesShell() {
     if (batchModulesShellApp) { batchModulesShellApp.unmount(); batchModulesShellApp = null; }
   },
+  mountDateRailIsland(el) {
+    if (!el) return false;
+    if (dateRailIslandApp) dateRailIslandApp.unmount();
+    dateRailIslandApp = withPinia(createApp(DateRailIsland));
+    dateRailIslandApp.mount(el);
+    return true;
+  },
+  unmountDateRailIsland() {
+    if (dateRailIslandApp) { dateRailIslandApp.unmount(); dateRailIslandApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
@@ -186,3 +198,35 @@ window.PicScannerVue = {
   _p4Ready: true,
   _p5Ready: true,
 };
+
+// PR2: DateRail 原位岛 — 特性开关，默认关闭，?vue_date=1 或 localStorage vue_date=1 开启
+function isVueDateRailEnabled() {
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.has('vue_date')) return params.get('vue_date') !== '0';
+    return localStorage.getItem('vue_date') === '1';
+  } catch { return false; }
+}
+function autoMountDateRail() {
+  if (!isVueDateRailEnabled()) return;
+  const vueEl = document.getElementById('vue-date-rail');
+  const vanillaEl = document.getElementById('vanilla-date-rail');
+  if (!vueEl) return;
+  vueEl.classList.remove('hidden');
+  if (vanillaEl) vanillaEl.classList.add('hidden');
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountDateRailIsland === 'function') {
+      window.PicScannerVue.mountDateRailIsland(vueEl);
+    } else setTimeout(tryMount, 100);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+window.toggleVueDateRail = (on) => {
+  try {
+    if (on) localStorage.setItem('vue_date', '1');
+    else localStorage.removeItem('vue_date');
+    location.reload();
+  } catch {}
+};
+autoMountDateRail();

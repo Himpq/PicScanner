@@ -41,6 +41,11 @@ export const useGalleryStore = defineStore('gallery', () => {
   const PHOTO_LOAD_BATCH = 20;
   const RENDER_AHEAD_PHOTOS = 20;
 
+  const dateCovers = ref(new Map());
+  const dateNotes = ref(new Map());
+  const visibleDates = ref(new Set());
+  const dateFocus = ref(new Map());
+
   const scanStatus = ref('idle');
   const scanCountText = ref('0 / 0');
   const exifStatus = ref('idle');
@@ -51,6 +56,10 @@ export const useGalleryStore = defineStore('gallery', () => {
     if (!PS || !PS.state) return;
     if (Array.isArray(PS.state.dates)) dates.value = [...PS.state.dates];
     if (PS.state.dateCounts instanceof Map) dateCounts.value = new Map(PS.state.dateCounts);
+    if (PS.state.dateCovers instanceof Map) dateCovers.value = new Map(PS.state.dateCovers);
+    if (PS.state.dateNotes instanceof Map) dateNotes.value = new Map(PS.state.dateNotes);
+    if (PS.state.visibleDates instanceof Set) visibleDates.value = new Set(PS.state.visibleDates);
+    if (PS.state.dateFocus instanceof Map) dateFocus.value = new Map(PS.state.dateFocus);
     if (PS.state.activeDate !== undefined) activeDate.value = PS.state.activeDate;
     if (PS.state.sortKey) sortKey.value = PS.state.sortKey;
     if (PS.state.searchScope) searchScope.value = PS.state.searchScope;
@@ -372,6 +381,10 @@ export const useGalleryStore = defineStore('gallery', () => {
     favoriteCount,
     hiddenCount,
     activeCategory,
+    dateCovers,
+    dateNotes,
+    visibleDates,
+    dateFocus,
     galleryItemSize,
     galleryItemSizeRaw,
     currentRootPath,

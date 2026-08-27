@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/settings.css?v=settings-tabs-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=selected-frame-zindex-1" />
-  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=a-isolate-ps-1" />
+  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=pr2-date-rail-20260828" />
 </head>
 <body>
   <div id="app">
@@ -132,10 +132,11 @@
         </div>
       </section>
 
-      <nav class="date-rail">
+      <nav class="date-rail" id="vanilla-date-rail">
         <div class="section-title">日期</div>
         <div id="date-rail-list" class="date-rail-list"></div>
       </nav>
+      <nav class="date-rail hidden" id="vue-date-rail" aria-label="日期（Vue）"></nav>
 
       <section id="settings-screen" class="settings-screen hidden">
         <div class="settings-topbar">
@@ -343,7 +344,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=a-isolate-ps-1"></script>
+  <script src="assets/vue/picscanner-vue.js?v=pr2-date-rail-20260828"></script>
   <script src="assets/app_core.js?v=settings-tabs-1"></script>
   <script src="assets/app_gallery.js?v=remove-exif-badge-20260827"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>

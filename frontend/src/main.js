@@ -10,6 +10,8 @@ import QuickEditSliders from './quickedit/QuickEditSliders.vue';
 import SourceScreen from './islands/SourceScreen.vue';
 import GalleryShell from './islands/GalleryShell.vue';
 import StatsScreen from './islands/StatsScreen.vue';
+import LightboxShell from './islands/LightboxShell.vue';
+import QuickEditShell from './islands/QuickEditShell.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -35,6 +37,8 @@ let quickEditSlidersInstance = null;
 let sourceScreenApp = null;
 let galleryShellApp = null;
 let statsScreenApp = null;
+let lightboxShellApp = null;
+let quickEditShellApp = null;
 
 // 尽早同步常量与桥接到 legacy PS（若 PS 已存在）
 try { syncToLegacyPS(); } catch {}
@@ -116,7 +120,29 @@ window.PicScannerVue = {
   unmountStatsScreen() {
     if (statsScreenApp) { statsScreenApp.unmount(); statsScreenApp = null; }
   },
+  mountLightboxShell(el) {
+    if (!el) return false;
+    if (lightboxShellApp) lightboxShellApp.unmount();
+    lightboxShellApp = withPinia(createApp(LightboxShell));
+    lightboxShellApp.mount(el);
+    return true;
+  },
+  unmountLightboxShell() {
+    if (lightboxShellApp) { lightboxShellApp.unmount(); lightboxShellApp = null; }
+  },
+  mountQuickEditShell(el) {
+    if (!el) return false;
+    if (quickEditShellApp) quickEditShellApp.unmount();
+    quickEditShellApp = withPinia(createApp(QuickEditShell));
+    quickEditShellApp.mount(el);
+    return true;
+  },
+  unmountQuickEditShell() {
+    if (quickEditShellApp) { quickEditShellApp.unmount(); quickEditShellApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
+  _p3Ready: true,
+  _p4Ready: true,
 };

@@ -1,7 +1,2 @@
-export function call(name, ...args) {
-  const api = window.pywebview && window.pywebview.api;
-  if (!api || !api[name]) {
-    return Promise.reject(new Error('pywebview bridge not ready: ' + name));
-  }
-  return api[name](...args);
-}
+// @deprecated 兼容旧路径，请改用 import { call } from './bridge/index.js'
+export { call, getApi, isBridgeReady, missingStartupApiMethods, startupApiReady, useBridge } from './bridge/index.js';

@@ -12,6 +12,7 @@ import GalleryShell from './islands/GalleryShell.vue';
 import StatsScreen from './islands/StatsScreen.vue';
 import LightboxShell from './islands/LightboxShell.vue';
 import QuickEditShell from './islands/QuickEditShell.vue';
+import BatchModulesShell from './islands/BatchModulesShell.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -39,6 +40,7 @@ let galleryShellApp = null;
 let statsScreenApp = null;
 let lightboxShellApp = null;
 let quickEditShellApp = null;
+let batchModulesShellApp = null;
 
 // 尽早同步常量与桥接到 legacy PS（若 PS 已存在）
 try { syncToLegacyPS(); } catch {}
@@ -140,9 +142,20 @@ window.PicScannerVue = {
   unmountQuickEditShell() {
     if (quickEditShellApp) { quickEditShellApp.unmount(); quickEditShellApp = null; }
   },
+  mountBatchModulesShell(el) {
+    if (!el) return false;
+    if (batchModulesShellApp) batchModulesShellApp.unmount();
+    batchModulesShellApp = withPinia(createApp(BatchModulesShell));
+    batchModulesShellApp.mount(el);
+    return true;
+  },
+  unmountBatchModulesShell() {
+    if (batchModulesShellApp) { batchModulesShellApp.unmount(); batchModulesShellApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
   _p3Ready: true,
   _p4Ready: true,
+  _p5Ready: true,
 };

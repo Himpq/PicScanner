@@ -80,6 +80,9 @@ class VectorStore:
 
     def _maybe_migrate_legacy(self, conn) -> None:
         """从旧表 indexed_files 迁移（插件终端版首版）。"""
+        # 仅 semantic-image 需要迁移，其他索引（如 face-identity）跳过，避免污染
+        if self.index_name != "semantic-image":
+            return
         try:
             cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='indexed_files'")
             if not cur.fetchone():
@@ -122,13 +125,30 @@ class VectorStore:
             rows = conn.execute(
                 "SELECT id, embedding, dim FROM vector_records WHERE index_name=?", (self.index_name,)
             ).fetchall()
+        # 维度混用防护：同一 index_name 应同维，若历史污染则只加载多数维，少数维跳过并告警
+        from collections import Counter
+
+        dim_counts = Counter(int(r["dim"]) for r in rows)
+        majority_dim = dim_counts.most_common(1)[0][0] if dim_counts else None
+        if len(dim_counts) > 1:
+            print(f"[VectorStore:{self.index_name}] 警告：检测到多维度 {dict(dim_counts)}，仅加载 dim={majority_dim} 的记录，少数维将被跳过", flush=True)
+            rows = [r for r in rows if int(r["dim"]) == majority_dim]
         ids: list[str] = []
         vecs: list[np.ndarray] = []
         for r in rows:
+            arr = np.frombuffer(r["embedding"], dtype=np.float32)
+            # 额外防护：blob 长度与 dim 不符则跳过
+            if arr.size != int(r["dim"]):
+                print(f"[VectorStore:{self.index_name}] 跳过维度不符 {r['id']} blob {arr.size} vs dim {r['dim']}", flush=True)
+                continue
             ids.append(r["id"])
-            vecs.append(np.frombuffer(r["embedding"], dtype=np.float32))
+            vecs.append(arr)
         if ids:
-            mat = np.vstack(vecs) if len(vecs) > 1 else np.asarray(vecs[0]).reshape(1, -1) if vecs else np.zeros((0, 0), np.float32)
+            try:
+                mat = np.vstack(vecs) if len(vecs) > 1 else np.asarray(vecs[0]).reshape(1, -1) if vecs else np.zeros((0, 0), np.float32)
+            except ValueError as exc:
+                print(f"[VectorStore:{self.index_name}] vstack 失败，跳过加载: {exc}", flush=True)
+                return
             # 归一化后写入后端（检索时余弦）
             norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
             mat = mat / norms

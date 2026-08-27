@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/settings.css?v=settings-tabs-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=warm-accent-1" />
-  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=p5-rollback-1" />
+  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=a-isolate-ps-1" />
 </head>
 <body>
   <div id="app">
@@ -325,6 +325,16 @@
     </div>
   </div>
 
+  <!--
+    加载顺序约定（迁移期请勿调整）：
+    1) Vanilla 工具模块（quick_edit_*/pic_modification/raw_edit/source_conflicts/batch_*）先加载，建立基础能力
+    2) vue/picscanner-vue.js 必须早于 app_core.js：Vue 侧在模块求值期建立 window.PicScannerVue / Pinia；
+       但此时 window.PS 尚不存在（PS 由 app_core.js 定义），所以 main.js 内的早期 sync 是 no-op
+       （被 if (!PS) return 守卫吞掉）。真正的同步发生在 app_core.js 定义 window.PS 之后：
+       它主动调用 window.PicScannerVue.resyncToLegacyPS()，把 Vue 包（constants.js / bridge）中的
+       权威常量与 bridgeCall 写回 window.PS，双向桥接在此处真正生效。若反序，app_core 将无法调用该方法。
+    3) app_core.js → app_gallery.js → app_lightbox.js → app_modules.js → app.js 为 Vanilla 状态机与业务总线，必须在 Vue 之后
+  -->
   <script src="assets/quick_edit_worker.js?v=edit-stages-20260717-3"></script>
   <script src="assets/quick_edit_geometry.js?v=frame-axis-space-20260819-1"></script>
   <script src="assets/pic_modification.js?v=settings-alt-exif-20260703-1"></script>
@@ -333,7 +343,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=p5-rollback-1"></script>
+  <script src="assets/vue/picscanner-vue.js?v=a-isolate-ps-1"></script>
   <script src="assets/app_core.js?v=settings-tabs-1"></script>
   <script src="assets/app_gallery.js?v=remove-exif-badge-20260827"></script>
   <script src="assets/app_lightbox.js?v=lightbox-preview-fallback-20260827"></script>

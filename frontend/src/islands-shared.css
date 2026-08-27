@@ -1,0 +1,252 @@
+/*
+ * islands-shared.css
+ * ---------------------------------------------------------------
+ * Vue 岛屿专用布局样式（非 scoped）。
+ * 目的：让 Vue 岛屿完全自包含，不再复用 Vanilla 全局 style.css 的
+ * .side / .category-panel / .date-rail / .gallery-wrap / .gallery-scroll
+ * 等类名，从根上消除「Vue 改样式 ↔ Vanilla 重写 DOM」的双向冲突。
+ *
+ * 这些规则只服务 frontend/src 下的 ps-* 前缀类，不影响任何 Vanilla DOM。
+ * 视觉意图与原有 app/ui/assets/style.css 中对应布局保持一致（flex 三栏）。
+ */
+
+/* 图库三栏：侧栏 + 照片墙 + 日期栏 */
+.ps-gallery-shell {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  gap: 16px;
+}
+
+.ps-side {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ps-gallery-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ps-gallery-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
+.ps-date-rail {
+  width: 160px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .ps-gallery-shell { flex-direction: column; }
+  .ps-side,
+  .ps-date-rail { width: 100%; }
+}
+
+/* 分类面板（原 .category-panel 布局意图，独立到 ps- 命名空间） */
+.ps-category-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ps-category-panel .category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ps-category-panel .category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 日期栏（原 .date-rail 布局意图，独立到 ps- 命名空间） */
+.ps-date-rail .date-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 来源首页：复用 Vanilla .source-screen 内部布局意图，隔离到 ps- 前缀 */
+.ps-source-screen .ps-source-layout {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  min-height: 100%;
+}
+
+.ps-source-screen .ps-source-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.ps-source-screen .ps-source-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.ps-source-screen .ps-source-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ps-source-screen .ps-source-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ps-source-screen .ps-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.ps-source-screen .ps-shortcut-panel {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+/* 来源首页内部子元素：从 Vanilla .source-* 规则等价抄录，隔离到 ps- 命名空间 */
+.ps-source-page-head .section-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.ps-source-page-head p { font-size: 12px; color: var(--muted, #9aa0a6); margin: 0; }
+
+.ps-source-empty { font-size: 13px; color: var(--muted, #9aa0a6); padding: 12px 0; }
+
+.ps-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.ps-source-item {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  padding: 0;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  background: var(--surface, rgba(255,255,255,0.03));
+  cursor: pointer;
+  overflow: hidden;
+  min-height: 96px;
+  position: relative;
+}
+.ps-source-item:hover { border-color: var(--accent, #e0a45a); }
+.ps-source-item:disabled,
+.ps-source-item.unavailable { opacity: 0.5; cursor: not-allowed; }
+.ps-source-item.has-cover .ps-source-cover { display: block; height: 96px; background-size: cover; background-position: center; }
+.ps-source-cover { display: none; }
+.ps-source-content { padding: 10px 12px; }
+.ps-source-kicker { font-size: 11px; color: var(--muted, #9aa0a6); }
+.ps-source-title { font-size: 14px; font-weight: 600; }
+.ps-source-sub { font-size: 12px; color: var(--muted, #9aa0a6); }
+
+.ps-source-item-add {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+}
+.ps-source-item-add .plus { font-size: 28px; line-height: 1; color: var(--muted, #9aa0a6); }
+.ps-source-item-add .ps-source-title { font-size: 13px; }
+.ps-source-item-add .ps-source-sub { font-size: 11px; }
+
+.ps-source-conflicts-hint { margin-top: 12px; font-size: 12px; color: var(--muted, #9aa0a6); line-height: 1.6; }
+.ps-source-conflicts-hint p { margin: 0; }
+
+.ps-shortcut-panel {
+  width: 220px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border, rgba(255,255,255,0.08));
+  padding-left: 16px;
+}
+.ps-shortcut-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--muted, #9aa0a6); }
+.ps-shortcut-list { display: flex; flex-direction: column; gap: 6px; }
+.ps-shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text, #e8eaed);
+}
+.ps-shortcut-row kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 4px;
+  background: var(--surface, rgba(255,255,255,0.05));
+  font-size: 11px;
+  text-align: center;
+}
+
+/* 灯箱壳：避免与 Vanilla #lightbox 的 .lightbox-close 冲突 */
+.ps-lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+  z-index: 60;
+}
+
+/* 设置空态（原 .settings-empty，隔离到 ps- 命名空间） */
+.ps-settings-empty {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* 设置工具条（原 .settings-toolbar） */
+.ps-settings-toolbar {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 16px;
+}
+
+/* 侧栏来源路径（原 .side-path） */
+.ps-side-path {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+/* 快速调整侧栏（原 .quick-edit-side 视觉意图；flex / padding 由组件 scoped 提供） */
+.ps-quick-edit-side {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: #070708;
+  scrollbar-width: none;
+}
+.ps-quick-edit-side::-webkit-scrollbar { width: 0; height: 0; }

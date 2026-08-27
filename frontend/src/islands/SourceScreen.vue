@@ -52,35 +52,35 @@ function title(item) {
 
 <template>
   <div class="ps-source-screen">
-    <div class="source-layout">
-      <div class="source-panel">
-        <div class="source-head">
+    <div class="ps-source-layout">
+      <div class="ps-source-panel">
+        <div class="ps-source-head">
           <div>
             <h1>来源首页</h1>
             <p>按 PicScanner 来源标记识别当前可用路径。</p>
           </div>
-          <div class="source-head-actions">
+          <div class="ps-source-head-actions">
             <button class="icon-btn" title="设置" @click="openSettings">⚙</button>
             <button class="icon-btn" title="刷新磁盘" :disabled="loading" @click="refresh">↻</button>
           </div>
         </div>
 
-        <div class="source-pages">
-          <section class="source-page" data-source-page="connected">
-            <div class="source-page-head">
+        <div class="ps-source-pages">
+          <section class="ps-source-page" data-source-page="connected">
+            <div class="ps-source-page-head">
               <div class="section-title">可用来源 <span>{{ count }}</span></div>
               <p>仅显示来源 ID 唯一且标记可访问的当前路径。</p>
             </div>
 
-            <div v-if="error" class="source-empty">加载失败：{{ error }} <button class="ghost-btn" @click="refresh">重试</button></div>
+            <div v-if="error" class="ps-source-empty">加载失败：{{ error }} <button class="ghost-btn" @click="refresh">重试</button></div>
 
-            <div v-else-if="loading && !sources.length" class="source-empty">扫描来源中...</div>
+            <div v-else-if="loading && !sources.length" class="ps-source-empty">扫描来源中...</div>
 
-            <div v-else class="source-grid">
+            <div v-else class="ps-source-grid">
               <button
                 v-for="item in sources"
                 :key="item.source_id || item.path"
-                class="source-item"
+                class="ps-source-item"
                 :class="{ 'has-cover': !!(item.summary && item.summary.cover_url), unavailable: !!item.unavailable }"
                 :disabled="!!item.unavailable"
                 :title="item.unavailable ? (item.unavailable_message || '来源未插入或已更换') : ''"
@@ -94,16 +94,16 @@ function title(item) {
                 </div>
               </button>
 
-              <button class="source-item add" @click="addFolder">
+              <button class="ps-source-item ps-source-item-add" @click="addFolder">
                 <div>
                   <div class="plus">+</div>
-                  <div class="source-title">添加文件夹</div>
-                  <div class="source-sub">选择后会记忆到本机</div>
+                  <div class="ps-source-title">添加文件夹</div>
+                  <div class="ps-source-sub">选择后会记忆到本机</div>
                 </div>
               </button>
             </div>
 
-            <div v-if="hasConflicts" class="source-conflicts-hint">
+            <div v-if="hasConflicts" class="ps-source-conflicts-hint">
               <p v-if="conflicts.length">发现 {{ conflicts.length }} 个重复来源 ID，已在弹窗中提示。</p>
               <p v-if="discoveryErrors.length">有 {{ discoveryErrors.length }} 个路径标记读取失败。</p>
             </div>
@@ -111,21 +111,21 @@ function title(item) {
         </div>
       </div>
 
-      <aside class="shortcut-panel" aria-label="快捷键">
-        <div class="shortcut-title">快捷键</div>
-        <div class="shortcut-list">
-          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>F</kbd><span>搜索照片</span></div>
-          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>滚轮</kbd><span>调整照片墙缩略图</span></div>
-          <div class="shortcut-row"><kbd>Alt</kbd><span>立即显示悬停照片参数</span></div>
-          <div class="shortcut-row"><kbd>滚轮</kbd><span>灯箱缩放图片</span></div>
-          <div class="shortcut-row"><kbd>Q</kbd><span>选择照片快速调整</span></div>
-          <div class="shortcut-row"><kbd>灯箱</kbd><kbd>Q</kbd><span>调整当前照片</span></div>
-          <div class="shortcut-row"><kbd>C</kbd><span>对比图片</span></div>
-          <div class="shortcut-row"><kbd>F</kbd><span>收藏悬停照片</span></div>
-          <div class="shortcut-row"><kbd>E</kbd><span>编辑悬停照片笔记</span></div>
-          <div class="shortcut-row"><kbd>R</kbd><span>编辑当前日期笔记</span></div>
-          <div class="shortcut-row"><kbd>S</kbd><span>设置悬停照片分类</span></div>
-          <div class="shortcut-row"><kbd>Shift</kbd><kbd>Enter</kbd><span>笔记换行</span></div>
+      <aside class="ps-shortcut-panel" aria-label="快捷键">
+        <div class="ps-shortcut-title">快捷键</div>
+        <div class="ps-shortcut-list">
+          <div class="ps-shortcut-row"><kbd>Ctrl</kbd><kbd>F</kbd><span>搜索照片</span></div>
+          <div class="ps-shortcut-row"><kbd>Ctrl</kbd><kbd>滚轮</kbd><span>调整照片墙缩略图</span></div>
+          <div class="ps-shortcut-row"><kbd>Alt</kbd><span>立即显示悬停照片参数</span></div>
+          <div class="ps-shortcut-row"><kbd>滚轮</kbd><span>灯箱缩放图片</span></div>
+          <div class="ps-shortcut-row"><kbd>Q</kbd><span>选择照片快速调整</span></div>
+          <div class="ps-shortcut-row"><kbd>灯箱</kbd><kbd>Q</kbd><span>调整当前照片</span></div>
+          <div class="ps-shortcut-row"><kbd>C</kbd><span>对比图片</span></div>
+          <div class="ps-shortcut-row"><kbd>F</kbd><span>收藏悬停照片</span></div>
+          <div class="ps-shortcut-row"><kbd>E</kbd><span>编辑悬停照片笔记</span></div>
+          <div class="ps-shortcut-row"><kbd>R</kbd><span>编辑当前日期笔记</span></div>
+          <div class="ps-shortcut-row"><kbd>S</kbd><span>设置悬停照片分类</span></div>
+          <div class="ps-shortcut-row"><kbd>Shift</kbd><kbd>Enter</kbd><span>笔记换行</span></div>
         </div>
       </aside>
     </div>

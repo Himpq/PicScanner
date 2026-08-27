@@ -26,9 +26,9 @@ onMounted(async () => {
 <template>
   <div v-if="loading" class="storage-list">读取中...</div>
 
-  <div v-else-if="error" class="settings-empty">{{ error }}</div>
+  <div v-else-if="error" class="ps-settings-empty">{{ error }}</div>
 
-  <div v-else-if="!sources.length" class="settings-empty">暂无已扫描来源</div>
+  <div v-else-if="!sources.length" class="ps-settings-empty">暂无已扫描来源</div>
 
   <div v-else class="storage-list">
     <article v-for="source in sources" :key="source.source_id || source.id" class="storage-row">

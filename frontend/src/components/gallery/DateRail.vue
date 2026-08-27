@@ -30,7 +30,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <nav class="date-rail">
+  <nav class="ps-date-rail">
     <div class="section-title">日期</div>
     <div class="date-rail-list">
       <button
@@ -47,5 +47,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.ps-date-rail { /* 布局由 islands-shared.css 提供 */ }
 .date-rail-empty { font-size:12px; color:var(--muted, #9aa0a6); padding:8px; }
 </style>

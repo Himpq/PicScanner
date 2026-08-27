@@ -34,7 +34,7 @@ function label(cat) {
 </script>
 
 <template>
-  <div class="category-panel">
+  <div class="ps-category-panel">
     <div class="category-head">
       <div class="section-title">分类</div>
       <button class="icon-btn category-add" title="新增分类" aria-label="新增分类" @click="addCategory">
@@ -66,5 +66,5 @@ function label(cat) {
 </template>
 
 <style scoped>
-.category-panel { /* 复用全局样式 */ }
+.ps-category-panel { /* 布局由 islands-shared.css 提供 */ }
 </style>

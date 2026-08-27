@@ -832,4 +832,12 @@
     QUICK_EDIT_SAVE_SIZE_LONG_EDGE_MIN,
     QUICK_EDIT_SAVE_SIZE_LONG_EDGE_MAX,
   };
+
+  // 双轨同步（P2）：window.PS 刚定义完成。Vue 包（picscanner-vue.js）先于本文件加载，
+  // 但其模块求值期 window.PS 尚不存在，main.js 内的 syncToLegacyPS 是 no-op。
+  // 此处主动把 Vue 侧（constants.js / bridge）的权威常量与 bridgeCall 写入 window.PS，
+  // 让双向桥接真正生效。若将来 app_core 内联常量被删除，这一行仍是唯一保险。
+  if (window.PicScannerVue && typeof window.PicScannerVue.resyncToLegacyPS === 'function') {
+    window.PicScannerVue.resyncToLegacyPS();
+  }
 })();

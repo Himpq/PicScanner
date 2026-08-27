@@ -50,7 +50,7 @@ onBeforeUnmount(() => {
         <button v-for="m in modules" :key="m.key" type="button" class="module-option" role="menuitem" :data-module-key="m.key" @click="openMod(m.key)">
           <b>{{ m.name || m.key }}</b><em v-if="m.description">{{ m.description }}</em>
         </button>
-        <div v-if="!modules.length" class="settings-empty">暂无模块</div>
+        <div v-if="!modules.length" class="ps-settings-empty">暂无模块</div>
       </div>
     </div>
 

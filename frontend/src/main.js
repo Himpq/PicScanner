@@ -1,5 +1,6 @@
 import { createApp, reactive } from 'vue';
 import { createPinia } from 'pinia';
+import './islands-shared.css';
 import StorageSettings from './settings/StorageSettings.vue';
 import ShortcutsSettings from './settings/ShortcutsSettings.vue';
 import AboutSettings from './settings/AboutSettings.vue';
@@ -42,9 +43,33 @@ let lightboxShellApp = null;
 let quickEditShellApp = null;
 let batchModulesShellApp = null;
 
-// 尽早同步常量与桥接到 legacy PS（若 PS 已存在）
+// 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
+// 注意：在 index.html 既定加载顺序下，Vue 包先于 app_core.js 求值，而 window.PS
+// 由 app_core.js 定义，所以此时 PS 通常尚未就绪，下面的 try/catch 会静默 return。
+// 真正的同步发生在 app_core.js 定义 window.PS 之后，它会调用
+// window.PicScannerVue.resyncToLegacyPS()（见下方暴露的方法）—— 此时 PS 已存在，
+// syncToLegacyPS / syncBridgeToLegacyPS 才会真正执行 Object.assign / 补 bridgeCall。
 try { syncToLegacyPS(); } catch {}
 try { syncBridgeToLegacyPS(); } catch {}
+
+// 暴露一个安全的 PS 读取器，供各 store 在 PS 未就绪时返回 null 而非抛错
+window.__getPS = function () {
+  return (typeof window !== 'undefined' && window.PS) ? window.PS : null;
+};
+
+// P2: 双轨重同步。app_core.js 在 window.PS 定义完成后调用此方法，
+// 把 Vue 包（constants.js / bridge）中的权威常量与 bridgeCall 写入 window.PS。
+// 之所以需要它：模块求值期 PS 不存在，上面的早期同步是 no-op；
+// 此处 PS 已存在，syncToLegacyPS 会真正执行，bridgeCall 也会被补齐。
+// （app_core.js 的 PS 对象只挂了 call，没有 bridgeCall，这一步是补齐的关键。）
+function resyncToLegacyPS() {
+  try {
+    syncToLegacyPS();
+    syncBridgeToLegacyPS();
+  } catch (e) {
+    console.warn('[PicScannerVue] resyncToLegacyPS failed', e);
+  }
+}
 
 function withPinia(vueApp) {
   vueApp.use(pinia);
@@ -54,6 +79,8 @@ function withPinia(vueApp) {
 window.PicScannerVue = {
   // 暴露 pinia 供调试与后续 stores 使用
   pinia,
+  // P2: app_core.js 定义 window.PS 后调用，把 Vue 侧常量/桥接重同步进 PS
+  resyncToLegacyPS,
   mount(tabKey, el) {
     const component = COMPONENTS[tabKey];
     if (!component) return false;

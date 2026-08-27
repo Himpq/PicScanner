@@ -42,9 +42,9 @@ function syncSliders() {
       <button type="button" class="ghost-btn" @click="syncSliders">刷新</button>
     </div>
 
-    <div class="quick-edit-side">
+    <div class="ps-quick-edit-side">
       <div v-show="activeTab === 'adjust'" class="quick-edit-panel-page" data-quick-edit-panel-page="adjust">
-        <div v-if="!hasPhoto" class="settings-empty">未选择照片</div>
+        <div v-if="!hasPhoto" class="ps-settings-empty">未选择照片</div>
         <template v-else>
           <QuickEditHistogram />
           <QuickEditSliders ref="slidersRef" />
@@ -60,7 +60,7 @@ function syncSliders() {
     </div>
 
     <div class="qe-preview-host">
-      <div class="settings-empty">预览画布仍由 legacy `quick_edit_worker` + `quick_edit_geometry` 驱动，Vue 侧通过 `useQuickEditStore.setParam` 驱动重绘。</div>
+      <div class="ps-settings-empty">预览画布仍由 legacy `quick_edit_worker` + `quick_edit_geometry` 驱动，Vue 侧通过 `useQuickEditStore.setParam` 驱动重绘。</div>
     </div>
   </div>
 </template>
@@ -70,6 +70,6 @@ function syncSliders() {
 .quick-edit-panel-tabs { display:flex; gap:6px; padding:8px; border-bottom:1px solid var(--border,#2a2a2a); }
 .quick-edit-panel-tab { padding:6px 10px; border:1px solid transparent; border-radius:6px; background:transparent; cursor:pointer; }
 .quick-edit-panel-tab.active { background: rgba(224,164,90,0.14); border-color: rgba(224,164,90,0.35); color: #e0a45a; }
-.quick-edit-side { flex:1; overflow:auto; padding:10px; }
+.ps-quick-edit-side { flex:1; overflow:auto; padding:10px; }
 .qe-preview-host { padding:10px; border-top:1px solid var(--border,#2a2a2a); font-size:12px; }
 </style>

@@ -43,7 +43,7 @@ watch(photo, () => {
 
 <template>
   <div v-if="open" class="ps-lightbox-shell" @click.self="close">
-    <button class="lightbox-close" title="关闭" @click="close">×</button>
+    <button class="ps-lightbox-close" title="关闭" @click="close">×</button>
     <LightboxStage v-if="!store.compareOpen" />
     <CompareView v-else />
     <LightboxInfoPanel v-if="!store.compareOpen" />
@@ -53,5 +53,5 @@ watch(photo, () => {
 
 <style scoped>
 .ps-lightbox-shell { position:fixed; inset:0; background: rgba(0,0,0,0.92); z-index: 50; display:flex; flex-direction:column; }
-.lightbox-close { position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color:#fff; cursor:pointer; }
+.ps-lightbox-close { position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color:#fff; cursor:pointer; z-index:60; }
 </style>

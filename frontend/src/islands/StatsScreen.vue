@@ -69,8 +69,8 @@ function sortShutterBuckets(rows) {
         <div class="brand-title">统计信息</div>
         <div class="brand-sub">{{ currentPath || '未选择来源' }}</div>
       </div>
-      <div v-if="loading && !sources.length" class="settings-empty">读取中...</div>
-      <div v-else-if="error && !sources.length" class="settings-empty">{{ error }}</div>
+      <div v-if="loading && !sources.length" class="ps-settings-empty">读取中...</div>
+      <div v-else-if="error && !sources.length" class="ps-settings-empty">{{ error }}</div>
       <div v-else class="storage-list compact">
         <article v-for="s in sources" :key="s.source_id || s.root_path" class="storage-row">
           <div class="storage-cover"><div class="storage-id">ID {{ s.id || '--' }}</div><img v-if="s.cover_url" :src="s.cover_url" alt="" /></div>
@@ -79,20 +79,20 @@ function sortShutterBuckets(rows) {
             <div class="storage-counts">已扫描 {{ Number(s.scanned_count || s.visible_files || 0) }} · 登记 {{ Number(s.registered_count || s.total_files || 0) }}</div>
           </div>
         </article>
-        <div v-if="!sources.length" class="settings-empty">暂无来源</div>
+        <div v-if="!sources.length" class="ps-settings-empty">暂无来源</div>
       </div>
     </aside>
 
     <section class="stats-main">
-      <div class="settings-toolbar">
+      <div class="ps-settings-toolbar">
         <button class="ghost-btn back-btn" @click="close"><span aria-hidden="true">←</span><span>返回图库</span></button>
         <div class="toolbar-spacer"></div>
         <button class="ghost-btn" @click="() => store.fetchDetail().catch(()=>{})">刷新</button>
       </div>
 
       <div class="stats-content">
-        <div v-if="loading && !stats.total_files" class="settings-empty">统计加载中...</div>
-        <div v-else-if="error && !stats.total_files" class="settings-empty">{{ error }}</div>
+        <div v-if="loading && !stats.total_files" class="ps-settings-empty">统计加载中...</div>
+        <div v-else-if="error && !stats.total_files" class="ps-settings-empty">{{ error }}</div>
         <template v-else>
           <div class="stats-tabs" role="tablist" aria-label="统计分页">
             <button class="stats-tab" :class="{ active: activeTab === 'overview' }" type="button" data-stats-tab="overview" @click="setTab('overview')">概览</button>

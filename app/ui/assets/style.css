@@ -355,6 +355,8 @@ h1 {
   z-index: 10;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 118px;
+  grid-template-rows: 1fr;
+  height: 100%;
   background: var(--bg);
   min-height: 0;
   overflow: hidden;

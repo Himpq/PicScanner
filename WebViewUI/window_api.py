@@ -240,7 +240,50 @@ class WindowApi:
         return self._do_maximize(win)
 
     def open_devtools(self):
-        """F12 打开 DevTools（remote-debugging-port）。"""
+        """F12 打开 DevTools（优先原生 OpenDevToolsWindow，回退 remote-debugging）。"""
+        # 优先原生 WebView2 DevTools 窗口
+        try:
+            import webview.platforms.winforms as _wf
+
+            win = self._get_window("")
+            if win is not None:
+                form = _wf.BrowserView.instances.get(getattr(win, "uid", None))
+                if form is not None and getattr(form, "browser", None) is not None:
+                    wv = getattr(form.browser, "webview", None)
+                    if wv is not None:
+                        core = getattr(wv, "CoreWebView2", None)
+                        if core is not None and hasattr(core, "OpenDevToolsWindow"):
+                            # 需在 UI 线程执行
+                            from System import Action
+
+                            done = [False]
+
+                            def _open():
+                                try:
+                                    core.OpenDevToolsWindow()
+                                    done[0] = True
+                                except Exception:
+                                    pass
+
+                            try:
+                                if bool(getattr(form, "InvokeRequired", False)):
+                                    form.Invoke(Action(_open))
+                                    # 给 UI 线程一点时间
+                                    import time as _t
+
+                                    for _ in range(20):
+                                        if done[0]:
+                                            break
+                                        _t.sleep(0.05)
+                                else:
+                                    _open()
+                                if done[0]:
+                                    return {"success": True, "mode": "native"}
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+        # 回退：remote-debugging-port 外部浏览器
         try:
             import os
             import webbrowser
@@ -252,7 +295,6 @@ class WindowApi:
                 port = int(config.get("devtools_port", 9222) or 9222)
             except Exception:
                 port = 9222
-            # 若环境变量已指定端口则优先
             raw = str(os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "") or "")
             if "--remote-debugging-port=" in raw:
                 try:
@@ -265,18 +307,7 @@ class WindowApi:
                 webbrowser.open(url)
             except Exception:
                 pass
-            # 同时尝试直接 evaluate_js 打开（若 WebView2 支持）
-            try:
-                win = self._get_window("")
-                if win:
-                    # 触发 WebView2 的 DevTools（若已启用 debug）
-                    try:
-                        win.evaluate_js("console.log('[F12] devtools requested')")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            return {"success": True, "url": url}
+            return {"success": True, "url": url, "mode": "remote"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 

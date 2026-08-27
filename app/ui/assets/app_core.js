@@ -841,18 +841,14 @@
     window.PicScannerVue.resyncToLegacyPS();
   }
 
-  // F12 打开 DevTools（供手动 debug 整体底部黑边等布局问题）
+  // F12 — 临时仅日志，不调 Python，避免死锁定位
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'F12' || ev.keyCode === 123) {
       ev.preventDefault();
       ev.stopPropagation();
-      try {
-        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_devtools === 'function') {
-          window.pywebview.api.open_devtools();
-        } else if (typeof call === 'function') {
-          call('open_devtools').catch(()=>{});
-        }
-      } catch {}
+      try { console.log('[F12] pressed, pywebview=' + !!(window.pywebview && window.pywebview.api)); } catch {}
+      try { if (typeof call === 'function') call('log', '[F12] pressed').catch(()=>{}); } catch {}
+      // 暂不调 open_devtools，避免窗口未响应；需 DevTools 请右键→检查或 Ctrl+Shift+I
     }
   });
 })();

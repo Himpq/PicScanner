@@ -72,18 +72,20 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 /* 复用 style.css 原 .date-pill/.has-cover/visible/active/focus-center */
 </style>
 <style>
-/* PR2 修复：日期栏未触底 — flex 撑满，配合 workspace grid 1fr */
+/* 修复 margin/padding-bottom 预留黑边 */
 #vue-date-rail {
+  display: block !important;
   height: 100% !important;
   min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column;
   box-sizing: border-box;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
 }
 #vue-date-rail .date-rail-list {
-  height: auto !important;
-  flex: 1 !important;
+  height: calc(100% - 28px) !important;
   min-height: 0;
   box-sizing: border-box;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
 }
 </style>

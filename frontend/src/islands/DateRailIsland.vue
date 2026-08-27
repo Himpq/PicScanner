@@ -40,24 +40,7 @@ function note(d) { return store.dateNotes.get(d.date_key) || ''; }
 let timer = null;
 onMounted(() => {
   store.hydrateFromLegacy();
-  timer = setInterval(() => store.hydrateFromLegacy(), 200);
-  // 诊断：测量 date-rail 高度，定位底部黑边
-  setTimeout(() => {
-    try {
-      const ws = document.getElementById('workspace') || document.querySelector('.workspace');
-      const vueRail = document.getElementById('vue-date-rail');
-      const list = vueRail ? vueRail.querySelector('.date-rail-list') : null;
-      const log = (el, name) => {
-        if (!el) return name + ': null';
-        const r = el.getBoundingClientRect();
-        const cs = getComputedStyle(el);
-        return `${name}: rect(h=${Math.round(r.height)}, top=${Math.round(r.top)}, bottom=${Math.round(r.bottom)}) cs(h=${cs.height}, min-h=${cs.minHeight}, display=${cs.display}, position=${cs.position})`;
-      };
-      const msg = ['[DateRail diag]', log(ws, 'workspace'), log(vueRail, 'vue-date-rail'), log(list, 'list')].join(' | ');
-      console.log(msg);
-      try { if (window.pywebview && window.pywebview.api && window.pywebview.api.log) window.pywebview.api.log(msg); } catch {}
-    } catch (e) { console.warn('diag failed', e); }
-  }, 800);
+  timer = setInterval(() => store.hydrateFromLegacy(), 400);
 });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 </script>

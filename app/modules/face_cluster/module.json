@@ -1,0 +1,7 @@
+{
+  "key": "face_cluster",
+  "name": "人脸聚类",
+  "version": "0.1.0",
+  "description": "YuNet+SFace 人脸按人物聚类（EXIF下方等待式扫描，~3MB CPU）",
+  "frontend": "face_cluster.js"
+}

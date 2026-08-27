@@ -15,6 +15,7 @@ import LightboxShell from './islands/LightboxShell.vue';
 import QuickEditShell from './islands/QuickEditShell.vue';
 import BatchModulesShell from './islands/BatchModulesShell.vue';
 import DateRailIsland from './islands/DateRailIsland.vue';
+import CategoryPanelIsland from './islands/CategoryPanelIsland.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -44,6 +45,7 @@ let lightboxShellApp = null;
 let quickEditShellApp = null;
 let batchModulesShellApp = null;
 let dateRailIslandApp = null;
+let categoryPanelIslandApp = null;
 
 // 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
 // 注意：在 index.html 既定加载顺序下，Vue 包先于 app_core.js 求值，而 window.PS
@@ -191,6 +193,16 @@ window.PicScannerVue = {
   unmountDateRailIsland() {
     if (dateRailIslandApp) { dateRailIslandApp.unmount(); dateRailIslandApp = null; }
   },
+  mountCategoryPanelIsland(el) {
+    if (!el) return false;
+    if (categoryPanelIslandApp) categoryPanelIslandApp.unmount();
+    categoryPanelIslandApp = withPinia(createApp(CategoryPanelIsland));
+    categoryPanelIslandApp.mount(el);
+    return true;
+  },
+  unmountCategoryPanelIsland() {
+    if (categoryPanelIslandApp) { categoryPanelIslandApp.unmount(); categoryPanelIslandApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
@@ -230,3 +242,35 @@ window.toggleVueDateRail = (on) => {
   } catch {}
 };
 autoMountDateRail();
+
+// PR3: CategoryPanel 原位岛 — 特性开关 ?vue_category=1 / localStorage
+function isVueCategoryEnabled() {
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.has('vue_category')) return params.get('vue_category') !== '0';
+    return localStorage.getItem('vue_category') === '1';
+  } catch { return false; }
+}
+function autoMountCategory() {
+  if (!isVueCategoryEnabled()) return;
+  const vueEl = document.getElementById('vue-category-panel');
+  const vanillaEl = document.getElementById('vanilla-category-panel');
+  if (!vueEl) return;
+  vueEl.classList.remove('hidden');
+  if (vanillaEl) vanillaEl.classList.add('hidden');
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountCategoryPanelIsland === 'function') {
+      window.PicScannerVue.mountCategoryPanelIsland(vueEl);
+    } else setTimeout(tryMount, 100);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+window.toggleVueCategory = (on) => {
+  try {
+    if (on) localStorage.setItem('vue_category', '1');
+    else localStorage.removeItem('vue_category');
+    location.reload();
+  } catch {}
+};
+autoMountCategory();

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/settings.css?v=settings-tabs-1" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=selected-frame-zindex-1" />
-  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=pr2-date-rail-fix-20260828-2" />
+  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=pr3-category-20260828" />
 </head>
 <body>
   <div id="app">
@@ -84,13 +84,14 @@
             <div id="exif-message" class="progress-msg"></div>
           </div>
         </div>
-        <div class="category-panel">
+        <div class="category-panel" id="vanilla-category-panel">
           <div class="category-head">
             <div class="section-title">分类</div>
             <button id="add-category" class="icon-btn category-add" title="新增分类" aria-label="新增分类"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
           </div>
           <div id="category-list" class="category-list"></div>
         </div>
+        <div class="category-panel hidden" id="vue-category-panel" aria-label="分类（Vue）"></div>
       </aside>
 
       <section class="gallery-wrap">
@@ -344,7 +345,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=pr2-date-rail-fix-20260828-2"></script>
+  <script src="assets/vue/picscanner-vue.js?v=pr3-category-20260828"></script>
   <script src="assets/app_core.js?v=settings-tabs-1"></script>
   <script src="assets/app_gallery.js?v=remove-exif-badge-20260827"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>

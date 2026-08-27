@@ -36,6 +36,10 @@ export const useGalleryStore = defineStore('gallery', () => {
 
   const photoOffsets = ref(new Map());
   const photoCache = ref(new Map());
+  const photoLoading = ref(new Set());
+  const INITIAL_PHOTO_LIMIT = 40;
+  const PHOTO_LOAD_BATCH = 20;
+  const RENDER_AHEAD_PHOTOS = 20;
 
   const scanStatus = ref('idle');
   const scanCountText = ref('0 / 0');
@@ -267,6 +271,68 @@ export const useGalleryStore = defineStore('gallery', () => {
     call('set_gallery_item_size', v).catch(() => {});
   }
 
+  async function fetchPhotosForDate(dateKey, { limit } = {}) {
+    if (!dateKey) return false;
+    if (photoLoading.value.has(dateKey)) return false;
+    const total = dateCounts.value.get(dateKey) || 0;
+    const offset = photoOffsets.value.get(dateKey) || 0;
+    if (total > 0 && offset >= total) return false;
+    photoLoading.value.add(dateKey);
+    // 委托 legacy 若存在且未切到 Vue 真实渲染（双轨期优先 legacy 的 replaceChild 逻辑）
+    // 但当 PhotoGrid 已 Vue 化时，直接走 Vue 分页
+    const PS = window.PS;
+    const useLegacy = false; // 设为 true 可回落到 legacy 的 DOM 替换
+    if (useLegacy && PS && typeof PS.loadPhotosForDate === 'function') {
+      try {
+        const ok = await PS.loadPhotosForDate(dateKey, { limit });
+        hydrateFromLegacy();
+        return ok;
+      } finally {
+        photoLoading.value.delete(dateKey);
+      }
+    }
+    const reqLimit = Math.max(1, Number(limit) || (offset === 0 ? INITIAL_PHOTO_LIMIT : PHOTO_LOAD_BATCH));
+    try {
+      const res = await call('list_photos', dateKey, offset, reqLimit, currentRootPath.value || null, currentSourceId.value || null, sortKey.value, filterPayload());
+      const photos = res.photos || [];
+      const existing = photoCache.value.get(dateKey) || [];
+      const next = [...existing];
+      photos.forEach((p, idx) => {
+        const targetIdx = offset + idx;
+        next[targetIdx] = p;
+        // 同步到 legacy 的 photoCache 以便灯箱/批量复用
+        if (PS && PS.state && PS.state.photoCache && p && p.id) {
+          try { PS.state.photoCache.set(Number(p.id), p); } catch {}
+        }
+      });
+      // 去除稀疏空位，保持连续
+      const compact = next.filter(Boolean);
+      photoCache.value.set(dateKey, photos.length ? [...compact] : existing);
+      // 触发响应式（Map 需重新赋值）
+      photoCache.value = new Map(photoCache.value);
+      photoOffsets.value.set(dateKey, offset + photos.length);
+      photoOffsets.value = new Map(photoOffsets.value);
+      // 更新 dateCounts 若后端返回更精确
+      if (photos.length < reqLimit && total > 0) {
+        // 已到末尾，无需额外处理
+      }
+      return photos.length > 0;
+    } catch (err) {
+      console.warn('[gallery] list_photos failed', dateKey, err);
+      return false;
+    } finally {
+      photoLoading.value.delete(dateKey);
+    }
+  }
+
+  function photosForDate(dateKey) {
+    return photoCache.value.get(dateKey) || [];
+  }
+
+  function isPhotoLoading(dateKey) {
+    return photoLoading.value.has(dateKey);
+  }
+
   // 从 legacy 拉取 source 上下文（进入工作区时调用）
   function syncSourceContext(rootPath, sourceId) {
     currentRootPath.value = String(rootPath || '');
@@ -276,6 +342,10 @@ export const useGalleryStore = defineStore('gallery', () => {
       PS.state.currentRootPath = currentRootPath.value;
       PS.state.currentSourceId = currentSourceId.value;
     }
+    // 切换来源时清空照片缓存
+    photoCache.value = new Map();
+    photoOffsets.value = new Map();
+    photoLoading.value = new Set();
   }
 
   const dateCount = computed(() => dates.value.length);
@@ -308,6 +378,7 @@ export const useGalleryStore = defineStore('gallery', () => {
     currentSourceId,
     photoOffsets,
     photoCache,
+    photoLoading,
     scanStatus,
     scanCountText,
     exifStatus,
@@ -319,6 +390,9 @@ export const useGalleryStore = defineStore('gallery', () => {
     currentSortLabel,
     fetchDates,
     fetchCategories,
+    fetchPhotosForDate,
+    photosForDate,
+    isPhotoLoading,
     setActiveCategory,
     applySort,
     applyFilter,

@@ -4,6 +4,7 @@ import { useLightboxStore } from '../stores/lightbox.js';
 import LightboxStage from '../components/lightbox/LightboxStage.vue';
 import LightboxInfoPanel from '../components/lightbox/LightboxInfoPanel.vue';
 import LightboxToolbar from '../components/lightbox/LightboxToolbar.vue';
+import CompareView from '../components/lightbox/CompareView.vue';
 
 const store = useLightboxStore();
 const open = computed(() => store.open);
@@ -43,8 +44,9 @@ watch(photo, () => {
 <template>
   <div v-if="open" class="ps-lightbox-shell" @click.self="close">
     <button class="lightbox-close" title="关闭" @click="close">×</button>
-    <LightboxStage />
-    <LightboxInfoPanel />
+    <LightboxStage v-if="!store.compareOpen" />
+    <CompareView v-else />
+    <LightboxInfoPanel v-if="!store.compareOpen" />
     <LightboxToolbar />
   </div>
 </template>

@@ -3,6 +3,9 @@ import { onMounted, computed, ref } from 'vue';
 import { useQuickEditStore } from '../stores/quickEdit.js';
 import QuickEditSliders from '../quickedit/QuickEditSliders.vue';
 import QuickEditHeader from '../components/quickedit/QuickEditHeader.vue';
+import QuickEditHistogram from '../components/quickedit/QuickEditHistogram.vue';
+import QuickEditHSL from '../components/quickedit/QuickEditHSL.vue';
+import QuickEditFrameLUT from '../components/quickedit/QuickEditFrameLUT.vue';
 
 const store = useQuickEditStore();
 const open = computed(() => store.open);
@@ -42,13 +45,17 @@ function syncSliders() {
     <div class="quick-edit-side">
       <div v-show="activeTab === 'adjust'" class="quick-edit-panel-page" data-quick-edit-panel-page="adjust">
         <div v-if="!hasPhoto" class="settings-empty">未选择照片</div>
-        <QuickEditSliders v-else ref="slidersRef" />
+        <template v-else>
+          <QuickEditHistogram />
+          <QuickEditSliders ref="slidersRef" />
+          <QuickEditHSL />
+        </template>
       </div>
       <div v-show="activeTab === 'frame'" class="quick-edit-panel-page" data-quick-edit-panel-page="frame">
-        <div class="settings-empty">相框 / LUT / 预设 由 legacy 承载，Pinia 已镜像参数。后续增量将把 `quick_edit_worker` 的相框图层迁入 Vue。</div>
+        <QuickEditFrameLUT />
       </div>
       <div v-show="activeTab === 'hsl'" class="quick-edit-panel-page" data-quick-edit-panel-page="hsl">
-        <div class="settings-empty">HSL / 曲线 / 分离色调 已在上方滑杆中提供，完整面板待 P4 增量。</div>
+        <QuickEditHSL />
       </div>
     </div>
 

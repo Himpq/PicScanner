@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, computed } from 'vue';
 import { useBatchStore } from '../stores/batch.js';
 import { useModulesStore } from '../stores/modules.js';
+import BatchQueue from '../components/batch/BatchQueue.vue';
 
 const batch = useBatchStore();
 const mods = useModulesStore();
@@ -57,6 +58,8 @@ onBeforeUnmount(() => {
       <span>当前模块：{{ activeKey }}</span>
       <button class="ghost-btn" @click="closeMod">关闭</button>
     </div>
+
+    <BatchQueue />
   </div>
 </template>
 

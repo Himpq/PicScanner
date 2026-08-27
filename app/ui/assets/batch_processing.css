@@ -1,5 +1,6 @@
 .photo-card.batch-selected {
-  box-shadow: 0 0 0 2px rgba(255, 184, 23, 0.92), 0 0 0 5px rgba(255, 184, 23, 0.16);
+  /* 改用 inset：选中描边/辉光绘在卡片内侧，避免被 .gallery-scroll{overflow:auto} 在滚动边缘裁切 */
+  box-shadow: inset 0 0 0 2px rgba(255, 184, 23, 0.92), inset 0 0 0 5px rgba(255, 184, 23, 0.16);
 }
 
 .photo-card.batch-selected::after {

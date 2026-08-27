@@ -240,68 +240,79 @@ class WindowApi:
         return self._do_maximize(win)
 
     def open_devtools(self):
-        """F12 打开 DevTools — 非阻塞，避免 UI 死锁。"""
-        def _do():
-            # 优先原生
-            try:
-                import webview.platforms.winforms as _wf
+        """F12 打开 DevTools — 优先原生，失败则提示开启 debug 重启。"""
+        # 尝试原生（需在 UI 线程）
+        try:
+            import webview.platforms.winforms as _wf
+            from System import Action
 
-                win = self._get_window("")
-                if win is not None:
-                    form = _wf.BrowserView.instances.get(getattr(win, "uid", None))
-                    if form is not None and getattr(form, "browser", None) is not None:
-                        wv = getattr(form.browser, "webview", None)
-                        if wv is not None:
-                            core = getattr(wv, "CoreWebView2", None)
-                            if core is not None and hasattr(core, "OpenDevToolsWindow"):
-                                from System import Action
+            win = self._get_window("")
+            if win is not None:
+                form = _wf.BrowserView.instances.get(getattr(win, "uid", None))
+                if form is not None and getattr(form, "browser", None) is not None:
+                    wv = getattr(form.browser, "webview", None)
+                    core = getattr(wv, "CoreWebView2", None) if wv is not None else None
+                    # 若 CoreWebView2 尚未就绪，稍后重试一次
+                    if core is None:
+                        import time as _t
 
-                                def _open():
-                                    try:
-                                        core.OpenDevToolsWindow()
-                                    except Exception:
-                                        pass
-
+                        for _ in range(10):
+                            _t.sleep(0.15)
+                            try:
+                                wv2 = getattr(form.browser, "webview", None)
+                                core2 = getattr(wv2, "CoreWebView2", None) if wv2 is not None else None
+                                if core2 is not None:
+                                    core = core2
+                                    break
+                            except Exception:
+                                pass
+                    if core is not None and hasattr(core, "OpenDevToolsWindow"):
+                        def _open():
+                            try:
+                                core.OpenDevToolsWindow()
+                            except Exception as e:
+                                # 可能是 debug 未启用，尝试通过环境变量启用后提示重启
                                 try:
-                                    if bool(getattr(form, "InvokeRequired", False)):
-                                        form.BeginInvoke(Action(_open))
-                                    else:
-                                        _open()
-                                    return
+                                    print(f"[F12] OpenDevToolsWindow failed: {e}")
                                 except Exception:
                                     pass
-            except Exception:
-                pass
-            # 回退：remote
+
+                        try:
+                            if bool(getattr(form, "InvokeRequired", False)):
+                                form.BeginInvoke(Action(_open))
+                            else:
+                                _open()
+                            return {"success": True, "mode": "native"}
+                        except Exception as e:
+                            print(f"[F12] BeginInvoke failed: {e}")
+        except Exception as e:
+            print(f"[F12] native attempt failed: {e}")
+
+        # 原生失败：提示需开启 devtools 后重启
+        try:
+            import webbrowser
+
+            from .config import config as _cfg
+
+            # 持久化开启 devtools，下次启动生效
             try:
-                import os
-                import webbrowser
-
-                from .config import config
-
-                port = 9222
-                try:
-                    port = int(config.get("devtools_port", 9222) or 9222)
-                except Exception:
-                    port = 9222
-                raw = str(os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "") or "")
-                if "--remote-debugging-port=" in raw:
-                    try:
-                        part = raw.split("--remote-debugging-port=")[-1].split()[0].strip()
-                        port = int(part.split(",")[0])
-                    except Exception:
-                        pass
-                try:
-                    webbrowser.open(f"http://127.0.0.1:{port}")
-                except Exception:
-                    pass
+                _cfg.set("devtools_enabled", True)
+                _cfg.set("devtools_auto_open", False)
             except Exception:
                 pass
-
-        import threading
-
-        threading.Thread(target=_do, daemon=True).start()
-        return {"success": True}
+            msg = (
+                "DevTools 未启用（debug=False），已自动开启 devtools_enabled，\n"
+                "请重启 PicScanner 后再按 F12。将为你打开 chrome://inspect 备用页。"
+            )
+            print(f"[F12] {msg}")
+            try:
+                # 仍尝试打开 remote 页面（下次启动后 9222 才会监听）
+                webbrowser.open("http://127.0.0.1:9222")
+            except Exception:
+                pass
+            return {"success": False, "message": msg, "need_restart": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     # ── 多窗口工厂 ────────────────────────────────────────────
     def create_child_window(self, opts):

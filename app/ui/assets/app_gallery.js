@@ -2759,20 +2759,15 @@
     PS.moreObserver.observe(el);
   }
 
-  function photoStatusText(photo, previewLoaded) {
-    if (photo.lens_model || photo.model) return photo.lens_model || photo.model;
-    if (photo.exif_status === 'complete') return 'EXIF';
-    if (photo.exif_status === 'failed') return 'EXIF 失败';
-    if (photo.preview_failed) return '预览失败';
-    if (photo.previewable || photo.original_url || photo.preview_url) return previewLoaded ? '预览' : '加载中';
-    return '';
-  }
-
   function updatePhotoCardMeta(card, photo, previewLoaded) {
     const meta = card.querySelector('.photo-meta');
     if (!meta) return;
     meta.children[0].textContent = photo.format_label || photo.format || '';
-    meta.children[1].textContent = photoStatusText(photo, previewLoaded);
+    // 右下角状态/EXIF 角标不再显示（用户要求移除缩略图上的镜头名与 EXIF 标记）
+    if (meta.children[1]) {
+      meta.children[1].textContent = '';
+      meta.children[1].style.display = 'none';
+    }
     applyPhotoMarkToCard(card, photo);
   }
 

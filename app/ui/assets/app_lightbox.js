@@ -939,7 +939,7 @@
     const localUrl = lightboxLocalUrl(photo, cachedPhoto);
     const url = lightboxSourceUrl(photo, cachedPhoto);
     const thumbnailUrl = transientPreview ? '' : (photo.preview_url || cachedPhoto.preview_url || '');
-    const previewUrl = thumbnailUrl && thumbnailUrl !== url
+    let previewUrl = thumbnailUrl && thumbnailUrl !== url
       ? thumbnailUrl
       : '';
     const photoId = Number(photo.id || 0);
@@ -992,6 +992,31 @@
       els.lightbox.classList.remove('loading');
       els.lightbox.classList.remove('previewing');
       return;
+    }
+    if (!previewUrl && previewable && photoId) {
+      // 列表未返回缩略图（list_photos 未强制生成 preview_url）时，先异步拉取缩略图立即显示，
+      // 全图（original_url/lightbox_url）仍在后台加载，加载完成后 revealLoadedImage 秒切全图。
+      call('get_photo_preview', photoId).then((res) => {
+        if (!isCurrent()) return;
+        const thumb = res && res.success && res.photo ? (res.photo.preview_url || '') : '';
+        if (!thumb) return;
+        const merged = mergePhotoPreserve(cachedPhoto, res.photo);
+        state.photoCache.set(photoId, merged);
+        state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
+        const card = els.gallery.querySelector('[data-photo-id="' + photoId + '"]');
+        if (card) {
+          const img = card.querySelector('img[data-photo-id]');
+          if (img && !PS.imageHasSource(img)) img.src = merged.preview_url;
+          PS.updatePhotoCardMeta(card, merged, true);
+        }
+        previewUrl = thumb;
+        els.lightbox.classList.remove('loading');
+        els.lightbox.classList.add('previewing');
+        showPreviewImage();
+      }).catch((err) => {
+        if (!isCurrent()) return;
+        console.warn('[PicScanner] 异步缩略图获取失败', { photoId, error: err });
+      });
     }
     if (previewUrl) {
       els.lightbox.classList.remove('loading');

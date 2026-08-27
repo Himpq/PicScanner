@@ -288,28 +288,17 @@ class WindowApi:
         except Exception as e:
             print(f"[F12] native attempt failed: {e}")
 
-        # 原生失败：提示需开启 devtools 后重启
+        # 原生失败：提示需开启 devtools 后重启，不再跳 Edge
         try:
-            import webbrowser
-
             from .config import config as _cfg
 
-            # 持久化开启 devtools，下次启动生效
             try:
                 _cfg.set("devtools_enabled", True)
                 _cfg.set("devtools_auto_open", False)
             except Exception:
                 pass
-            msg = (
-                "DevTools 未启用（debug=False），已自动开启 devtools_enabled，\n"
-                "请重启 PicScanner 后再按 F12。将为你打开 chrome://inspect 备用页。"
-            )
+            msg = "DevTools 未启用，已自动开启 devtools_enabled，请重启 PicScanner 后再按 F12"
             print(f"[F12] {msg}")
-            try:
-                # 仍尝试打开 remote 页面（下次启动后 9222 才会监听）
-                webbrowser.open("http://127.0.0.1:9222")
-            except Exception:
-                pass
             return {"success": False, "message": msg, "need_restart": True}
         except Exception as e:
             return {"success": False, "message": str(e)}

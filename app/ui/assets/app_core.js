@@ -841,14 +841,23 @@
     window.PicScannerVue.resyncToLegacyPS();
   }
 
-  // F12 — 临时仅日志，不调 Python，避免死锁定位
+  // F12 打开 DevTools
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'F12' || ev.keyCode === 123) {
       ev.preventDefault();
       ev.stopPropagation();
-      try { console.log('[F12] pressed, pywebview=' + !!(window.pywebview && window.pywebview.api)); } catch {}
-      try { if (typeof call === 'function') call('log', '[F12] pressed').catch(()=>{}); } catch {}
-      // 暂不调 open_devtools，避免窗口未响应；需 DevTools 请右键→检查或 Ctrl+Shift+I
+      try {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_devtools === 'function') {
+          window.pywebview.api.open_devtools().then((r) => {
+            try { console.log('[F12] open_devtools', r); } catch {}
+            if (r && r.need_restart) alert('DevTools 已开启，需重启 PicScanner 后再按 F12');
+          }).catch((e) => { try { console.warn('F12 failed', e); } catch {} });
+        } else if (typeof call === 'function') {
+          call('open_devtools').then((r) => {
+            if (r && r.need_restart) alert('DevTools 已开启，需重启 PicScanner 后再按 F12');
+          }).catch(()=>{});
+        }
+      } catch {}
     }
   });
 })();

@@ -239,6 +239,47 @@ class WindowApi:
             pass
         return self._do_maximize(win)
 
+    def open_devtools(self):
+        """F12 打开 DevTools（remote-debugging-port）。"""
+        try:
+            import os
+            import webbrowser
+
+            from .config import config
+
+            port = 9222
+            try:
+                port = int(config.get("devtools_port", 9222) or 9222)
+            except Exception:
+                port = 9222
+            # 若环境变量已指定端口则优先
+            raw = str(os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "") or "")
+            if "--remote-debugging-port=" in raw:
+                try:
+                    part = raw.split("--remote-debugging-port=")[-1].split()[0].strip()
+                    port = int(part.split(",")[0])
+                except Exception:
+                    pass
+            url = f"http://127.0.0.1:{port}"
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+            # 同时尝试直接 evaluate_js 打开（若 WebView2 支持）
+            try:
+                win = self._get_window("")
+                if win:
+                    # 触发 WebView2 的 DevTools（若已启用 debug）
+                    try:
+                        win.evaluate_js("console.log('[F12] devtools requested')")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return {"success": True, "url": url}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
     # ── 多窗口工厂 ────────────────────────────────────────────
     def create_child_window(self, opts):
         """创建一个带自绘标题栏的子窗口。

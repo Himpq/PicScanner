@@ -840,4 +840,19 @@
   if (window.PicScannerVue && typeof window.PicScannerVue.resyncToLegacyPS === 'function') {
     window.PicScannerVue.resyncToLegacyPS();
   }
+
+  // F12 打开 DevTools（供手动 debug 整体底部黑边等布局问题）
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'F12' || ev.keyCode === 123) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      try {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_devtools === 'function') {
+          window.pywebview.api.open_devtools();
+        } else if (typeof call === 'function') {
+          call('open_devtools').catch(()=>{});
+        }
+      } catch {}
+    }
+  });
 })();

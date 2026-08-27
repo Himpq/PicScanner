@@ -1,0 +1,17 @@
+/* tokens.css — 从 app/ui/assets/style.css :root 抽离的设计令牌
+ * PR1 地基：零 UI 改动，仅提供单一真源，后续 components 复用此文件而非硬编码
+ * 保持与 style.css :root 100% 一致，后续新增令牌在此扩展
+ */
+:root {
+  --bg: #050505;
+  --panel: #0b0b0d;
+  --panel-2: #121216;
+  --panel-3: #18181d;
+  --line: rgba(255,255,255,0.08);
+  --muted: rgba(255,255,255,0.56);
+  --text: #f4f4f5;
+  --accent: #e0a45a;
+  --danger: #ff5c74;
+  --titlebar-h: var(--nc-titlebar-h, 36px);
+  --photo-min-size: 168px;
+}

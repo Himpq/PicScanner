@@ -938,7 +938,14 @@
     const cachedPhoto = transientPreview ? photo : (state.photoCache.get(Number(photo.id || 0)) || photo);
     const localUrl = lightboxLocalUrl(photo, cachedPhoto);
     const url = lightboxSourceUrl(photo, cachedPhoto);
-    const thumbnailUrl = transientPreview ? '' : (photo.preview_url || cachedPhoto.preview_url || '');
+    let thumbnailUrl = transientPreview ? '' : (photo.thumbnail_url || photo.preview_url || cachedPhoto.thumbnail_url || cachedPhoto.preview_url || '');
+    // 兜底：若对象无缩略图但 gallery 中已有 <img>（PhotoGrid 已渲染），直接复用其 src 秒显
+    if (!thumbnailUrl) {
+      try {
+        const cardImg = document.querySelector('[data-photo-id="' + (photo.id || 0) + '"] img');
+        if (cardImg && cardImg.src) thumbnailUrl = cardImg.src;
+      } catch {}
+    }
     let previewUrl = thumbnailUrl && thumbnailUrl !== url
       ? thumbnailUrl
       : '';
@@ -950,14 +957,29 @@
       && state.lightbox.photo
       && Number(state.lightbox.photo.id || 0) === photoId
     );
+    // 调试：打印本次打开的各 URL，便于定位“loading→缩略→突变”
+    try { console.log('[lightbox] open', { id: photoId, thumb: thumbnailUrl, preview: previewUrl, url: url, previewable: previewable }); } catch {}
+    try { if (typeof call === 'function') call('log', '[lightbox] open id=' + photoId + ' thumb=' + (thumbnailUrl||'') + ' preview=' + (previewUrl||'') + ' url=' + (url||'')).catch(()=>{}); } catch {}
     els.lightboxImg.onload = null;
     els.lightboxImg.onerror = null;
     els.lightboxImg.alt = keepCurrentImage ? '' : (photo.filename || '');
     if (!keepCurrentImage) els.lightboxImg.removeAttribute('src');
     if (!transientPreview && url && !localUrl) warmLightboxCache(cachedPhoto);
     if (!url && previewable && photoId) {
-      els.lightbox.classList.add('loading');
-      els.lightbox.classList.remove('previewing');
+      // 无高清 URL 时先秒显缩略图（若有），再后台生成高清，避免长时间 loading 空转
+      if (previewUrl) {
+        els.lightbox.classList.remove('loading');
+        els.lightbox.classList.add('previewing');
+        try { if (photo.width && photo.height) applyLightboxImageDisplaySize(photo.width, photo.height, { allowUpscale: true }); } catch {}
+        els.lightboxImg.src = previewUrl;
+        // 后台解码尺寸校正
+        try {
+          const p = new Image(); p.decoding='async'; p.onload=()=>{ try{ const d=p.decode?p.decode():Promise.resolve(); d.then(()=>{ if(!isCurrent()) return; const b=lightboxImageBasis(photo,p.naturalWidth,p.naturalHeight); applyLightboxImageDisplaySize(b.width,b.height,{allowUpscale:!Number(photo.width)}); }).catch(()=>{}); }catch{} }; p.onerror=()=>{}; p.src=previewUrl;
+        } catch {}
+      } else {
+        els.lightbox.classList.add('loading');
+        els.lightbox.classList.remove('previewing');
+      }
       call('get_photo_lightbox_preview', photoId).then((res) => {
         if (!isCurrent()) return;
         const loadedUrl = res && res.photo ? (res.photo.lightbox_url || res.photo.original_url || '') : '';
@@ -993,13 +1015,33 @@
       els.lightbox.classList.remove('previewing');
       return;
     }
+    let previewReady = false;
+    const ensurePreview = () => {
+      if (previewUrl) {
+        previewReady = true;
+        els.lightbox.classList.add('previewing');
+        els.lightbox.classList.add('loading');
+        if (photo.width && photo.height) applyLightboxImageDisplaySize(photo.width, photo.height, { allowUpscale: true });
+        els.lightboxImg.src = previewUrl;
+        return true;
+      }
+      return false;
+    };
+
     if (!previewUrl && previewable && photoId) {
-      // 列表未返回缩略图（list_photos 未强制生成 preview_url）时，先异步拉取缩略图立即显示，
-      // 全图（original_url/lightbox_url）仍在后台加载，加载完成后 revealLoadedImage 秒切全图。
+      // 无缩略图时先占位 loading，待缩略图到位再切 previewing，避免原图抢先
+      els.lightbox.classList.add('loading');
+      els.lightbox.classList.remove('previewing');
+      els.lightboxImg.style.width = '';
+      els.lightboxImg.style.height = '';
       call('get_photo_preview', photoId).then((res) => {
         if (!isCurrent()) return;
         const thumb = res && res.success && res.photo ? (res.photo.preview_url || '') : '';
-        if (!thumb) return;
+        if (!thumb) {
+          // 取不到缩略图则直接走原图
+          if (url) preloader.src = url;
+          return;
+        }
         const merged = mergePhotoPreserve(cachedPhoto, res.photo);
         state.photoCache.set(photoId, merged);
         state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
@@ -1010,24 +1052,26 @@
           PS.updatePhotoCardMeta(card, merged, true);
         }
         previewUrl = thumb;
-        els.lightbox.classList.remove('loading');
-        els.lightbox.classList.add('previewing');
+        ensurePreview();
         showPreviewImage();
+        if (url && !preloader.src) preloader.src = url;
       }).catch((err) => {
         if (!isCurrent()) return;
         console.warn('[PicScanner] 异步缩略图获取失败', { photoId, error: err });
+        if (url && !preloader.src) preloader.src = url;
       });
-    }
-    if (previewUrl) {
-      els.lightbox.classList.remove('loading');
-      els.lightbox.classList.add('previewing');
-    } else if (keepCurrentImage) {
-      els.lightbox.classList.remove('loading', 'previewing');
+    } else if (!ensurePreview()) {
+      if (keepCurrentImage) {
+        els.lightbox.classList.remove('loading', 'previewing');
+        previewReady = true;
+      } else {
+        els.lightbox.classList.add('loading');
+        els.lightbox.classList.remove('previewing');
+        els.lightboxImg.style.width = '';
+        els.lightboxImg.style.height = '';
+      }
     } else {
-      els.lightbox.classList.add('loading');
-      els.lightbox.classList.remove('previewing');
-      els.lightboxImg.style.width = '';
-      els.lightboxImg.style.height = '';
+      previewReady = true;
     }
     let originalRevealed = false;
     const revealLoadedImage = () => {
@@ -1042,6 +1086,7 @@
 
     const showPreviewImage = () => {
       if (!previewUrl) return;
+      // 缩略图已同步设为 src，此处仅做解码后尺寸校正（避免布局抖动）
       const preview = new Image();
       preview.decoding = 'async';
       preview.onload = () => {
@@ -1054,16 +1099,14 @@
             basis.height,
             { allowUpscale: !Number(photo.width) || !Number(photo.height) }
           );
-          els.lightboxImg.src = previewUrl;
+          // 已显示缩略图，无需再次设 src
         }).catch((err) => {
           if (!isCurrent()) return;
           console.warn('[PicScanner] 缩略图解码失败', err);
         });
       };
       preview.onerror = () => {
-        if (!isCurrent()) return;
-        els.lightbox.classList.add('loading');
-        els.lightbox.classList.remove('previewing');
+        // 保持已显示的缩略图，仅打日志
         console.warn('[PicScanner] 缩略图加载失败: ' + previewUrl);
       };
       preview.src = previewUrl;
@@ -1090,8 +1133,10 @@
         url,
       });
     };
-    preloader.src = url;
-    showPreviewImage();
+    // 若已就绪缩略图则立即并行加载原图；若在等待异步缩略图则由回调内启动，避免原图抢先
+    const waitingForThumb = !previewUrl && previewable && !!photoId && !previewReady;
+    if (url && !waitingForThumb) preloader.src = url;
+    if (previewReady) showPreviewImage();
   }
 
   function lightboxOpenableCards() {

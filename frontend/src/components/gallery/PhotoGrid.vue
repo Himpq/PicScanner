@@ -164,7 +164,7 @@ watch(dates, () => {
 .photo-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(var(--photo-min-size,168px), 1fr)); gap:10px; }
 .photo-card { position:relative; aspect-ratio: 1; overflow:hidden; border-radius:8px; background: #0d0d10; cursor:pointer; }
 .photo-card img { width:100%; height:100%; object-fit:cover; display:block; }
-.photo-card.batch-selected { box-shadow: 0 0 0 2px #ffb817; }
+/* 选中描边统一由 batch_processing.css 的 .photo-card.batch-selected::after 承载（z-index 高于图片），此处不再重复定义 */
 .photo-fav-badge { position:absolute; top:6px; right:6px; width:20px; height:20px; border-radius:50%; background: #ffb817; color:#000; display:grid; place-items:center; font-size:11px; }
 .date-header { display:flex; align-items:baseline; gap:10px; padding:8px 2px; }
 .date-header strong { font-size:14px; font-weight:700; }

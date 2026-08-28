@@ -23,7 +23,14 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-from plugins.semantic_search.encoder import MODEL_ID, ClipEncoder, load_image
+try:
+    from plugins.semantic_search.encoder_onnx import MODEL_ID, ClipEncoder, load_image, onnx_available
+
+    if not onnx_available():
+        raise ImportError("onnx not exported")
+except Exception:
+    from plugins.semantic_search.encoder import MODEL_ID, ClipEncoder, load_image
+
 from plugins.semantic_search.store import VectorStore
 
 DEFAULT_TEST_DIR = PROJECT_ROOT / "test"
@@ -225,17 +232,27 @@ def main() -> None:
     needs_encoder = args.command in ("scan", "search") or args.command is None
     encoder = None
     if needs_encoder:
+        # 优先检查 onnx，再回退 torch
+        try:
+            from plugins.semantic_search.encoder_onnx import LOCAL_ONNX_DIR, onnx_available
+
+            has_onnx = onnx_available()
+        except Exception:
+            has_onnx = False
         from plugins.semantic_search.encoder import LOCAL_MODEL_DIR
 
-        if not (LOCAL_MODEL_DIR / "config.json").exists():
+        if not has_onnx and not (LOCAL_MODEL_DIR / "config.json").exists():
             print(f"[init] 未找到本地模型目录: {LOCAL_MODEL_DIR}")
             print("[init] 请先执行一次模型下载（约 700MB，支持断点续传）:")
             print("       python -m plugins.semantic_search.download_model")
             return
+        if has_onnx:
+            print(f"[init] 检测到 ONNX 模型 {LOCAL_ONNX_DIR}，优先使用 onnxruntime")
         print("[init] 正在加载 Chinese-CLIP 模型...")
         t0 = time.time()
         encoder = ClipEncoder()
-        print(f"[init] 模型就绪（设备: {encoder.device}，用时 {time.time() - t0:.1f} 秒）")
+        backend = "onnx" if has_onnx else "torch"
+        print(f"[init] 模型就绪（后端: {backend} 设备: {encoder.device}，用时 {time.time() - t0:.1f} 秒）")
 
     if args.command == "scan":
         cmd_scan(store, encoder, Path(args.folder), rebuild=args.rebuild)

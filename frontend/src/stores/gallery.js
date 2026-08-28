@@ -357,10 +357,6 @@ export const useGalleryStore = defineStore('gallery', () => {
             try {
               r = await call('module_api', 'semantic_search', 'search', semQ, 8, semSid, semFilter);
             } catch (e) { return; }
-            if ((!r || !r.success || !Array.isArray(r.results) || !r.results.length) && semSid) {
-              if (semSeq !== searchSeq || searchQuery.value !== semQ) return;
-              try { r = await call('module_api', 'semantic_search', 'search', semQ, 8, '', semFilter); } catch (e) { return; }
-            }
             if (semSeq !== searchSeq) return;
             if (searchQuery.value !== semQ) return;
             if (!r || !r.success || !Array.isArray(r.results) || !r.results.length) return;
@@ -372,15 +368,17 @@ export const useGalleryStore = defineStore('gallery', () => {
               const key = String(x.id || x.item_key || x.path);
               if (seen.has(key)) continue;
               seen.add(key);
+              // 后端已尽量给出 preview_url，仍为空时用 path 兜底，避免缩略图空白
+              const fallbackUrl = x.preview_url || x.path || '';
               merged.push(Object.assign({
                 type: 'photo',
                 search_label: '语义',
                 search_title: semQ,
                 search_match: '语义 ' + (Number(x.score).toFixed(2)),
-                preview_url: x.preview_url || x.path || '',
+                preview_url: fallbackUrl,
                 path: x.path || '',
                 filename: (x.path || '').split(/[\\/]/).pop() || '',
-              }, x));
+              }, x, { preview_url: x.preview_url || fallbackUrl }));
               if (++added >= 5) break;
             }
             if (added) {

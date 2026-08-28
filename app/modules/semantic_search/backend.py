@@ -24,27 +24,43 @@ _encoder_loading_logged = False
 
 def _get_encoder():
     global _cached_encoder, _cached_encoder_id, _encoder_loading_logged
-    from plugins.semantic_search.encoder import ClipEncoder, resolve_model_source
+    # 优先走 ONNX（0.2s 导入，无 torch 依赖），缺 onnx 文件时回退 torch
+    try:
+        from plugins.semantic_search.encoder_onnx import ClipEncoder as OnnxClipEncoder, resolve_model_source as onnx_resolve, onnx_available
+
+        if onnx_available():
+            ClipEncoder = OnnxClipEncoder
+            resolve_model_source = onnx_resolve
+            _backend_kind = "onnx"
+        else:
+            raise ImportError("onnx not exported yet")
+    except Exception as _e:
+        from plugins.semantic_search.encoder import ClipEncoder, resolve_model_source
+
+        _backend_kind = "torch"
+        # _log(f"回退 torch 后端: {_e}")
     src = resolve_model_source()
+    cache_key = f"{_backend_kind}:{src}"
     # 快路径：已缓存直接返回
-    if _cached_encoder is not None and _cached_encoder_id == src:
+    if _cached_encoder is not None and _cached_encoder_id == cache_key:
         return _cached_encoder
-    # 慢路径：加锁 + 双重检查，避免并发搜索同时触发 5~10 次 10s 加载
+    # 慢路径：加锁 + 双重检查，避免并发搜索同时触发多次加载
     with _encoder_lock:
-        if _cached_encoder is not None and _cached_encoder_id == src:
+        if _cached_encoder is not None and _cached_encoder_id == cache_key:
             return _cached_encoder
         # 只有一个线程会走到这里，其余线程在锁外等待后直接命中缓存
         if not _encoder_loading_logged or _cached_encoder is None:
-            print(f"[semantic_search] 正在加载模型 {src} ...", flush=True)
+            print(f"[semantic_search] 正在加载模型 ({_backend_kind}) {src} ...", flush=True)
             _encoder_loading_logged = True
         else:
-            _log(f"等待模型加载完成 {src} ...")
+            _log(f"等待模型加载完成 ({_backend_kind}) {src} ...")
         import time
-        t0=time.time()
+
+        t0 = time.time()
         enc = ClipEncoder()
-        print(f"[semantic_search] 模型加载完成 device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
+        print(f"[semantic_search] 模型加载完成 ({_backend_kind}) device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
         _cached_encoder = enc
-        _cached_encoder_id = src
+        _cached_encoder_id = cache_key
         return enc
 
 
@@ -79,7 +95,7 @@ class SemanticSearchModule:
                 if v is not None:
                     auto_load = bool(v)
             if auto_load:
-                self.warmup_model(delay=2.0)
+                self.warmup_model(delay=0.3)
         except Exception as exc:
             _log(f"安排模型预热失败（已忽略）: {exc}")
 
@@ -268,7 +284,15 @@ class SemanticSearchModule:
         self._push_event("semantic_index_progress", {"phase": "loading_model", "done": 0, "total": todo, "source_id": source_id})
         _log(f"准备加载模型，共 {todo} 张待编码 source={source_id or '*'}")
         try:
-            from plugins.semantic_search.encoder import MODEL_ID, load_image  # type: ignore
+            try:
+                from plugins.semantic_search.encoder_onnx import MODEL_ID, load_image  # type: ignore
+                from plugins.semantic_search.encoder_onnx import onnx_available as _oa
+
+                if not _oa():
+                    raise ImportError("onnx not ready")
+            except Exception:
+                from plugins.semantic_search.encoder import MODEL_ID, load_image  # type: ignore
+
             encoder = _get_encoder()
         except Exception as exc:
             import traceback
@@ -491,12 +515,52 @@ class SemanticSearchModule:
             storage = self._storage
             from pathlib import Path as _Path
             try:
-                from app.backend.thumbnailer import existing_thumbnail, existing_lightbox_preview
+                from app.backend.thumbnailer import existing_thumbnail, existing_lightbox_preview, _thumb_path_from_stat, _lightbox_preview_path
                 from app.backend.api import _versioned_file_uri
                 from app.backend.exif_reader import is_renderable_image
             except Exception:
-                existing_thumbnail = existing_lightbox_preview = _versioned_file_uri = None  # type: ignore
+                existing_thumbnail = existing_lightbox_preview = _versioned_file_uri = _thumb_path_from_stat = _lightbox_preview_path = None  # type: ignore
                 is_renderable_image = lambda p: True  # type: ignore
+
+            def _cached_thumb_url(photo_row, fallback_path=""):
+                """即使原文件离线（不存在），也尝试用 mtime/size 找回已缓存的缩略图。"""
+                ppath = str((photo_row or {}).get("path") or fallback_path or "")
+                if not ppath:
+                    return ""
+                # 1) 正常路径：文件存在时走现有逻辑
+                try:
+                    if existing_thumbnail is not None:
+                        thumb = existing_thumbnail(ppath)
+                        if thumb is not None and _versioned_file_uri is not None:
+                            return _versioned_file_uri(thumb)
+                except Exception:
+                    pass
+                # 2) 离线回退：用 DB 里的 mtime/size 直接算 thumb key，不依赖文件存在
+                try:
+                    if _thumb_path_from_stat is not None and _versioned_file_uri is not None and photo_row is not None:
+                        # photos 表里 mtime/size 字段名可能是 mtime/size 或 file_mtime/file_size
+                        mtime = float(photo_row.get("mtime") or photo_row.get("file_mtime") or 0)
+                        size = int(photo_row.get("size") or photo_row.get("file_size") or 0)
+                        if mtime and size:
+                            tpath = _thumb_path_from_stat(_Path(ppath), mtime_ns=int(mtime * 1e9), size=size)
+                            if tpath.exists() and tpath.stat().st_size > 0:
+                                return _versioned_file_uri(tpath)
+                        # lightbox 预览也尝试
+                        if existing_lightbox_preview is None and _lightbox_preview_path is not None:
+                            lb_path = _lightbox_preview_path(_Path(ppath))
+                            if lb_path.exists() and lb_path.stat().st_size > 0:
+                                return _versioned_file_uri(lb_path)
+                except Exception:
+                    pass
+                # 3) 最后兜底：用文件 file:// 直显（仅当文件实际存在且可渲染）
+                try:
+                    pp = _Path(ppath)
+                    if pp.exists() and is_renderable_image(pp) and _versioned_file_uri is not None:
+                        return _versioned_file_uri(pp)
+                except Exception:
+                    pass
+                return ""
+
             results = []
             for r in scored:
                 rec = r.record
@@ -525,33 +589,9 @@ class SemanticSearchModule:
                     except Exception:
                         photo_row = None
                 if photo_row is not None:
-                    # 复用本体缩略图判断：只看文件是否存在 + 后缀，不读图（和 thumbnail.existing_thumbnail 一致）
+                    # 复用本体缩略图判断：优先走缓存，即使原文件离线也能出图
                     ppath = str(photo_row.get("path") or rec.path)
-                    preview_url = ""
-                    try:
-                        # 1) 420 缩略图
-                        if existing_thumbnail is not None:
-                            thumb = existing_thumbnail(ppath)
-                            if thumb is not None and _versioned_file_uri is not None:
-                                preview_url = _versioned_file_uri(thumb)
-                        # 2) RAW lightbox 预览
-                        if not preview_url and existing_lightbox_preview is not None:
-                            try:
-                                lb = existing_lightbox_preview(ppath)
-                                if lb is not None and _versioned_file_uri is not None:
-                                    preview_url = _versioned_file_uri(lb)
-                            except Exception:
-                                pass
-                        # 3) 兜底：可渲染原图直显（JPG/PNG/WebP）
-                        if not preview_url:
-                            try:
-                                pp = _Path(ppath)
-                                if pp.exists() and is_renderable_image(pp) and _versioned_file_uri is not None:
-                                    preview_url = _versioned_file_uri(pp)
-                            except Exception:
-                                preview_url = ""
-                    except Exception:
-                        preview_url = ""
+                    preview_url = _cached_thumb_url(photo_row, ppath)
                     # 取本体已算好的 date_key/offset
                     try:
                         offset = storage.photo_offset_in_date(int(photo_row["id"]), str(photo_row.get("date_key") or ""), source_id=photo_row.get("source_id")) if storage else 0
@@ -575,7 +615,26 @@ class SemanticSearchModule:
                         "search_match": f"语义 {r.score:.2f}",
                     })
                 else:
-                    # 回退：无 photos 行时仍可显示（但不可跳转）
+                    # 回退：无 photos 行时仍可显示（但不可跳转），也尽量给缩略图
+                    fallback_preview = ""
+                    try:
+                        # 尝试用 vector 记录里的 file_mtime/size 算 thumb key
+                        if _thumb_path_from_stat is not None and _versioned_file_uri is not None and rec.path:
+                            try:
+                                mtime = float(getattr(rec, "file_mtime", 0) or 0)
+                                size = int(getattr(rec, "file_size", 0) or 0)
+                                if mtime and size:
+                                    tpath = _thumb_path_from_stat(_Path(rec.path), mtime_ns=int(mtime * 1e9), size=size)
+                                    if tpath.exists() and tpath.stat().st_size > 0:
+                                        fallback_preview = _versioned_file_uri(tpath)
+                            except Exception:
+                                pass
+                        if not fallback_preview and rec.path:
+                            pp = _Path(rec.path)
+                            if pp.exists() and is_renderable_image(pp) and _versioned_file_uri is not None:
+                                fallback_preview = _versioned_file_uri(pp)
+                    except Exception:
+                        fallback_preview = ""
                     results.append({
                         "id": rec.id,
                         "type": "photo",
@@ -584,12 +643,14 @@ class SemanticSearchModule:
                         "item_key": rec.item_key,
                         "model": rec.model,
                         "score": r.score,
-                        "preview_url": "",
+                        "preview_url": fallback_preview,
                         "search_label": "语义",
                         "search_title": q,
                         "search_match": f"语义 {r.score:.2f}",
                     })
-            _log(f"语义搜索完成 query='{q}' 命中{len(results)}条 " + (f"top={results[0]['score']:.3f}" if results else ""))
+            # 排序：有缩略图的优先，避免首条就空白
+            results.sort(key=lambda x: (1 if x.get("preview_url") else 0, float(x.get("score") or 0)), reverse=True)
+            _log(f"语义搜索完成 query='{q}' 命中{len(results)}条 " + (f"top={results[0]['score']:.3f} preview={bool(results[0].get('preview_url'))}" if results else ""))
             return {"success": True, "results": results}
         except Exception as exc:
             import traceback

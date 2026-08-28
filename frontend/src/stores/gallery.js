@@ -53,36 +53,62 @@ export const useGalleryStore = defineStore('gallery', () => {
 
   // PR4 优化：hydrate 时做脏检查，避免 Vue 已真源化的 photoCache 被 stale 的 PS 覆盖
   // 仅在 PS 的 dates 长度大于本地时才覆盖，防止 3000→0 的空参回退
+  // 优化：每次 400ms 轮询会调一次，盲目赋新数组/Map 会触发大量响应式重建（卡顿主因）
+  // 先做浅比较，仅在内容变化时才赋新引用
+  function shallowMapEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.size !== b.size) return false;
+    for (const k of a.keys()) if (!b.has(k) || a.get(k) !== b.get(k)) return false;
+    return true;
+  }
+  function shallowSetEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
+  }
+  function arraysEqualShallow(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
   function hydrateFromLegacy() {
     const PS = window.PS;
     if (!PS || !PS.state) return;
     if (Array.isArray(PS.state.dates)) {
-      // 空参陷阱防护：若 PS dates 为空但本地已有数据且 PS 未处于 reset 流程，则不回退
       if (PS.state.dates.length === 0 && dates.value.length > 0) {
-        // 允许 legacy 的 resetGallery 主动清空（通过 pendingRestoreDate 标记），其余情况保留 Vue 侧
         const isReset = !PS.state.loadingDates && PS.state.dates.length === 0 && !PS.state.currentSourceId;
-        if (!isReset) { /* 保留 Vue 侧 dates */ } else dates.value = [];
-      } else {
+        if (!isReset) { /* 保留 Vue 侧 dates */ } else if (dates.value.length) dates.value = [];
+      } else if (!arraysEqualShallow(dates.value, PS.state.dates)) {
         dates.value = [...PS.state.dates];
       }
     }
-    if (PS.state.dateCounts instanceof Map) dateCounts.value = new Map(PS.state.dateCounts);
-    if (PS.state.dateCovers instanceof Map) dateCovers.value = new Map(PS.state.dateCovers);
-    if (PS.state.dateNotes instanceof Map) dateNotes.value = new Map(PS.state.dateNotes);
-    if (PS.state.visibleDates instanceof Set) visibleDates.value = new Set(PS.state.visibleDates);
-    if (PS.state.dateFocus instanceof Map) dateFocus.value = new Map(PS.state.dateFocus);
-    if (PS.state.activeDate !== undefined) activeDate.value = PS.state.activeDate;
-    if (PS.state.sortKey) sortKey.value = PS.state.sortKey;
-    if (PS.state.searchScope) searchScope.value = PS.state.searchScope;
-    if (PS.state.galleryItemSize) galleryItemSize.value = PS.state.galleryItemSize;
-    if (PS.state.galleryItemSizeRaw) galleryItemSizeRaw.value = PS.state.galleryItemSizeRaw;
-    if (Array.isArray(PS.state.categories)) categories.value = [...PS.state.categories];
-    if (typeof PS.state.favoriteCount === 'number') favoriteCount.value = PS.state.favoriteCount;
-    if (typeof PS.state.hiddenCount === 'number') hiddenCount.value = PS.state.hiddenCount;
-    if (PS.state.activeCategory !== undefined) activeCategory.value = PS.state.activeCategory;
-    if (PS.state.activeFilter && typeof PS.state.activeFilter === 'object') activeFilter.value = { ...PS.state.activeFilter };
-    if (PS.state.currentRootPath) currentRootPath.value = PS.state.currentRootPath;
-    if (PS.state.currentSourceId) currentSourceId.value = PS.state.currentSourceId;
+    if (PS.state.dateCounts instanceof Map && !shallowMapEqual(dateCounts.value, PS.state.dateCounts)) dateCounts.value = new Map(PS.state.dateCounts);
+    if (PS.state.dateCovers instanceof Map && !shallowMapEqual(dateCovers.value, PS.state.dateCovers)) dateCovers.value = new Map(PS.state.dateCovers);
+    if (PS.state.dateNotes instanceof Map && !shallowMapEqual(dateNotes.value, PS.state.dateNotes)) dateNotes.value = new Map(PS.state.dateNotes);
+    if (PS.state.visibleDates instanceof Set && !shallowSetEqual(visibleDates.value, PS.state.visibleDates)) visibleDates.value = new Set(PS.state.visibleDates);
+    if (PS.state.dateFocus instanceof Map && !shallowMapEqual(dateFocus.value, PS.state.dateFocus)) dateFocus.value = new Map(PS.state.dateFocus);
+    if (PS.state.activeDate !== undefined && activeDate.value !== PS.state.activeDate) activeDate.value = PS.state.activeDate;
+    if (PS.state.sortKey && sortKey.value !== PS.state.sortKey) sortKey.value = PS.state.sortKey;
+    if (PS.state.searchScope && searchScope.value !== PS.state.searchScope) searchScope.value = PS.state.searchScope;
+    if (PS.state.galleryItemSize && galleryItemSize.value !== PS.state.galleryItemSize) galleryItemSize.value = PS.state.galleryItemSize;
+    if (PS.state.galleryItemSizeRaw && galleryItemSizeRaw.value !== PS.state.galleryItemSizeRaw) galleryItemSizeRaw.value = PS.state.galleryItemSizeRaw;
+    if (Array.isArray(PS.state.categories) && !arraysEqualShallow(categories.value, PS.state.categories)) categories.value = [...PS.state.categories];
+    if (typeof PS.state.favoriteCount === 'number' && favoriteCount.value !== PS.state.favoriteCount) favoriteCount.value = PS.state.favoriteCount;
+    if (typeof PS.state.hiddenCount === 'number' && hiddenCount.value !== PS.state.hiddenCount) hiddenCount.value = PS.state.hiddenCount;
+    if (PS.state.activeCategory !== undefined && activeCategory.value !== PS.state.activeCategory) activeCategory.value = PS.state.activeCategory;
+    if (PS.state.activeFilter && typeof PS.state.activeFilter === 'object') {
+      const cur = activeFilter.value || {};
+      const next = PS.state.activeFilter;
+      let diff = Object.keys(cur).length !== Object.keys(next).length;
+      if (!diff) for (const k of Object.keys(next)) if (cur[k] !== next[k]) { diff = true; break; }
+      if (diff) activeFilter.value = { ...next };
+    }
+    if (PS.state.currentRootPath && currentRootPath.value !== PS.state.currentRootPath) currentRootPath.value = PS.state.currentRootPath;
+    if (PS.state.currentSourceId && currentSourceId.value !== PS.state.currentSourceId) currentSourceId.value = PS.state.currentSourceId;
   }
 
   function syncSortToLegacy() {
@@ -451,6 +477,42 @@ export const useGalleryStore = defineStore('gallery', () => {
     return photoLoading.value.has(dateKey);
   }
 
+  // 预览回填：等价于 legacy 的 state.photoCache.set + drain 后的 img.src 更新
+  // 用于 usePreviewQueue 在 get_photo_preview 成功后原地合并 preview_url 等字段
+  function patchPhoto(photoId, patch) {
+    const pid = Number(photoId);
+    if (!pid || !patch || typeof patch !== 'object') return false;
+    let found = false;
+    const nextCache = new Map(photoCache.value);
+    for (const [dateKey, arr] of nextCache.entries()) {
+      let changed = false;
+      const nextArr = arr.map((p) => {
+        const curId = Number(p.id ?? p.photo_id);
+        if (curId === pid) {
+          found = true;
+          changed = true;
+          return Object.assign({}, p, patch);
+        }
+        return p;
+      });
+      if (changed) {
+        nextCache.set(dateKey, nextArr);
+      }
+    }
+    if (found) {
+      photoCache.value = nextCache;
+      // 同步到 legacy 侧，保持灯箱/批量复用一致
+      try {
+        const PS = window.PS;
+        if (PS && PS.state && PS.state.photoCache) {
+          const prev = PS.state.photoCache.get(pid) || {};
+          PS.state.photoCache.set(pid, Object.assign({}, prev, patch));
+        }
+      } catch {}
+    }
+    return found;
+  }
+
   // 从 legacy 拉取 source 上下文（进入工作区时调用）
   function syncSourceContext(rootPath, sourceId) {
     currentRootPath.value = String(rootPath || '');
@@ -515,6 +577,7 @@ export const useGalleryStore = defineStore('gallery', () => {
     fetchPhotosForDate,
     photosForDate,
     isPhotoLoading,
+    patchPhoto,
     setActiveCategory,
     applySort,
     applyFilter,

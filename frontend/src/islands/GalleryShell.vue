@@ -4,7 +4,6 @@ import { useGalleryStore } from '../stores/gallery.js';
 import GalleryToolbar from '../components/gallery/GalleryToolbar.vue';
 import CategoryPanel from '../components/gallery/CategoryPanel.vue';
 import DateRail from '../components/gallery/DateRail.vue';
-import PhotoGrid from '../components/gallery/PhotoGrid.vue';
 
 const store = useGalleryStore();
 const currentSource = computed(() => {
@@ -77,7 +76,7 @@ function onGallerySizeInput(e) {
       <GalleryToolbar />
       <div class="time-range-mirror">{{ timeRange }}</div>
       <div class="ps-gallery-scroll">
-        <PhotoGrid />
+        <div class="legacy-gallery-placeholder" style="padding:24px;text-align:center;color:var(--muted,#9aa0a6)">照片墙由 legacy #gallery 渲染（Vue PhotoGrid 已回退）</div>
         <div class="older-sentinel">检查更早日期...</div>
       </div>
     </section>

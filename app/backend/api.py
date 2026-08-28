@@ -127,6 +127,17 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             DATA_DIR, storage, plugin_configs=self._plugin_configs, push=self._module_push, scanner_ref=scanner
         )
 
+    def log(self, msg):
+        """前端调试日志转发入口（仅开发期使用）。msg 可为字符串或任意 JSON 可序列化对象。"""
+        try:
+            import datetime as _dt
+            ts = _dt.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            text = msg if isinstance(msg, str) else json.dumps(msg, ensure_ascii=False)
+            print(f"[{ts}][frontend] {text}", flush=True)
+        except Exception:
+            pass
+        return {"success": True}
+
     def _module_push(self, event, data):
         """模块事件推送出口：经 webview evaluate_js 下发到前端调度器。
 

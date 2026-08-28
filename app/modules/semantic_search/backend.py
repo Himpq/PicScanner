@@ -68,6 +68,20 @@ class SemanticSearchModule:
         self._index_thread: threading.Thread | None = None
         self._index_stop = threading.Event()
         self._lock = threading.RLock()
+        self._warmup_thread: threading.Thread | None = None
+
+        # 自动懒加载模型：app 启动后于后台线程预热，绝不阻塞主线程/UI。
+        # 默认开启，可在模块配置里设 auto_load_model=false 关闭。
+        try:
+            auto_load = True
+            if self._config is not None:
+                v = self._config.get("auto_load_model")
+                if v is not None:
+                    auto_load = bool(v)
+            if auto_load:
+                self.warmup_model(delay=2.0)
+        except Exception as exc:
+            _log(f"安排模型预热失败（已忽略）: {exc}")
 
         scanner = self._scanner
         if scanner is not None and hasattr(scanner, "on_scan_finished"):
@@ -86,7 +100,49 @@ class SemanticSearchModule:
             "index_status": self.index_status,
             "cancel_index": self.cancel_index,
             "clear_index": self.clear_index,
+            "warmup_model": self.warmup_model,
         }
+
+    # ---------- 后台懒加载模型（启动预热，不阻塞） ----------
+
+    def warmup_model(self, delay: float = 0.0) -> bool:
+        """在后台线程预热 Chinese-CLIP 模型，立即返回不阻塞调用方。
+
+        - 复用 _get_encoder()（已加锁、线程安全、结果缓存），所以预热完成后
+          首次 search/build_index 直接命中缓存，无需再等 14s。
+        - 依赖缺失或本地无模型时仅日志跳过，绝不影响主程序。
+        - delay>0 时先等一会儿再加载，避开启动初期与 UI/缩略图抢 CPU。
+        返回 True 表示已安排（含已在进行的去重判断）。
+        """
+        with self._lock:
+            if self._warmup_thread and self._warmup_thread.is_alive():
+                _log("模型预热已在进行，跳过重复安排")
+                return False
+
+        def _run() -> None:
+            if delay and delay > 0:
+                time.sleep(delay)
+            # 再检查一次，避免 delay 期间重复进入
+            with self._lock:
+                if self._warmup_thread and self._warmup_thread.is_alive() and self._warmup_thread is not threading.current_thread():
+                    return
+            try:
+                _log("开始后台预热向量模型（不阻塞主程序）...")
+                enc = _get_encoder()
+                _log(f"向量模型预热完成 device={enc.device}")
+                self._push_event("semantic_model_warmup", {"status": "ready", "device": enc.device})
+            except Exception as exc:
+                import traceback
+                traceback.print_exc()
+                _log(f"向量模型预热失败（已忽略，首次使用时再惰性加载）: {exc}")
+                self._push_event("semantic_model_warmup", {"status": "failed", "error": str(exc)})
+
+        t = threading.Thread(target=_run, name="semantic-model-warmup", daemon=True)
+        with self._lock:
+            self._warmup_thread = t
+        t.start()
+        _log("已安排在后台线程预热向量模型")
+        return True
 
     # ---------- 扫描完成钩子 ----------
 

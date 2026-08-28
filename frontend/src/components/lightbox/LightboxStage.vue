@@ -82,8 +82,8 @@ function warmHdCache(p) {
     // 若当前仍是该图，更新 hdUrl
     if (Number(photo.value?.id)===id) {
       hdUrl.value = full.lightbox_url || full.original_url || '';
-      // 预载高清
-      if (hdUrl.value) { const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(Number(photo.value?.id)===id){ const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(imgRef.value){ imgRef.value.src=hdUrl.value; applyDisplaySize(full, pre.naturalWidth, pre.naturalHeight); }}).catch(()=>{}); }}; pre.src=hdUrl.value; }
+      // 预载高清 — 完成后清除 loading/previewing
+      if (hdUrl.value) { const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(Number(photo.value?.id)===id){ const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ store.loading=false; store.previewing=false; if(imgRef.value){ imgRef.value.src=hdUrl.value; applyDisplaySize(full, pre.naturalWidth, pre.naturalHeight); }}).catch(()=>{ store.loading=false; }); } else { store.loading=false; }}; pre.onerror=()=>{ store.loading=false; }; pre.src=hdUrl.value; }
     }
   }).catch(()=>{});
 }
@@ -94,7 +94,10 @@ function loadForPhoto(p) {
   previewUrl.value = '';
   hdUrl.value = '';
   displayW.value=''; displayH.value='';
-  if (!p) return;
+  // 严格复刻原版 loading/previewing 时序：缩略图优先秒显，原图加载期间显示 spinner
+  store.loading = true;
+  store.previewing = false;
+  if (!p) { store.loading = false; return; }
   const PS = window.PS;
   const cached = (PS && PS.state && PS.state.photoCache && PS.state.photoCache.get(Number(p.id))) || p;
   // 缩略优先
@@ -105,6 +108,10 @@ function loadForPhoto(p) {
   const hd = p.lightbox_url || p.original_url || cached.lightbox_url || cached.original_url || '';
   previewUrl.value = thumb && thumb!==hd ? thumb : '';
   hdUrl.value = hd;
+  // 初始状态：有缩略则 previewing+loading，无缩略则 loading
+  if (previewUrl.value) { store.previewing = true; store.loading = true; }
+  else if (hd) { store.loading = true; }
+  else if ((p.previewable || cached.previewable) && Number(p.id)) { store.loading = true; }
   // 先显示缩略
   if (previewUrl.value) {
     // 设缩略后异步校正尺寸
@@ -112,23 +119,26 @@ function loadForPhoto(p) {
       const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(!isCurrent()) return; applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight); }).catch(()=>{}); }; pre.src=previewUrl.value;
     });
   } else {
-    // 无缩略时若可预览则后台生成缩略
+    // 无缩略时若可预览则后台生成缩略 — 成功后同步置 previewing
     if ((p.previewable || cached.previewable) && Number(p.id)) {
       const call2 = PS && PS.call ? PS.call.bind(PS) : (window.pywebview?.api ? (m,...a)=>window.pywebview.api[m](...a):null);
-      if (call2) call2('get_photo_preview', Number(p.id)).then(res=>{ if(!isCurrent()) return; const t=res && res.success && res.photo && res.photo.preview_url; if(t){ previewUrl.value=t; }}).catch(()=>{});
+      if (call2) call2('get_photo_preview', Number(p.id)).then(res=>{ if(!isCurrent()) return; const t=res && res.success && res.photo && res.photo.preview_url; if(t){ previewUrl.value=t; store.previewing=true; nextTick(()=>{ const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=> applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight)).catch(()=>{}); }; pre.src=t; }); }}).catch(()=>{ if(isCurrent() && !hdUrl.value) store.loading=false; });
     }
   }
   // 高清：若无 hd 但可预览则后台生成
   if (!hdUrl.value && (p.previewable || cached.previewable) && Number(p.id)) {
     warmHdCache(cached);
   }
-  // 预载高清（缩略显示后）
+  // 预载高清（缩略显示后）— 加载完成即清除 loading/previewing，复刻原版 els.lightbox.classList.remove('loading')
   if (hd) {
     const pre=new Image(); pre.decoding='async';
-    pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(!isCurrent()) return; if(imgRef.value){ imgRef.value.src=hd; applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight); }}).catch(()=>{}); };
-    pre.onerror=()=>{};
+    pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(!isCurrent()) return; store.loading=false; store.previewing=false; if(imgRef.value){ imgRef.value.src=hd; applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight); }}).catch(()=>{ if(isCurrent()){ store.loading=false; store.previewing=false; }}); };
+    pre.onerror=()=>{ if(isCurrent()){ store.loading=false; store.previewing=false; }};
     // 若有缩略则延迟半帧再拉高清，避免抢带宽
     if (previewUrl.value) setTimeout(()=>{ if(isCurrent()) pre.src=hd; }, 120); else pre.src=hd;
+  } else if (!previewUrl.value && !((p.previewable || cached.previewable) && Number(p.id))) {
+    // 既无缩略也无高清且不可预览，直接结束 loading
+    store.loading = false; store.previewing = false;
   }
 }
 
@@ -194,7 +204,10 @@ function onPointerUp(e) {
 }
 function onPointerCancel(e){ onPointerUp(e); }
 
-onMounted(()=> store.hydrateFromLegacy && store.hydrateFromLegacy());
+onMounted(() => {
+  // 注意：这里不能 hydrateFromLegacy —— legacy #lightbox 在 Vue 真源模式下处于 hidden，
+  // hydrate 会把 store.open 覆盖回 false，导致灯箱刚打开就自动关闭（已修复于 lightbox store）。
+});
 onBeforeUnmount(()=>{ if(rafPan) cancelAnimationFrame(rafPan); });
 
 const imgSrc = computed(()=>{
@@ -205,7 +218,7 @@ const imgSrc = computed(()=>{
 </script>
 
 <template>
-  <div ref="stageRef" class="lightbox-stage vue-lightbox-stage"
+  <div ref="stageRef" class="lightbox-stage"
     @wheel.prevent="onWheel"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -230,7 +243,6 @@ const imgSrc = computed(()=>{
 </template>
 
 <style scoped>
-.vue-lightbox-stage { width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; touch-action:none; position:relative; background:#050505; }
-.lightbox-img { max-width:100%; max-height:100%; object-fit:contain; transform-origin:center center; user-select:none; will-change: transform; }
-.lightbox-empty { color:var(--muted,#9aa0a6); font-size:14px; }
+/* 完全复用 style.css 的 .lightbox-stage / .lightbox-img，不再自定义背景与 flex，避免与原版不一致 */
+.lightbox-empty { color:var(--muted,#9aa0a6); font-size:14px; position:absolute; inset:0; display:grid; place-items:center; }
 </style>

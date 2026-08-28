@@ -11,8 +11,9 @@ export function useVirtualGrid(options) {
   const {
     getItemSize, // () => number
     getGap = () => 10,
-    getHeaderHeight = () => 38,
+    getHeaderHeight = () => 36,
     getMoreHeight = () => 34,
+    getContentWidth, // () => number — sections 18px 留白时用实际栅格宽度
     overscanRows = 4,
   } = options || {};
 
@@ -23,12 +24,13 @@ export function useVirtualGrid(options) {
   let rafPending = false;
   let resizeObserver = null;
 
+  // 列数：必须和 CSS auto-fill 实际渲染的列数一致。
+  // PhotoGrid 在 section 上用 left/right 18px 模拟 .gallery padding，
+  // 真正的 .photo-grid 宽度 = viewportWidth - 36，所以用 getContentWidth 拿去掉留白后的宽度。
   function columns() {
-    const w = viewportWidth.value || 800;
+    const w = (typeof getContentWidth === 'function' ? getContentWidth() : 0) || viewportWidth.value || 800;
     const size = Math.max(1, Number(getItemSize ? getItemSize() : 168));
     const gap = Math.max(0, Number(getGap()));
-    // 贴合 style.css: grid-template-columns: repeat(auto-fill, minmax(var(--photo-min-size), var(--photo-min-size)))
-    // 这里用固定列宽计算，和 CSS auto-fill 行为 1:1
     return Math.max(1, Math.floor((w + gap) / (size + gap)));
   }
 
@@ -39,10 +41,11 @@ export function useVirtualGrid(options) {
 
   function dateHeight(count) {
     const total = Math.max(0, Number(count || 0));
-    if (total <= 0) return getHeaderHeight() + getMoreHeight() + 8;
+    if (total <= 0) return getHeaderHeight() + getMoreHeight() + 40;
     const cols = columns();
     const rows = Math.ceil(total / cols);
-    return getHeaderHeight() + rows * rowHeight() + getMoreHeight() + 8; // 8 = section margin-bottom 补偿
+    // 40 = date-more margin-top 12 + date-section margin-bottom 28（对齐 style.css 4583/4836）
+    return getHeaderHeight() + rows * rowHeight() + getMoreHeight() + 40;
   }
 
   // 布局缓存：对应 dates[i] 的 top/height/rows
@@ -56,9 +59,10 @@ export function useVirtualGrid(options) {
       const key = d.date_key;
       const count = Math.max(0, Number(getCount ? getCount(d) : 0));
       const rows = count > 0 ? Math.ceil(count / cols) : 0;
+      // 40 = date-more margin-top 12 + date-section margin-bottom 28
       const h = count > 0
-        ? getHeaderHeight() + rows * rh + getMoreHeight() + 8
-        : getHeaderHeight() + getMoreHeight() + 8;
+        ? getHeaderHeight() + rows * rh + getMoreHeight() + 40
+        : getHeaderHeight() + getMoreHeight() + 40;
       layouts.push({ key, index: i, date: d, count, rows, cols, top, height: h });
       top += h;
     }

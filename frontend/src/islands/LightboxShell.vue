@@ -110,8 +110,10 @@ watch(photo, () => {
 </script>
 
 <template>
-  <div v-if="open" class="ps-lightbox-shell" @click.self="close">
-    <button class="ps-lightbox-close" title="关闭" @click="close">×</button>
+  <!-- 与 legacy #lightbox 完全同构：复用 style.css 的 .lightbox / .lightbox-stage / .lightbox-toolbar 等样式，做到像素一致 -->
+  <!-- loading/previewing 类严格复刻原版 app_lightbox.js 的 els.lightbox.classList 逻辑，驱动 .lightbox-stage::after spinner -->
+  <div v-if="open" class="lightbox ps-lightbox-shell" :class="{ 'compare-mode': store.compareOpen, loading: store.loading, previewing: store.previewing }" @click.self="close">
+    <button class="lightbox-close" title="关闭" @click="close">×</button>
     <LightboxStage v-if="!store.compareOpen" />
     <CompareView v-else />
     <LightboxInfoPanel v-if="!store.compareOpen && store.infoVisible" />
@@ -120,11 +122,11 @@ watch(photo, () => {
 </template>
 
 <style scoped>
-.ps-lightbox-shell { position:fixed; inset:var(--titlebar-h,36px) 0 0 0; background: rgba(0,0,0,0.94); z-index: 80; display:flex; flex-direction:column; }
-.ps-lightbox-shell .lightbox-stage, .ps-lightbox-shell :deep(.vue-lightbox-stage) { flex:1; min-height:0; }
-.ps-lightbox-close { position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color:#fff; cursor:pointer; z-index:90; }
+/* 复用全局 style.css 的 .lightbox 样式，仅补充 Vue 挂载点需要的层级 */
+.ps-lightbox-shell { z-index: 80; }
+/* 保持与 legacy 一致：close 为 36x36 圆角8px，非 32px 圆形 */
 </style>
 <style>
-/* 灯箱信息面板共用样式由 app_lightbox 的 style.css 提供，Vue 额外兜底 */
-#vue-lightbox .ps-lightbox-shell .lightbox-info { z-index: 85; }
+/* 信息面板在 Vue 侧仍通过固定定位复用原版 .lightbox-info 样式，无需额外覆盖 */
+#vue-lightbox .lightbox-info { z-index: 83; }
 </style>

@@ -32,6 +32,9 @@ export const useLightboxStore = defineStore('lightbox', () => {
   const compareSelected = ref([null, null]);
   const compareLocked = ref(true);
 
+  const loading = ref(false);
+  const previewing = ref(false);
+
   const navHoverSide = ref('');
 
   function hydrateFromLegacy() {
@@ -39,6 +42,33 @@ export const useLightboxStore = defineStore('lightbox', () => {
     if (!PS || !PS.state) return;
     const lb = PS.state.lightbox;
     if (!lb) return;
+    // 严格复刻原版持久化：优先从 preferredSize/Position 恢复尺寸/位置
+    try {
+      const ps = PS.state.lightboxInfoPreferredSize;
+      if (ps && typeof ps.width === 'number') infoW.value = Number(ps.width || 310);
+      if (ps && typeof ps.height === 'number') infoH.value = Number(ps.height || 0);
+      const pp = PS.state.lightboxInfoPreferredPosition;
+      if (pp && typeof pp.x === 'number') { infoX.value = Number(pp.x); infoY.value = Number(pp.y); }
+    } catch {}
+    if (isVueLightboxEnabled()) {
+      // Vue 真源模式：open/photo/zoom/pan 由 Vue store 权威驱动。
+      // 若在此覆盖 open，legacy #lightbox 处于 hidden（Vue 打开时被隐藏），
+      // hydrate 会把 open 打回 false，导致灯箱一打开就关闭（LightboxStage onMounted 曾触发）。
+      // 仅镜像 legacy 侧的 compare 与 info 面板偏好。
+      infoVisible.value = lb.infoVisible !== false;
+      // 若无 preferredPosition 则回退 lb.infoX/Y，避免覆盖已恢复的持久化位置
+      try {
+        const pp2 = PS.state.lightboxInfoPreferredPosition;
+        if (!pp2 || typeof pp2.x !== 'number') { infoX.value = Number(lb.infoX || 18); infoY.value = Number(lb.infoY || 18); }
+      } catch { infoX.value = Number(lb.infoX || 18); infoY.value = Number(lb.infoY || 18); }
+      infoDetailsCollapsed.value = !!PS.state.lightboxInfoDetailsCollapsed;
+      if (PS.state.compare) {
+        compareOpen.value = !!PS.state.compare.open;
+        compareSelected.value = [...(PS.state.compare.selected || [null, null])];
+        compareLocked.value = !!PS.state.compare.locked;
+      }
+      return;
+    }
     photo.value = lb.photo || null;
     zoom.value = Number(lb.zoom || 1);
     panX.value = Number(lb.panX || 0);
@@ -240,6 +270,7 @@ export const useLightboxStore = defineStore('lightbox', () => {
     photo, zoom, panX, panY, dragging,
     infoVisible, infoX, infoY, infoW, infoH, infoDetailsCollapsed,
     open, compareOpen, compareSelected, compareLocked, navHoverSide,
+    loading, previewing,
     focalText, apscText,
     hydrateFromLegacy, syncToLegacy,
     formatZoom, parseZoomInput, setZoom, zoomIn, zoomOut, applyZoomInput,

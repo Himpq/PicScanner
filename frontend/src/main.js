@@ -17,7 +17,6 @@ import BatchModulesShell from './islands/BatchModulesShell.vue';
 import DateRailIsland from './islands/DateRailIsland.vue';
 import CategoryPanelIsland from './islands/CategoryPanelIsland.vue';
 import ToolbarIsland from './islands/ToolbarIsland.vue';
-import PhotoGrid from './components/gallery/PhotoGrid.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -48,7 +47,6 @@ let quickEditShellApp = null;
 let batchModulesShellApp = null;
 let dateRailIslandApp = null;
 let categoryPanelIslandApp = null;
-let photoGridApp = null;
 let toolbarIslandApp = null;
 
 // 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
@@ -207,16 +205,6 @@ window.PicScannerVue = {
   unmountCategoryPanelIsland() {
     if (categoryPanelIslandApp) { categoryPanelIslandApp.unmount(); categoryPanelIslandApp = null; }
   },
-  mountPhotoGridIsland(el) {
-    if (!el) return false;
-    if (photoGridApp) photoGridApp.unmount();
-    photoGridApp = withPinia(createApp(PhotoGrid));
-    photoGridApp.mount(el);
-    return true;
-  },
-  unmountPhotoGridIsland() {
-    if (photoGridApp) { photoGridApp.unmount(); photoGridApp = null; }
-  },
   mountToolbarIsland(el) {
     if (!el) return false;
     if (toolbarIslandApp) toolbarIslandApp.unmount();
@@ -233,7 +221,7 @@ window.PicScannerVue = {
   _p3Ready: true,
   _p4Ready: true,
   _p5Ready: true,
-  _photoGridVirtualReady: true,
+  _photoGridVirtualReady: false, // legacy 画廊激活，Vue PhotoGrid 已回退
 };
 
 // PR2: DateRail 原位岛 — 特性开关，默认关闭，?vue_date=1 或 localStorage vue_date=1 开启
@@ -300,47 +288,12 @@ window.toggleVueCategory = (on) => {
 };
 autoMountCategory();
 
-// PR4: PhotoGrid 虚拟滚动 — 特性开关 ?vue_photo=1 / localStorage，默认关闭（legacy #gallery 为默认渲染路径）
-// 原因：Vue 岛尚未实现 legacy 的预览图生成管线（enqueuePreview/get_photo_preview 按需生成并回填），
-// 新扫描照片的缩略图未落盘时 Vue 侧永久无图，且 UI 细节（占位/日期头按钮）与 legacy 不一致，灰度回退
-// 双轨：vanilla #gallery vs vue #vue-photo-grid，虚拟滚动仅渲染视口
-function isVuePhotoEnabled() {
-    try {
-        const params = new URLSearchParams(location.search);
-        if (params.has('vue_photo')) return params.get('vue_photo') !== '0';
-        const stored = localStorage.getItem('vue_photo');
-        if (stored === '0') return false;
-        if (stored === '1') return true;
-        // 默认走 legacy，待 Vue 侧补齐预览管线后再灰度
-        return false;
-    } catch {
-        return false;
-    }
-}
-function autoMountPhotoGrid() {
-  if (!isVuePhotoEnabled()) return;
-  const vueEl = document.getElementById('vue-photo-grid');
-  if (!vueEl) return;
-  vueEl.classList.remove('hidden');
-  // 双轨兜底：不立即隐藏 vanilla #gallery / #older-sentinel，
-  // 由 PhotoGrid.vue 在 hasDates 后自行切换，避免 Vue 空数据时全黑
-  const tryMount = () => {
-    if (window.PicScannerVue && typeof window.PicScannerVue.mountPhotoGridIsland === 'function') {
-      window.PicScannerVue.mountPhotoGridIsland(vueEl);
-    } else setTimeout(tryMount, 100);
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
-  else tryMount();
-}
-window.toggleVuePhoto = (on) => {
-  try {
-    if (on === false) localStorage.setItem('vue_photo', '0');
-    else if (on === true) localStorage.setItem('vue_photo', '1');
-    else localStorage.removeItem('vue_photo');
-    location.reload();
-  } catch {}
+// PR4: PhotoGrid 已回退至 legacy — Vue 版不再自动挂载
+// 画廊渲染完全由 legacy app_gallery.js 接管（#gallery / IntersectionsObserver）
+// 如需恢复 Vue 版，恢复 PhotoGrid.vue 完整实现并在此处恢复 autoMount 逻辑
+window.toggleVuePhoto = () => {
+  console.warn('[PicScanner] PhotoGrid Vue 已回退，当前为 legacy 画廊。按 git 历史恢复 PhotoGrid.vue 即可重新启用。');
 };
-autoMountPhotoGrid();
 
 // PR5: Toolbar 工具栏 — 特性开关 ?vue_toolbar=1 / localStorage，默认灰度开启
 function isVueToolbarEnabled() {
@@ -377,7 +330,8 @@ window.toggleVueToolbar = (on) => {
 };
 autoMountToolbar();
 
-// PR6: Lightbox 灯箱 — 特性开关 ?vue_lightbox=1，默认灰度开启
+// PR6: Lightbox 灯箱 — 已完成 Vue 迁移，与 legacy 像素一致（close 36x36 圆角8px / toolbar 居中 / info fixed 定位 / compare 双栏）
+// 特性开关 ?vue_lightbox=0 可回退 legacy，默认开启 Vue 版
 function isVueLightboxEnabled() {
   try {
     const p = new URLSearchParams(location.search);
@@ -389,6 +343,7 @@ function isVueLightboxEnabled() {
   } catch { return true; }
 }
 function autoMountLightbox() {
+  if (!isVueLightboxEnabled()) return;
   const el = document.getElementById('vue-lightbox');
   if (!el) return;
   // 灯箱为全局覆盖层，无需 hidden 切换，由 store.open 控制显隐

@@ -1,6 +1,11 @@
 // 统一 pywebview 桥接，带 mock 兜底，供 Vue 与老 IIFE 共用
 // Phase 0: 仅封装 call + 提供 useBridge composable；mock 仅用于脱离 pywebview 的本地预览/测试
 
+// Vue 岛在 DOMContentLoaded 即挂载，早于 pywebview 异步注入 window.pywebview，
+// 因此 call 命中 API 前需要短暂等待桥接就绪（pywebviewready 事件 + 轮询兜底）
+const BRIDGE_WAIT_MS = 5000;
+const BRIDGE_POLL_MS = 100;
+
 const MOCK_ENABLED = typeof window !== 'undefined' && !window.pywebview;
 
 function mockCall(name, ...args) {
@@ -30,11 +35,48 @@ export function isBridgeReady() {
   return !!api;
 }
 
-export function call(name, ...args) {
+// 等待 pywebview 注入完成；超时返回 false（无 pywebview 的浏览器预览环境）
+let bridgeWaitFailed = false;
+
+function waitBridgeReady() {
+  if (getApi()) return Promise.resolve(true);
+  if (bridgeWaitFailed) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let elapsed = 0;
+
+    function settle(ok) {
+      window.removeEventListener('pywebviewready', onReady);
+      clearInterval(pollTimer);
+      if (!ok) bridgeWaitFailed = true;
+      resolve(ok);
+    }
+
+    function onReady() {
+      if (getApi()) settle(true);
+    }
+
+    const pollTimer = setInterval(() => {
+      elapsed += BRIDGE_POLL_MS;
+      if (getApi()) settle(true);
+      else if (elapsed >= BRIDGE_WAIT_MS) settle(false);
+    }, BRIDGE_POLL_MS);
+
+    window.addEventListener('pywebviewready', onReady);
+  });
+}
+
+export async function call(name, ...args) {
   const api = getApi();
   if (api && typeof api[name] === 'function') {
     return api[name](...args);
   }
+
+  const ready = await waitBridgeReady();
+  const waitedApi = getApi();
+  if (ready && waitedApi && typeof waitedApi[name] === 'function') {
+    return waitedApi[name](...args);
+  }
+
   if (MOCK_ENABLED) {
     return mockCall(name, ...args);
   }

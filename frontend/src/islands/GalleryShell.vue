@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue';
 import { useGalleryStore } from '../stores/gallery.js';
 import GalleryToolbar from '../components/gallery/GalleryToolbar.vue';
 import CategoryPanel from '../components/gallery/CategoryPanel.vue';
@@ -42,8 +42,6 @@ onMounted(() => {
   }, 1000);
   window.__galleryShellSyncTimer = timer;
 });
-
-import { onBeforeUnmount } from 'vue';
 onBeforeUnmount(() => {
   if (window.__galleryShellSyncTimer) {
     clearInterval(window.__galleryShellSyncTimer);

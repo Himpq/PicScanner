@@ -127,58 +127,63 @@
   setInterval(pollSource, 1200);
 
   // ---- Ctrl+F 直钩：直劫 pywebview.api.search_photos（PS.call 已被 gallery 闭包缓存，劫 PS.call 劫不到） ----
+  // 修复版：不再同步等待语义（原版 await doSem 会堵塞正常的 Ctrl+F 8~10s，尤其首字 'z','wa' 等碎片查询也会触发，且并发搜索会重复加载模型）。
+  // 现改为：立即返回关键词结果，语义在后台防抖静默追加；且 Vue 的 gallery.js 已接管语义追加，此处仅作为 legacy 兜底。
   const hijackSearch = () => {
     const api = window.pywebview && window.pywebview.api;
     if(!api || !api.search_photos || api._semanticHijacked) return false;
     const _origSearch = api.search_photos.bind(api);
     const PS = window.PS;
     api._semanticHijacked = true;
+    let _hijackSeq = 0;
+    let _hijackTimer = null;
     api.search_photos = async (...args)=>{
-      const res = await _origSearch(...args); // {success, items, photos, count}
+      const res = await _origSearch(...args); // {success, items, photos, count} —— 立即返回，不等语义
       try{
         const q = String(args[0]||'').trim();
-        if(q.length>=1 && res && res.success){
-          const sid = String(args[2]|| (PS&&PS.state&&PS.state.currentSourceId) || '').trim();
-          const filters = args[5]||null;
-          const doSem = async (s)=> {
+        // Vue 已接管语义追加时，hijack 不再重复追加，避免 double
+        const vueHandles = (() => {
+          try { return !!(window.__galleryDoSearchSeq && window.__gallerySearchQuery); } catch(e){ return false; }
+        })();
+        if(vueHandles) return res;
+        if(q.length<2 || !res || !res.success) return res;
+        const sid = String(args[2]|| (PS&&PS.state&&PS.state.currentSourceId) || '').trim();
+        const filters = args[5]||null;
+        const curSeq = ++_hijackSeq;
+        clearTimeout(_hijackTimer);
+        _hijackTimer = setTimeout(async ()=>{
+          if(curSeq !== _hijackSeq) return;
+          try{
             const call = (PS&&PS.call) ? PS.call.bind(PS) : (m,...a)=>api.module_api(m,...a);
-            return await call('module_api','semantic_search','search',q,8,s,filters);
-          };
-          let r = await doSem(sid);
-          if((!r || !r.success || !r.results || !r.results.length) && sid){
-            r = await doSem('');
-          }
-          if(r && r.success && Array.isArray(r.results) && r.results.length){
-            const base = Array.isArray(res.items) ? res.items : [];
-            const seen=new Set(base.map(x=>String(x.id||x.item_key||x.path)));
-            let added=0;
-            for(const x of r.results){
-              const key = String(x.id||x.item_key||x.path);
-              if(seen.has(key)) continue;
-              seen.add(key);
-              base.push(Object.assign({
-                type:'photo',
-                search_label:'语义',
-                search_title: q,
-                search_match:'语义 '+(Number(x.score).toFixed(2)),
-                preview_url: x.preview_url || x.path || '',
-                path: x.path||'',
-                filename: (x.path||'').split(/[\\/]/).pop()||'',
-              }, x));
-              if(++added>=5) break;
+            let r = await call('module_api','semantic_search','search',q,8,sid,filters);
+            if((!r || !r.success || !r.results || !r.results.length) && sid){
+              if(curSeq !== _hijackSeq) return;
+              r = await call('module_api','semantic_search','search',q,8,'',filters);
             }
-            res.items = base;
-            res.count = base.length;
-            if(Array.isArray(res.photos)) res.photos = base.filter(b=>b.type!=='date');
-            console.log('[semantic] Ctrl+F 追加语义', r.results.length, '→', added);
-          } else {
-            console.log('[semantic] Ctrl+F 语义无命中', q);
-          }
-        }
+            if(curSeq !== _hijackSeq) return;
+            if(!r || !r.success || !Array.isArray(r.results) || !r.results.length) return;
+            // 尝试推入 Vue store（若存在），否则仅日志
+            const tryPushToVue = () => {
+              try{
+                const w = window;
+                // gallery store 暴露的 helper
+                if(w.__gallerySearchQuery && w.__gallerySearchQuery() !== q) return false;
+                // 直接通过 DOM 事件通知或 store 操作：触发自定义事件让 Vue 监听
+                window.dispatchEvent(new CustomEvent('semantic-append', {detail:{query:q, results:r.results}}));
+                return true;
+              }catch(e){ return false; }
+            };
+            if(!tryPushToVue()){
+              console.log('[semantic] Ctrl+F 语义命中', r.results.length, '(legacy 无 Vue store，已跳过合并)');
+            } else {
+              console.log('[semantic] Ctrl+F 后台语义', r.results.length);
+            }
+          }catch(e){ console.warn('[semantic] Ctrl+F hijack bg', e); }
+        }, 320);
       }catch(e){ console.warn('[semantic] Ctrl+F hijack', e); }
       return res;
     };
-    // 同步也劫 PS.call 供其他路径
+    // 同步也劫 PS.call 供其他路径（同样非阻塞）
     if(PS && PS.call && !PS._semanticHijacked){
       const _origCall = PS.call.bind(PS);
       PS._semanticHijacked = true;
@@ -187,10 +192,38 @@
         return _origCall(method,...args);
       };
     }
-    console.log('[semantic] Ctrl+F hijack ready (pywebview.api)');
+    console.log('[semantic] Ctrl+F hijack ready (pywebview.api) [non-blocking]');
     return true;
   };
   if(!hijackSearch()) setTimeout(hijackSearch, 800);
   setTimeout(hijackSearch, 1500);
   setTimeout(hijackSearch, 2500);
+  // 兜底：监听后台语义追加事件，推入 Vue store
+  window.addEventListener('semantic-append', (ev)=>{
+    try{
+      const d = ev && ev.detail; if(!d) return;
+      const q = String(d.query||''); const results = Array.isArray(d.results)?d.results:[];
+      if(!q || !results.length) return;
+      // 若 Vue store 可访问，直接合并
+      const tryVue = () => {
+        // 动态拿 pinia store：通过全局暴露的 __galleryStore 若有
+        const store = window.__galleryStore;
+        if(store && Array.isArray(store.searchResults)){
+          if(String(store.searchQuery||'') !== q) return;
+          const base = store.searchResults || [];
+          const seen=new Set(base.map(x=>String(x.id||x.item_key||x.path)));
+          let added=0; const merged=[...base];
+          for(const x of results){
+            const key=String(x.id||x.item_key||x.path); if(seen.has(key)) continue; seen.add(key);
+            merged.push(Object.assign({type:'photo',search_label:'语义',search_title:q,search_match:'语义 '+(Number(x.score).toFixed(2)),preview_url:x.preview_url||x.path||'',path:x.path||'',filename:(x.path||'').split(/[\\/]/).pop()||''}, x));
+            if(++added>=5) break;
+          }
+          if(added){ store.searchResults = merged; store.searchStatus = '找到 '+merged.length+' 个结果 (含'+added+'条语义)'; }
+          return true;
+        }
+        return false;
+      };
+      if(!tryVue()) console.log('[semantic] semantic-append 无 store 接管', q);
+    }catch(e){ console.warn('[semantic] semantic-append', e); }
+  });
 })();

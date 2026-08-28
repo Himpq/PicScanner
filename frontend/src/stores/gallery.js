@@ -51,10 +51,21 @@ export const useGalleryStore = defineStore('gallery', () => {
   const exifStatus = ref('idle');
   const exifCountText = ref('0 / 0');
 
+  // PR4 优化：hydrate 时做脏检查，避免 Vue 已真源化的 photoCache 被 stale 的 PS 覆盖
+  // 仅在 PS 的 dates 长度大于本地时才覆盖，防止 3000→0 的空参回退
   function hydrateFromLegacy() {
     const PS = window.PS;
     if (!PS || !PS.state) return;
-    if (Array.isArray(PS.state.dates)) dates.value = [...PS.state.dates];
+    if (Array.isArray(PS.state.dates)) {
+      // 空参陷阱防护：若 PS dates 为空但本地已有数据且 PS 未处于 reset 流程，则不回退
+      if (PS.state.dates.length === 0 && dates.value.length > 0) {
+        // 允许 legacy 的 resetGallery 主动清空（通过 pendingRestoreDate 标记），其余情况保留 Vue 侧
+        const isReset = !PS.state.loadingDates && PS.state.dates.length === 0 && !PS.state.currentSourceId;
+        if (!isReset) { /* 保留 Vue 侧 dates */ } else dates.value = [];
+      } else {
+        dates.value = [...PS.state.dates];
+      }
+    }
     if (PS.state.dateCounts instanceof Map) dateCounts.value = new Map(PS.state.dateCounts);
     if (PS.state.dateCovers instanceof Map) dateCovers.value = new Map(PS.state.dateCovers);
     if (PS.state.dateNotes instanceof Map) dateNotes.value = new Map(PS.state.dateNotes);
@@ -119,21 +130,19 @@ export const useGalleryStore = defineStore('gallery', () => {
     return opt ? opt.label : sortKey.value;
   }
 
-  // ---- API 代理（双轨期：优先走 legacy 的 DOM 联动，Vue 侧镜像状态）----
+  // ---- API 代理（PR4 后 Vue 真源，彻底绕开 legacy 的 DOM 联动）----
   async function fetchDates({ reset = false } = {}) {
-    if (loadingDates.value || noMoreDates.value) return false;
+    if (loadingDates.value) return false;
+    // noMoreDates 仅在非 reset 时生效，reset 时强制拉取
+    if (!reset && noMoreDates.value) return false;
     loadingDates.value = true;
     try {
-      const PS = window.PS;
-      // 若 legacy 的 loadOlderDates 存在，直接复用以保留虚拟滚动/占位逻辑
-      if (PS && typeof PS.loadOlderDates === 'function' && !reset) {
-        const ok = await PS.loadOlderDates();
-        hydrateFromLegacy();
-        return ok;
-      }
       const cursor = reset ? null : dateCursor.value;
       const limit = cursor ? 8 : 5000;
-      const res = await call('list_dates', cursor, limit, currentRootPath.value || null, currentSourceId.value || null, sortKey.value, filterPayload());
+      // 空参校验：sortKey 必须在 SORT_OPTIONS 范围，filterPayload 已保证 null/对象
+      const safeSort = SORT_OPTIONS.some((o) => o.key === sortKey.value) ? sortKey.value : 'datetime_desc';
+      const payload = filterPayload();
+      const res = await call('list_dates', cursor, limit, currentRootPath.value || null, currentSourceId.value || null, safeSort, payload);
       const newDates = res.dates || [];
       if (!newDates.length) {
         noMoreDates.value = true;
@@ -144,19 +153,34 @@ export const useGalleryStore = defineStore('gallery', () => {
         dateCounts.value = new Map();
         newDates.forEach((d) => dateCounts.value.set(d.date_key, Number(d.count || 0)));
         dateCursor.value = newDates[newDates.length - 1]?.date_key || null;
+        noMoreDates.value = false;
       } else {
+        // 去重 + 增量合并，避免 O(n²) 的 some 扫描，改用 Set
+        const existingKeys = new Set(dates.value.map((x) => x.date_key));
+        const appended = [];
         newDates.forEach((d) => {
-          if (!dates.value.some((x) => x.date_key === d.date_key)) dates.value.push(d);
+          if (!existingKeys.has(d.date_key)) {
+            dates.value.push(d);
+            appended.push(d);
+          }
           dateCounts.value.set(d.date_key, Number(d.count || 0));
         });
-        dates.value.sort((a, b) => {
-          const left = String(a.date_key || ''), right = String(b.date_key || '');
-          return sortKey.value === 'datetime_asc' ? left.localeCompare(right) : right.localeCompare(left);
-        });
+        // 仅当有新增时再排序，减少无谓 sort
+        if (appended.length) {
+          dates.value.sort((a, b) => {
+            const left = String(a.date_key || ''), right = String(b.date_key || '');
+            return safeSort === 'datetime_asc' ? left.localeCompare(right) : right.localeCompare(left);
+          });
+        }
         dateCursor.value = dates.value.length ? dates.value[dates.value.length - 1].date_key : null;
+        // Map 重新赋值触发响应式（仅一次）
+        dateCounts.value = new Map(dateCounts.value);
       }
       if (!activeDate.value && newDates[0]) activeDate.value = newDates[0].date_key;
       return true;
+    } catch (err) {
+      console.warn('[gallery] list_dates failed', err);
+      return false;
     } finally {
       loadingDates.value = false;
     }
@@ -202,67 +226,157 @@ export const useGalleryStore = defineStore('gallery', () => {
     if (key === sortKey.value) return;
     sortKey.value = key;
     syncSortToLegacy();
-    const PS = window.PS;
-    if (PS && typeof PS.applySort === 'function') {
-      PS.applySort(key);
-      hydrateFromLegacy();
-    } else {
-      dates.value = [];
-      noMoreDates.value = false;
-      dateCursor.value = null;
-      fetchDates({ reset: true });
-    }
-  }
-
-  function applyFilter(filter) {
-    activeFilter.value = normalizeFilter(filter);
-    const PS = window.PS;
-    if (PS && typeof PS.applyFilter === 'function') {
-      PS.applyFilter(activeFilter.value);
-      hydrateFromLegacy();
-      return;
-    }
+    // PR5 真源：排序改变重置分页，直接走 Pinia
     dates.value = [];
     noMoreDates.value = false;
     dateCursor.value = null;
+    photoCache.value = new Map();
+    photoOffsets.value = new Map();
+    fetchDates({ reset: true });
+  }
+
+  // PR5: 拉取筛选选项（镜头/焦段/日期范围），供 Toolbar 筛选弹层使用
+  async function fetchFilterOptions({ force = false } = {}) {
+    if (filterOptions.value && !force) return filterOptions.value;
+    const res = await call('get_filter_options', currentRootPath.value || null, currentSourceId.value || null);
+    if (!res || !res.success) throw new Error(res && res.message ? res.message : '读取筛选项失败');
+    filterOptions.value = res.options || {};
+    return filterOptions.value;
+  }
+
+  // PR5 真源化：不再委托 PS.applyFilter，直接重置分页走 Pinia
+  function applyFilter(filter) {
+    const clean = normalizeFilter(filter);
+    // 去重：相同 filter 不重复拉取
+    const prev = JSON.stringify(normalizeFilter(activeFilter.value));
+    const next = JSON.stringify(clean);
+    activeFilter.value = clean;
+    filterOpen.value = false;
+    if (prev === next) return;
+    dates.value = [];
+    noMoreDates.value = false;
+    dateCursor.value = null;
+    photoCache.value = new Map();
+    photoOffsets.value = new Map();
     fetchDates({ reset: true });
   }
 
   function clearFilter() {
+    const had = Object.keys(normalizeFilter(activeFilter.value)).length > 0;
     activeFilter.value = {};
-    const PS = window.PS;
-    if (PS && typeof PS.clearActiveFilter === 'function') {
-      PS.clearActiveFilter();
-      hydrateFromLegacy();
-      return;
-    }
+    filterOpen.value = false;
+    if (!had) return;
     dates.value = [];
     noMoreDates.value = false;
     dateCursor.value = null;
+    photoCache.value = new Map();
+    photoOffsets.value = new Map();
     fetchDates({ reset: true });
   }
 
   let searchTimer = null;
+  let searchSeq = 0;
   async function doSearch(query, scope) {
     const q = String(query || '').trim();
     const s = String(scope || searchScope.value || 'all');
     searchQuery.value = q;
     searchScope.value = s;
+    try { window.__gallerySearchQuery = q; } catch {}
     if (!q) {
       searchResults.value = [];
       searchStatus.value = '输入关键词搜索当前来源';
       return;
     }
+    // 完全 Vue 化：先确保来源上下文已从 PS 同步到 Pinia（首次进入工作区时 store 仍空）
+    // 这一步让 Vue 成为真源，后续 search 仅用 store 值，不再每次回退 PS
+    hydrateFromLegacy();
+    // 若仍空，显式同步一次（处理 PhotoGrid 轮询未覆盖到的竞态）
+    if (!currentRootPath.value || !currentSourceId.value) {
+      const PS0 = (typeof window !== 'undefined' && window.PS && window.PS.state) ? window.PS.state : null;
+      if (PS0) {
+        if (!currentRootPath.value && PS0.currentRootPath) currentRootPath.value = String(PS0.currentRootPath);
+        if (!currentSourceId.value && PS0.currentSourceId) currentSourceId.value = String(PS0.currentSourceId);
+      }
+    }
+    const seq = ++searchSeq;
+    try { window.__galleryDoSearchSeq = seq; } catch {}
     searchStatus.value = '搜索中...';
     try {
-      const res = await call('search_photos', q, s, currentSourceId.value || null, currentRootPath.value || null);
+      const fp = filterPayload();
+      const effRoot = currentRootPath.value || null;
+      const effSid = currentSourceId.value || null;
+      console.log('[search][vue] req', {q, root: effRoot, sid: effSid, scope:s, filters: fp, sort: sortKey.value});
+      // 完全 Vue 签名：search_photos(query, root_path, source_id, scope, limit, filters, sort_key)
+      let res = await call('search_photos', q, effRoot, effSid, s, 40, fp, sortKey.value);
+      console.log('[search][vue] res', res);
+      if (seq !== searchSeq) return;
       if (!res || !res.success) throw new Error(res?.message || '搜索失败');
-      searchResults.value = res.results || res.photos || [];
-      searchStatus.value = searchResults.value.length ? '找到 ' + searchResults.value.length + ' 张' : '未找到匹配结果';
+      let items = res.items || res.results || res.photos || [];
+      searchResults.value = items;
+      searchStatus.value = items.length ? '找到 ' + items.length + ' 个结果' : '没有找到 "' + q + '"';
+      // ---- 语义追加（完全 Vue）：单字中文“鸟/鹿/牛”需放行，仅拦截单字母/数字碎片如 'z','a','1' ----
+      function isSingleAsciiNoise(t){ return t.length===1 && /^[a-zA-Z0-9]$/.test(t); }
+      const shouldSemantic = !isSingleAsciiNoise(q);
+      if (shouldSemantic) {
+        const semSeq = seq;
+        const semQ = q;
+        // 已真源化，直接用 store 的 sid/filter
+        const semSid = currentSourceId.value || '';
+        const semFilter = filterPayload();
+        setTimeout(async () => {
+          if (semSeq !== searchSeq) return;
+          if (searchQuery.value !== semQ) return;
+          try {
+            let r = null;
+            try {
+              r = await call('module_api', 'semantic_search', 'search', semQ, 8, semSid, semFilter);
+            } catch (e) { return; }
+            if ((!r || !r.success || !Array.isArray(r.results) || !r.results.length) && semSid) {
+              if (semSeq !== searchSeq || searchQuery.value !== semQ) return;
+              try { r = await call('module_api', 'semantic_search', 'search', semQ, 8, '', semFilter); } catch (e) { return; }
+            }
+            if (semSeq !== searchSeq) return;
+            if (searchQuery.value !== semQ) return;
+            if (!r || !r.success || !Array.isArray(r.results) || !r.results.length) return;
+            const base = searchResults.value || [];
+            const seen = new Set(base.map((x) => String(x.id || x.item_key || x.path)));
+            let added = 0;
+            const merged = [...base];
+            for (const x of r.results) {
+              const key = String(x.id || x.item_key || x.path);
+              if (seen.has(key)) continue;
+              seen.add(key);
+              merged.push(Object.assign({
+                type: 'photo',
+                search_label: '语义',
+                search_title: semQ,
+                search_match: '语义 ' + (Number(x.score).toFixed(2)),
+                preview_url: x.preview_url || x.path || '',
+                path: x.path || '',
+                filename: (x.path || '').split(/[\\/]/).pop() || '',
+              }, x));
+              if (++added >= 5) break;
+            }
+            if (added) {
+              searchResults.value = merged;
+              searchStatus.value = '找到 ' + merged.length + ' 个结果 (含' + added + '条语义)';
+              console.log('[semantic] Vue 追加语义', r.results.length, '→', added);
+            }
+          } catch (e) { console.warn('[semantic] Vue 语义追加失败', e); }
+        }, 220);
+      }
     } catch (err) {
+      if (seq !== searchSeq) return;
       searchStatus.value = String(err?.message || err);
       searchResults.value = [];
     }
+  }
+  // 暴露给旧 hijack 复用，避免双写；同时暴露 store 供事件合并
+  if (typeof window !== 'undefined') {
+    window.__galleryDoSearchSeq = () => searchSeq;
+    window.__gallerySearchQuery = () => searchQuery.value;
+    // 延迟绑定 store 实例（useGalleryStore 调用后才有）
+    try { if (!window.__galleryStore) window.__galleryStore = { get searchResults(){return searchResults.value;}, set searchResults(v){searchResults.value=v;}, get searchQuery(){return searchQuery.value;}, get searchStatus(){return searchStatus.value;}, set searchStatus(v){searchStatus.value=v;} }; } catch(e){}
   }
 
   function setSearchOpen(open) {
@@ -280,57 +394,52 @@ export const useGalleryStore = defineStore('gallery', () => {
     call('set_gallery_item_size', v).catch(() => {});
   }
 
+  // PR4 真源化：photoCache 完全由 Vue 驱动，legacy 仅镜像
+  // 优化点：按 id 去重、稀疏数组改 push 连续、Map 只做一次重赋值
   async function fetchPhotosForDate(dateKey, { limit } = {}) {
     if (!dateKey) return false;
     if (photoLoading.value.has(dateKey)) return false;
     const total = dateCounts.value.get(dateKey) || 0;
     const offset = photoOffsets.value.get(dateKey) || 0;
     if (total > 0 && offset >= total) return false;
+    // 加锁：Set 重新赋值以触发响应式
     photoLoading.value.add(dateKey);
-    // 委托 legacy 若存在且未切到 Vue 真实渲染（双轨期优先 legacy 的 replaceChild 逻辑）
-    // 但当 PhotoGrid 已 Vue 化时，直接走 Vue 分页
+    photoLoading.value = new Set(photoLoading.value);
     const PS = window.PS;
-    const useLegacy = false; // 设为 true 可回落到 legacy 的 DOM 替换
-    if (useLegacy && PS && typeof PS.loadPhotosForDate === 'function') {
-      try {
-        const ok = await PS.loadPhotosForDate(dateKey, { limit });
-        hydrateFromLegacy();
-        return ok;
-      } finally {
-        photoLoading.value.delete(dateKey);
-      }
-    }
     const reqLimit = Math.max(1, Number(limit) || (offset === 0 ? INITIAL_PHOTO_LIMIT : PHOTO_LOAD_BATCH));
+    // 空参校验：filterPayload 显式 null，sortKey 兜底
+    const safeSort = SORT_OPTIONS.some((o) => o.key === sortKey.value) ? sortKey.value : 'datetime_desc';
+    const payload = filterPayload();
     try {
-      const res = await call('list_photos', dateKey, offset, reqLimit, currentRootPath.value || null, currentSourceId.value || null, sortKey.value, filterPayload());
+      const res = await call('list_photos', dateKey, offset, reqLimit, currentRootPath.value || null, currentSourceId.value || null, safeSort, payload);
       const photos = res.photos || [];
+      if (!photos.length) return false;
       const existing = photoCache.value.get(dateKey) || [];
-      const next = [...existing];
-      photos.forEach((p, idx) => {
-        const targetIdx = offset + idx;
-        next[targetIdx] = p;
-        // 同步到 legacy 的 photoCache 以便灯箱/批量复用
-        if (PS && PS.state && PS.state.photoCache && p && p.id) {
-          try { PS.state.photoCache.set(Number(p.id), p); } catch {}
-        }
-      });
-      // 去除稀疏空位，保持连续
-      const compact = next.filter(Boolean);
-      photoCache.value.set(dateKey, photos.length ? [...compact] : existing);
-      // 触发响应式（Map 需重新赋值）
+      // 去重：按 id 过滤已存在的照片，避免重复插入导致 offset 漂移
+      const existingIds = new Set(existing.map((p) => String(p.id || p.photo_id || '')));
+      const deduped = photos.filter((p) => !existingIds.has(String(p.id || p.photo_id || '')));
+      if (!deduped.length && photos.length) {
+        // 全部重复，说明后端分页与前端 offset 已错位，直接推进 offset
+        photoOffsets.value.set(dateKey, offset + photos.length);
+        photoOffsets.value = new Map(photoOffsets.value);
+        return false;
+      }
+      const next = deduped.length === photos.length ? [...existing, ...deduped] : [...existing, ...deduped];
+      // 同步到 legacy 的 photoCache 以便灯箱/批量/对比复用
+      if (PS && PS.state && PS.state.photoCache) {
+        deduped.forEach((p) => { try { if (p && p.id) PS.state.photoCache.set(Number(p.id), p); } catch {} });
+      }
+      photoCache.value.set(dateKey, next);
       photoCache.value = new Map(photoCache.value);
       photoOffsets.value.set(dateKey, offset + photos.length);
       photoOffsets.value = new Map(photoOffsets.value);
-      // 更新 dateCounts 若后端返回更精确
-      if (photos.length < reqLimit && total > 0) {
-        // 已到末尾，无需额外处理
-      }
-      return photos.length > 0;
+      return deduped.length > 0;
     } catch (err) {
       console.warn('[gallery] list_photos failed', dateKey, err);
       return false;
     } finally {
       photoLoading.value.delete(dateKey);
+      photoLoading.value = new Set(photoLoading.value);
     }
   }
 
@@ -412,6 +521,7 @@ export const useGalleryStore = defineStore('gallery', () => {
     clearFilter,
     doSearch,
     setSearchOpen,
+    fetchFilterOptions,
     applyGallerySize,
     syncSourceContext,
   };

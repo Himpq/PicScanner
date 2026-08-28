@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, computed, ref } from 'vue';
+import { onMounted, onBeforeUnmount, computed, ref } from 'vue';
 import { useQuickEditStore } from '../stores/quickEdit.js';
 import QuickEditSliders from '../quickedit/QuickEditSliders.vue';
 import QuickEditHeader from '../components/quickedit/QuickEditHeader.vue';
@@ -19,8 +19,6 @@ onMounted(() => {
   const timer = setInterval(() => store.hydrateFromLegacy(), 900);
   window.__quickEditShellSyncTimer = timer;
 });
-
-import { onBeforeUnmount } from 'vue';
 onBeforeUnmount(() => {
   if (window.__quickEditShellSyncTimer) { clearInterval(window.__quickEditShellSyncTimer); delete window.__quickEditShellSyncTimer; }
 });

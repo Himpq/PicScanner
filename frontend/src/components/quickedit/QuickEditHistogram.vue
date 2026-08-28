@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useQuickEditStore } from '../../stores/quickEdit.js';
 
 const store = useQuickEditStore();
@@ -39,11 +39,9 @@ function draw() {
 
 onMounted(() => {
   draw();
-  // 监听 legacy 的直方图更新
   const t = setInterval(draw, 400);
   window.__qeHistTimer = t;
 });
-import { onBeforeUnmount } from 'vue';
 onBeforeUnmount(() => {
   if (window.__qeHistTimer) { clearInterval(window.__qeHistTimer); delete window.__qeHistTimer; }
 });

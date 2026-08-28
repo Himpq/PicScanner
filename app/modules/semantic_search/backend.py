@@ -19,21 +19,33 @@ def _log(msg: str) -> None:
 
 _cached_encoder = None
 _cached_encoder_id = None
+_encoder_lock = threading.Lock()
+_encoder_loading_logged = False
 
 def _get_encoder():
-    global _cached_encoder, _cached_encoder_id
+    global _cached_encoder, _cached_encoder_id, _encoder_loading_logged
     from plugins.semantic_search.encoder import ClipEncoder, resolve_model_source
     src = resolve_model_source()
+    # 快路径：已缓存直接返回
     if _cached_encoder is not None and _cached_encoder_id == src:
         return _cached_encoder
-    print(f"[semantic_search] 正在加载模型 {src} ...", flush=True)
-    import time
-    t0=time.time()
-    enc = ClipEncoder()
-    print(f"[semantic_search] 模型加载完成 device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
-    _cached_encoder = enc
-    _cached_encoder_id = src
-    return enc
+    # 慢路径：加锁 + 双重检查，避免并发搜索同时触发 5~10 次 10s 加载
+    with _encoder_lock:
+        if _cached_encoder is not None and _cached_encoder_id == src:
+            return _cached_encoder
+        # 只有一个线程会走到这里，其余线程在锁外等待后直接命中缓存
+        if not _encoder_loading_logged or _cached_encoder is None:
+            print(f"[semantic_search] 正在加载模型 {src} ...", flush=True)
+            _encoder_loading_logged = True
+        else:
+            _log(f"等待模型加载完成 {src} ...")
+        import time
+        t0=time.time()
+        enc = ClipEncoder()
+        print(f"[semantic_search] 模型加载完成 device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
+        _cached_encoder = enc
+        _cached_encoder_id = src
+        return enc
 
 
 class SemanticSearchModule:
@@ -345,6 +357,12 @@ class SemanticSearchModule:
     def search(self, query: str, top_k: int = 8, source_id: str = "", filters: dict | None = None, dedup: bool | None = None, dedup_thresh: float | None = None):
         q = str(query or "").strip()
         if not q:
+            return {"success": True, "results": []}
+        # 短查询拦截：仅拦截单字母/数字碎片如 'z','a','1'，放行单字中文“鸟/鹿/牛”等语义
+        if len(q) == 1 and q.isascii() and q.isalnum():
+            _log(f"语义搜索跳过单字母碎片 query='{q}'")
+            return {"success": True, "results": []}
+        if len(q) < 1:
             return {"success": True, "results": []}
         # 开关走模块配置，方便后续 UI 接入
         try:

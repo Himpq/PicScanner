@@ -2,6 +2,16 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { LIGHTBOX_MIN_ZOOM, LIGHTBOX_MAX_ZOOM, LIGHTBOX_ZOOM_STEP } from '../constants.js';
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function isVueLightboxEnabled() {
+  try {
+    const p = new URLSearchParams(location.search);
+    if (p.has('vue_lightbox')) return p.get('vue_lightbox') !== '0';
+    const v = localStorage.getItem('vue_lightbox');
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return true;
+  } catch { return true; }
+}
 
 export const useLightboxStore = defineStore('lightbox', () => {
   const photo = ref(null);
@@ -113,6 +123,13 @@ export const useLightboxStore = defineStore('lightbox', () => {
     panY.value = 0;
     open.value = true;
     syncToLegacy();
+    if (isVueLightboxEnabled()) {
+      // Vue 真源：隐藏 legacy 灯箱，避免双层
+      try { const el = document.getElementById('lightbox'); if (el) el.classList.add('hidden'); } catch {}
+      const PS = window.PS;
+      if (PS && PS.state && PS.state.lightbox) { PS.state.lightbox.photo = p; PS.state.lightbox.zoom = 1; PS.state.lightbox.panX = 0; PS.state.lightbox.panY = 0; }
+      return;
+    }
     const PS = window.PS;
     if (PS && typeof PS.openLightbox === 'function') PS.openLightbox(p);
   }
@@ -120,18 +137,83 @@ export const useLightboxStore = defineStore('lightbox', () => {
   function closeLightbox() {
     open.value = false;
     syncToLegacy();
+    if (isVueLightboxEnabled()) {
+      const PS = window.PS;
+      if (PS && PS.state && PS.state.lightbox) PS.state.lightbox.photo = null;
+      return;
+    }
     const PS = window.PS;
     if (PS && typeof PS.closeLightbox === 'function') PS.closeLightbox();
   }
 
-  function nextPhoto() {
+  function orderedPhotos() {
+    // 优先用 Pinia gallery 的有序列表（与 PhotoGrid 虚拟顺序一致）
+    try {
+      const g = window.PicScannerVue && window.PicScannerVue.pinia ? null : null;
+    } catch {}
+    // 直接读 gallery store（避免循环导入，用 window 兜底 + 同步 import）
+    // 同步尝试：从 PS.state 取有序（Legacy 已按 sort 排好）
     const PS = window.PS;
-    if (PS && typeof PS.lightboxNext === 'function') PS.lightboxNext();
+    if (PS && PS.state && Array.isArray(PS.state.dates) && PS.state.dates.length) {
+      const out = [];
+      const sortKey = PS.state.sortKey || 'datetime_desc';
+      const dates = [...PS.state.dates].sort((a,b)=>{
+        const l=String(a.date_key||''), r=String(b.date_key||'');
+        return sortKey==='datetime_asc' ? l.localeCompare(r) : r.localeCompare(l);
+      });
+      for (const d of dates) {
+        const key = d.date_key;
+        // 从 legacy cache 或 gallery pinia 尝试
+        let arr = [];
+        try {
+          // gallery pinia 的 photoCache
+          const mod = window.__galleryStore;
+          if (mod && mod.photoCache && mod.photoCache.get) {
+            const v = mod.photoCache.get(key);
+            if (Array.isArray(v) && v.length) arr = v;
+          }
+        } catch {}
+        if (!arr.length && PS.state.photoOffsets) {
+          // 用 photoCache Map<id,photo> 过滤出该日期的
+          // fallback：遍历 photoCache 按 filename/date
+          const bucket = [];
+          PS.state.photoCache && PS.state.photoCache.forEach((ph)=>{
+            if (String(ph.date_key||'')===String(key)) bucket.push(ph);
+          });
+          arr = bucket;
+        }
+        if (arr.length) out.push(...arr);
+      }
+      if (out.length) return out;
+    }
+    // 最后兜底：仅 photoCache 全部
+    const PS2 = window.PS;
+    if (PS2 && PS2.state && PS2.state.photoCache) return Array.from(PS2.state.photoCache.values());
+    return [];
   }
-  function prevPhoto() {
+
+  function stepPhoto(dir) {
+    if (isVueLightboxEnabled()) {
+      const list = orderedPhotos();
+      if (!list.length || !photo.value) return;
+      const curId = String(photo.value.id || photo.value.photo_id || '');
+      let idx = list.findIndex(p=> String(p.id||p.photo_id)===curId);
+      if (idx < 0) idx = 0;
+      const next = list[idx + dir];
+      if (next) {
+        photo.value = next;
+        zoom.value = 1; panX.value = 0; panY.value = 0;
+        syncToLegacy();
+        if (window.PS && window.PS.state && window.PS.state.lightbox) { window.PS.state.lightbox.photo = next; }
+      }
+      return;
+    }
     const PS = window.PS;
-    if (PS && typeof PS.lightboxPrev === 'function') PS.lightboxPrev();
+    if (dir > 0 && PS && typeof PS.lightboxNext === 'function') PS.lightboxNext();
+    if (dir < 0 && PS && typeof PS.lightboxPrev === 'function') PS.lightboxPrev();
   }
+  function nextPhoto() { stepPhoto(1); }
+  function prevPhoto() { stepPhoto(-1); }
 
   const focalText = computed(() => {
     const p = photo.value;

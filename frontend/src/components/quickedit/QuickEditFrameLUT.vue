@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 
 const luts = ref([]);
 const frames = ref([]);
@@ -21,7 +21,6 @@ onMounted(() => {
   }, 1000);
   window.__qeFrameLutTimer = t;
 });
-import { onBeforeUnmount } from 'vue';
 onBeforeUnmount(() => {
   if (window.__qeFrameLutTimer) { clearInterval(window.__qeFrameLutTimer); delete window.__qeFrameLutTimer; }
 });

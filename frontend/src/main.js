@@ -16,6 +16,8 @@ import QuickEditShell from './islands/QuickEditShell.vue';
 import BatchModulesShell from './islands/BatchModulesShell.vue';
 import DateRailIsland from './islands/DateRailIsland.vue';
 import CategoryPanelIsland from './islands/CategoryPanelIsland.vue';
+import ToolbarIsland from './islands/ToolbarIsland.vue';
+import PhotoGrid from './components/gallery/PhotoGrid.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 
@@ -46,6 +48,8 @@ let quickEditShellApp = null;
 let batchModulesShellApp = null;
 let dateRailIslandApp = null;
 let categoryPanelIslandApp = null;
+let photoGridApp = null;
+let toolbarIslandApp = null;
 
 // 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
 // 注意：在 index.html 既定加载顺序下，Vue 包先于 app_core.js 求值，而 window.PS
@@ -203,12 +207,33 @@ window.PicScannerVue = {
   unmountCategoryPanelIsland() {
     if (categoryPanelIslandApp) { categoryPanelIslandApp.unmount(); categoryPanelIslandApp = null; }
   },
+  mountPhotoGridIsland(el) {
+    if (!el) return false;
+    if (photoGridApp) photoGridApp.unmount();
+    photoGridApp = withPinia(createApp(PhotoGrid));
+    photoGridApp.mount(el);
+    return true;
+  },
+  unmountPhotoGridIsland() {
+    if (photoGridApp) { photoGridApp.unmount(); photoGridApp = null; }
+  },
+  mountToolbarIsland(el) {
+    if (!el) return false;
+    if (toolbarIslandApp) toolbarIslandApp.unmount();
+    toolbarIslandApp = withPinia(createApp(ToolbarIsland));
+    toolbarIslandApp.mount(el);
+    return true;
+  },
+  unmountToolbarIsland() {
+    if (toolbarIslandApp) { toolbarIslandApp.unmount(); toolbarIslandApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
   _p3Ready: true,
   _p4Ready: true,
   _p5Ready: true,
+  _photoGridVirtualReady: true,
 };
 
 // PR2: DateRail 原位岛 — 特性开关，默认关闭，?vue_date=1 或 localStorage vue_date=1 开启
@@ -274,3 +299,112 @@ window.toggleVueCategory = (on) => {
   } catch {}
 };
 autoMountCategory();
+
+// PR4: PhotoGrid 虚拟滚动 — 特性开关 ?vue_photo=1 / localStorage，默认关闭（legacy #gallery 为默认渲染路径）
+// 原因：Vue 岛尚未实现 legacy 的预览图生成管线（enqueuePreview/get_photo_preview 按需生成并回填），
+// 新扫描照片的缩略图未落盘时 Vue 侧永久无图，且 UI 细节（占位/日期头按钮）与 legacy 不一致，灰度回退
+// 双轨：vanilla #gallery vs vue #vue-photo-grid，虚拟滚动仅渲染视口
+function isVuePhotoEnabled() {
+    try {
+        const params = new URLSearchParams(location.search);
+        if (params.has('vue_photo')) return params.get('vue_photo') !== '0';
+        const stored = localStorage.getItem('vue_photo');
+        if (stored === '0') return false;
+        if (stored === '1') return true;
+        // 默认走 legacy，待 Vue 侧补齐预览管线后再灰度
+        return false;
+    } catch {
+        return false;
+    }
+}
+function autoMountPhotoGrid() {
+  if (!isVuePhotoEnabled()) return;
+  const vueEl = document.getElementById('vue-photo-grid');
+  if (!vueEl) return;
+  vueEl.classList.remove('hidden');
+  // 双轨兜底：不立即隐藏 vanilla #gallery / #older-sentinel，
+  // 由 PhotoGrid.vue 在 hasDates 后自行切换，避免 Vue 空数据时全黑
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountPhotoGridIsland === 'function') {
+      window.PicScannerVue.mountPhotoGridIsland(vueEl);
+    } else setTimeout(tryMount, 100);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+window.toggleVuePhoto = (on) => {
+  try {
+    if (on === false) localStorage.setItem('vue_photo', '0');
+    else if (on === true) localStorage.setItem('vue_photo', '1');
+    else localStorage.removeItem('vue_photo');
+    location.reload();
+  } catch {}
+};
+autoMountPhotoGrid();
+
+// PR5: Toolbar 工具栏 — 特性开关 ?vue_toolbar=1 / localStorage，默认灰度开启
+function isVueToolbarEnabled() {
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.has('vue_toolbar')) return params.get('vue_toolbar') !== '0';
+    const v = localStorage.getItem('vue_toolbar');
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return true;
+  } catch { return true; }
+}
+function autoMountToolbar() {
+  if (!isVueToolbarEnabled()) return;
+  const vueEl = document.getElementById('vue-toolbar');
+  const vanillaEl = document.getElementById('vanilla-toolbar');
+  if (!vueEl) return;
+  vueEl.classList.remove('hidden');
+  if (vanillaEl) vanillaEl.classList.add('hidden');
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountToolbarIsland === 'function') window.PicScannerVue.mountToolbarIsland(vueEl);
+    else setTimeout(tryMount, 100);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+window.toggleVueToolbar = (on) => {
+  try {
+    if (on === false) localStorage.setItem('vue_toolbar', '0');
+    else if (on === true) localStorage.setItem('vue_toolbar', '1');
+    else localStorage.removeItem('vue_toolbar');
+    location.reload();
+  } catch {}
+};
+autoMountToolbar();
+
+// PR6: Lightbox 灯箱 — 特性开关 ?vue_lightbox=1，默认灰度开启
+function isVueLightboxEnabled() {
+  try {
+    const p = new URLSearchParams(location.search);
+    if (p.has('vue_lightbox')) return p.get('vue_lightbox') !== '0';
+    const v = localStorage.getItem('vue_lightbox');
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return true;
+  } catch { return true; }
+}
+function autoMountLightbox() {
+  const el = document.getElementById('vue-lightbox');
+  if (!el) return;
+  // 灯箱为全局覆盖层，无需 hidden 切换，由 store.open 控制显隐
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountLightboxShell === 'function') window.PicScannerVue.mountLightboxShell(el);
+    else setTimeout(tryMount, 200);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+window.toggleVueLightbox = (on) => {
+  try {
+    if (on === false) localStorage.setItem('vue_lightbox', '0');
+    else if (on === true) localStorage.setItem('vue_lightbox', '1');
+    else localStorage.removeItem('vue_lightbox');
+    location.reload();
+  } catch {}
+};
+autoMountLightbox();

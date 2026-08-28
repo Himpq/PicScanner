@@ -1,8 +1,7 @@
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useLightboxStore } from '../../stores/lightbox.js';
 import LightboxInfoContent from '../../lightbox/LightboxInfoContent.vue';
-import { reactive } from 'vue';
 
 const store = useLightboxStore();
 const photo = computed(() => store.photo);
@@ -10,7 +9,6 @@ const visible = computed(() => store.infoVisible);
 const collapsed = computed(() => store.infoDetailsCollapsed);
 
 const state = reactive({ photo: photo.value });
-import { watch } from 'vue';
 watch(photo, (v) => { state.photo = v; });
 
 let dragging = false;

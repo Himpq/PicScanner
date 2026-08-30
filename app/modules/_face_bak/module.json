@@ -1,0 +1,7 @@
+{
+  "key": "face",
+  "name": "人脸修颜",
+  "version": "1.4.0",
+  "description": "人脸检测 + 瘦脸/大眼液化，结果可流入快速修图与批量导出",
+  "frontend": "face.js"
+}

@@ -121,7 +121,8 @@ function openSearchResult(item) {
   // 走 legacy 的 jumpToDate：目标分区可能还没被虚拟化渲染出来，
   // 直接 getElementById 会得到 null，那就什么都不发生。
   if (item.type === 'date' && item.date_key) {
-    if (PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(item.date_key);
+    // 平滑滚动：jumpToDate 默认 'auto'（日期胶囊点击要瞬移），搜索跳转传 smooth
+    if (PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(item.date_key, 0, { behavior: 'smooth' });
     else {
       const el = document.getElementById('date-' + item.date_key);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -154,7 +155,7 @@ function openSearchResult(item) {
 
   // 兜底（legacy 接口缺失时）：至少滚到所在日期
   const dk = String(item.date_key || '');
-  if (dk && PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(dk);
+  if (dk && PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(dk, 0, { behavior: 'smooth' });
 }
 function highlightParts(text, query) {
   const t = String(text||''); const q = String(query||'').trim();

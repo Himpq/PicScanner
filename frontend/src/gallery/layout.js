@@ -59,7 +59,13 @@ export function itemPosition({ index, cols, itemSize, gap = PHOTO_GRID_GAP, head
 // ---------- 分区级 windowing ----------
 
 // 预计算所有分区的偏移与高度（O(n)，n = 日期分组数，实测 431）
-export function sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore }) {
+//
+// sectionGap：分区之间的视觉间距。legacy 的 .date-section 有 margin-bottom: 28px，
+// 正常流布局下分区实际占位 = 高度 + 28。windowing 用绝对定位复刻布局时必须把它
+// 算进 top/totalHeight，否则缩放锚点（zoomPlan 按 top 反查）会随分区下标线性漂移。
+// 默认 0 保持与旧调用方（legacy 的 dateSectionIntrinsicHeight，只做 content-visibility
+// 估算，不含 margin）完全兼容。
+export function sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore, sectionGap = 0 }) {
   const list = [];
   let top = 0;
   for (let i = 0; i < dates.length; i += 1) {
@@ -68,9 +74,11 @@ export function sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMor
     const moreHeight = hasMore && hasMore(dateKey, count) ? DATE_MORE_HEIGHT : 0;
     const m = dateSectionHeight({ count, itemSize, gridWidth, gap, moreHeight });
     list.push({ dateKey, count, top, height: m.height, cols: m.cols, rows: m.rows, moreHeight });
-    top += m.height;
+    top += m.height + sectionGap;
   }
-  return { sections: list, totalHeight: top };
+  // 末尾不留 gap：总高度 = 最后一个分区的底边
+  const totalHeight = list.length ? list[list.length - 1].top + list[list.length - 1].height : 0;
+  return { sections: list, totalHeight };
 }
 
 // 二分定位第一个「底边超过 scrollTop - buffer」的分区
@@ -147,8 +155,9 @@ export function zoomAnchorScrollTop({
   gap = PHOTO_GRID_GAP,
   headerHeight = DATE_HEADER_HEIGHT,
   hasMore,
+  sectionGap = 0,
 } = {}) {
-  const next = sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore });
+  const next = sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore, sectionGap });
   const section = next.sections.find((s) => s.dateKey === anchorDateKey);
   if (!section) return { scrollTop: null, metrics: next };
   const { y } = itemPosition({ index: anchorIndex, cols: section.cols, itemSize, gap, headerHeight });

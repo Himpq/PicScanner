@@ -18,6 +18,7 @@ import BatchModulesShell from './islands/BatchModulesShell.vue';
 import DateRailIsland from './islands/DateRailIsland.vue';
 import CategoryPanelIsland from './islands/CategoryPanelIsland.vue';
 import ToolbarIsland from './islands/ToolbarIsland.vue';
+import PhotoGrid from './components/gallery/PhotoGrid.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
 import { installLegacyStateProxy, isSsotActive, registerLegacySyncer } from './bridge/legacyStateProxy.js';
@@ -122,6 +123,7 @@ let batchModulesShellApp = null;
 let dateRailIslandApp = null;
 let categoryPanelIslandApp = null;
 let toolbarIslandApp = null;
+let photoGridApp = null;
 
 // 尽早尝试同步常量与桥接到 legacy PS（若 PS 已存在）。
 // 注意：在 index.html 既定加载顺序下，Vue 包先于 app_core.js 求值，而 window.PS
@@ -330,6 +332,18 @@ window.PicScannerVue = {
   unmountToolbarIsland() {
     if (toolbarIslandApp) { toolbarIslandApp.unmount(); toolbarIslandApp = null; }
   },
+  // P4：Vue PhotoGrid（两级 windowing）。挂载/卸载同时是 PS.jumpToDate /
+  // PS.jumpToSearchPhoto / PS.resetGallery 劫持的生命周期（组件内部完成）。
+  mountPhotoGridIsland(el) {
+    if (!el) return false;
+    if (photoGridApp) photoGridApp.unmount();
+    photoGridApp = withPinia(createApp(PhotoGrid));
+    photoGridApp.mount(el);
+    return true;
+  },
+  unmountPhotoGridIsland() {
+    if (photoGridApp) { photoGridApp.unmount(); photoGridApp = null; }
+  },
   _phase0Ready: true,
   _p1Ready: true,
   _p2Ready: true,
@@ -339,6 +353,16 @@ window.PicScannerVue = {
   // PhotoGrid 由 legacy #gallery 渲染（P4 前不做 Vue 版，避免双轨竞态）
   // P2 纯函数高度模型，供 legacy 与未来的 Vue PhotoGrid 共用
   layout,
+  // P4：Vue PhotoGrid 是否在运行。legacy 的 renderPhotoPlaceholders 用它跳过
+  // 隐藏容器里的占位卡构建（进入工作区曾是 ~1.9 万个空节点）。
+  isPhotoGridActive: () => !!photoGridApp,
+  // P4：legacy updatePhotoMark（收藏/隐藏/分类/笔记的唯一写入口）在变更时调用，
+  // Vue 侧据此把扁平缓存里的新标记合并进按日期数组，卡片才能响应式更新。
+  onLegacyPhotoMarksChanged: (filename) => {
+    try { useGalleryStore(pinia).syncPhotoMarkFromLegacy(filename); } catch (e) {
+      logWarn('[PicScannerVue] onLegacyPhotoMarksChanged failed', e);
+    }
+  },
   // P1 真源代理状态
   isSsotActive,
   registerLegacySyncer,
@@ -391,6 +415,20 @@ const ISLANDS = [
     defaultOn: true,
     retryMs: 200,
     mount: (el) => window.PicScannerVue.mountLightboxShell(el),
+  },
+  // P4：Vue PhotoGrid。defaultOn=false —— 灰度开关，?vue_photogrid=1 或
+  // localStorage['vue_photogrid']='1' 开启；真实库验收（滚穿 1806 张大分区 /
+  // Ctrl+缩放锚点 / 滚动中切排序）通过前不动默认值。
+  // vanillaId 指向 legacy 的滚动容器 #gallery-scroll：flag 开启时整体隐藏，
+  // 关闭时原样恢复（legacy 引擎不动，随时可回退）。
+  {
+    name: 'photoGrid',
+    vueId: 'vue-photogrid',
+    vanillaId: 'gallery-scroll',
+    flag: 'vue_photogrid',
+    defaultOn: false,
+    retryMs: 200,
+    mount: (el) => window.PicScannerVue.mountPhotoGridIsland(el),
   },
 ];
 

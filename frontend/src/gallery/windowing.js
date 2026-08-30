@@ -38,6 +38,7 @@ export const DEFAULT_ROW_BUFFER = 2;
  * @param viewportHeight 滚动容器可视高度
  * @param photoAt       (dateKey, index) => photo | null，未加载到就返回 null（渲染为占位卡）
  * @param hasMore       (dateKey, count) => boolean，是否渲染「继续检查这一天」
+ * @param sectionGap    分区之间的视觉间距（legacy .date-section 的 margin-bottom: 28px）
  */
 export function renderPlan({
   dates = [],
@@ -52,8 +53,9 @@ export function renderPlan({
   rowBuffer = DEFAULT_ROW_BUFFER,
   photoAt = () => null,
   hasMore = null,
+  sectionGap = 0,
 } = {}) {
-  const metrics = sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore });
+  const metrics = sectionMetrics(dates, { counts, itemSize, gridWidth, gap, hasMore, sectionGap });
   const { start, end } = visibleSectionRange(metrics, {
     scrollTop,
     viewportHeight,
@@ -136,16 +138,17 @@ export function zoomPlan({
   rowBuffer = DEFAULT_ROW_BUFFER,
   photoAt = () => null,
   hasMore = null,
+  sectionGap = 0,
 } = {}) {
   const planArgs = {
     dates, counts, gridWidth, gap, headerHeight,
-    sectionBufferPx, rowBuffer, photoAt, hasMore,
+    sectionBufferPx, rowBuffer, photoAt, hasMore, sectionGap,
   };
   if (!Number.isFinite(prevItemSize)) {
     throw new Error('zoomPlan 需要 prevItemSize（缩放前的条目边长）');
   }
 
-  const prevMetrics = sectionMetrics(dates, { counts, itemSize: prevItemSize, gridWidth, gap, hasMore });
+  const prevMetrics = sectionMetrics(dates, { counts, itemSize: prevItemSize, gridWidth, gap, hasMore, sectionGap });
   const anchor = anchorAtPoint(prevMetrics, {
     scrollTop,
     pointOffset: cursorY,
@@ -168,6 +171,7 @@ export function zoomPlan({
     gap,
     headerHeight,
     hasMore,
+    sectionGap,
   });
 
   const nextScroll = next == null ? scrollTop : next;

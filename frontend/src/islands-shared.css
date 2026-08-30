@@ -141,3 +141,11 @@
   scrollbar-width: none;
 }
 .ps-quick-edit-side::-webkit-scrollbar { width: 0; height: 0; }
+
+/* P4 Vue PhotoGrid 的滚动容器（#vue-photogrid）。
+   必须禁用浏览器的滚动锚定：windowing 的 canvas 高度随渲染窗口更新，
+   scroll anchoring 会在这时"自作聪明"调整 scrollTop，表现为视图瞬移/弹回。
+   几何完全由 windowing 控制，不需要浏览器补偿。 */
+.photogrid-scroller {
+  overflow-anchor: none;
+}

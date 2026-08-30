@@ -7,6 +7,9 @@ import { log, logWarn } from '../utils/log.js';
 export const useGalleryStore = defineStore('gallery', () => {
   const dates = ref([]);
   const dateCounts = ref(new Map());
+  // 分区头部的「N 张 · EXIF M」里的 M。legacy 在 state.dateExifCounts 维护，
+  // 扫描进度刷新时会更新 —— 与 dateCounts 一样走 hydrate 同步。
+  const dateExifCounts = ref(new Map());
   const activeDate = ref(null);
   const noMoreDates = ref(false);
   const loadingDates = ref(false);
@@ -88,6 +91,7 @@ export const useGalleryStore = defineStore('gallery', () => {
       }
     }
     if (PS.state.dateCounts instanceof Map && !shallowMapEqual(dateCounts.value, PS.state.dateCounts)) dateCounts.value = new Map(PS.state.dateCounts);
+    if (PS.state.dateExifCounts instanceof Map && !shallowMapEqual(dateExifCounts.value, PS.state.dateExifCounts)) dateExifCounts.value = new Map(PS.state.dateExifCounts);
     if (PS.state.dateCovers instanceof Map && !shallowMapEqual(dateCovers.value, PS.state.dateCovers)) dateCovers.value = new Map(PS.state.dateCovers);
     if (PS.state.dateNotes instanceof Map && !shallowMapEqual(dateNotes.value, PS.state.dateNotes)) dateNotes.value = new Map(PS.state.dateNotes);
     if (PS.state.visibleDates instanceof Set && !shallowSetEqual(visibleDates.value, PS.state.visibleDates)) visibleDates.value = new Set(PS.state.visibleDates);
@@ -562,26 +566,20 @@ export const useGalleryStore = defineStore('gallery', () => {
   function patchPhoto(photoId, patch) {
     const pid = Number(photoId);
     if (!pid || !patch || typeof patch !== 'object') return false;
+    // 原地合并：photoCache 是深响应式 ref(Map)，改属性即触发依赖该属性的卡片重渲染。
+    // 旧实现每次回填都 new Map 全量重建 —— 预览回填是热路径，那是 O(N) 分配的主要来源。
     let found = false;
-    const nextCache = new Map(photoCache.value);
-    for (const [dateKey, arr] of nextCache.entries()) {
-      let changed = false;
-      const nextArr = arr.map((p) => {
-        const curId = Number(p.id ?? p.photo_id);
-        if (curId === pid) {
+    outer: for (const [, arr] of photoCache.value.entries()) {
+      for (const p of arr) {
+        if (Number(p.id ?? p.photo_id) === pid) {
+          Object.assign(p, patch);
           found = true;
-          changed = true;
-          return Object.assign({}, p, patch);
+          break outer;
         }
-        return p;
-      });
-      if (changed) {
-        nextCache.set(dateKey, nextArr);
       }
     }
     if (found) {
-      photoCache.value = nextCache;
-      // 同步到 legacy 侧，保持灯箱/批量复用一致
+      // 同步到 legacy 侧，保持灯箱/批量/对比/EXIF 弹层复用一致
       try {
         const PS = window.PS;
         if (PS && PS.state && PS.state.photoCache) {
@@ -591,6 +589,42 @@ export const useGalleryStore = defineStore('gallery', () => {
       } catch {}
     }
     return found;
+  }
+
+  // 清空照片数据（保留日期列表）。Vue PhotoGrid 挂载期间劫持 PS.resetGallery 时调用：
+  // legacy 的 resetGallery 会清 state.photoCache/photoOffsets，store 侧若不同步清，
+  // 排序/筛选切换后旧照片会残留到新筛选结果的分区里。
+  function resetPhotoData() {
+    photoCache.value = new Map();
+    photoOffsets.value = new Map();
+    photoLoading.value = new Set();
+  }
+
+  // 把 legacy 侧刚写入 state.photoCache（扁平 Map<id, photo>）的标记/预览字段
+  // 合并回 store 的按日期数组。标记操作（收藏/隐藏/分类/笔记）的写入口在 legacy
+  // 的 updatePhotoMark，它不会经过预览队列 —— 由 PicScannerVue.onLegacyPhotoMarksChanged
+  // 钩子在变更时调用本函数，卡片才能响应式更新。
+  function syncPhotoMarkFromLegacy(filename) {
+    const cleanName = String(filename || '');
+    const PS = window.PS;
+    if (!PS || !PS.state || !PS.state.photoCache) return 0;
+    let touched = 0;
+    for (const [, arr] of photoCache.value.entries()) {
+      for (const p of arr) {
+        if (cleanName && String(p.filename || '') !== cleanName) continue;
+        const flat = PS.state.photoCache.get(Number(p.id ?? p.photo_id));
+        if (!flat) continue;
+        Object.assign(p, {
+          favorite: !!flat.favorite,
+          hidden: !!flat.hidden,
+          note: String(flat.note || ''),
+          category: String(flat.category || ''),
+          preview_failed: !!flat.preview_failed,
+        });
+        touched += 1;
+      }
+    }
+    return touched;
   }
 
   // 从 legacy 拉取 source 上下文（进入工作区时调用）
@@ -617,6 +651,7 @@ export const useGalleryStore = defineStore('gallery', () => {
   return {
     dates,
     dateCounts,
+    dateExifCounts,
     activeDate,
     noMoreDates,
     loadingDates,
@@ -661,6 +696,8 @@ export const useGalleryStore = defineStore('gallery', () => {
     photosForDate,
     isPhotoLoading,
     patchPhoto,
+    resetPhotoData,
+    syncPhotoMarkFromLegacy,
     setActiveCategory,
     applySort,
     applyFilter,

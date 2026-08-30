@@ -11220,17 +11220,41 @@
       showToast('已取消快速调整选图');
       return true;
     }
-    if (!els.lightbox.classList.contains('hidden')) {
+    // 兼容 Vue 灯箱：legacy els.lightbox.hidden 时仍需判定 Vue store 是否打开
+    const isVueLbOpen = (() => {
+      try { if (window.__lightboxStore && window.__lightboxStore.open) return true; } catch {}
+      try {
+        const vueLb = document.getElementById('vue-lightbox');
+        if (vueLb && vueLb.querySelector('.ps-lightbox-shell')) return true;
+        if (document.querySelector('.ps-lightbox-shell')) return true;
+      } catch {}
+      return false;
+    })();
+    const lightboxOpen = !els.lightbox.classList.contains('hidden') || isVueLbOpen || !!state.lightbox.photo && isVueLbOpen;
+    if (lightboxOpen) {
       if (state.compare.lightbox) {
         showToast('对比模式暂不支持快速调整');
         return true;
       }
+      // 集锦上下文：优先用集锦列表中的完整照片，避免 state.lightbox.photo 为精简版
+      if (PS.__collectionsContext && PS.__collectionsContext.list && PS.__collectionsContext.list.length) {
+        const ctx = PS.__collectionsContext;
+        const cur = ctx.list[ctx.index] || state.lightbox.photo;
+        if (cur) return openQuickEdit(cur);
+      }
       if (!state.lightbox.photo) {
+        // 尝试从 Vue store 取
+        try {
+          const vs = window.__lightboxStore && window.__lightboxStore.photo;
+          if (vs) return openQuickEdit(vs);
+        } catch {}
         showToast('当前没有可调整照片', 'error');
         return true;
       }
       return openQuickEdit(state.lightbox.photo);
     }
+    // 非灯箱：若集锦列表/详情页打开，禁止进入拾取（避免错误嵌入）
+    if (state.collectionsOpen || state.collectionDetailOpen) return false;
     return beginQuickEditPicking();
   }
 
@@ -11842,6 +11866,67 @@
     ev.stopPropagation();
     showToast(batchRunning ? '批量处理正在运行，完成或取消后才能退出程序' : '正在保存，完成前不能退出程序', 'error');
   }, true);
+  // 最高优先级：Esc 强制关闭对比选图（capture，盖过所有 early return）
+  // 兼容 lightbox 残留标志：只要 open 或面板可见即视为可关
+  function isComparePickerVisible() {
+    try {
+      const p = state.compare.panel;
+      if (p && !p.classList.contains('hidden')) return true;
+    } catch {}
+    return !!state.compare.open;
+  }
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    try { console.warn('[compare-esc][win-capture] open='+state.compare.open+' lightbox='+state.compare.lightbox+' visible='+isComparePickerVisible()+' selected='+JSON.stringify(state.compare.selected)); } catch {}
+    if (state.compare.open || isComparePickerVisible() || state.compare.lightbox) {
+      const wasLightbox = !!state.compare.lightbox;
+      try {
+        if (wasLightbox) PS.closeLightbox();
+        else PS.closeComparePanel();
+      } catch {}
+      // 强制清空选中并刷新卡片徽标，Esc 退出对比（尤其灯箱）不应保留 PhotoGrid 角标
+      try { state.compare.selected = [null, null]; } catch {}
+      try { if (state.compare.panel) state.compare.panel.classList.add('hidden'); } catch {}
+      try { state.compare.open = false; state.compare.lightbox = false; } catch {}
+      try { if (typeof PS.renderComparePanel === 'function') PS.renderComparePanel(); } catch {}
+      try { if (typeof PS.updateCompareCardHighlights === 'function') PS.updateCompareCardHighlights(); } catch {}
+      try {
+        if (window.__lightboxStore) {
+          window.__lightboxStore.compareOpen = false;
+          window.__lightboxStore.compareSelected = [null, null];
+          if (typeof window.__lightboxStore.syncToLegacy === 'function') window.__lightboxStore.syncToLegacy();
+        }
+      } catch {}
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.stopImmediatePropagation) try { ev.stopImmediatePropagation(); } catch {}
+    }
+  }, true);
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    if (state.compare.open || isComparePickerVisible() || state.compare.lightbox) {
+      const wasLightbox = !!state.compare.lightbox;
+      try {
+        if (wasLightbox) PS.closeLightbox();
+        else PS.closeComparePanel();
+      } catch {}
+      try { state.compare.selected = [null, null]; } catch {}
+      try { if (state.compare.panel) state.compare.panel.classList.add('hidden'); } catch {}
+      try { state.compare.open = false; state.compare.lightbox = false; } catch {}
+      try { if (typeof PS.renderComparePanel === 'function') PS.renderComparePanel(); } catch {}
+      try { if (typeof PS.updateCompareCardHighlights === 'function') PS.updateCompareCardHighlights(); } catch {}
+      try {
+        if (window.__lightboxStore) {
+          window.__lightboxStore.compareOpen = false;
+          window.__lightboxStore.compareSelected = [null, null];
+          if (typeof window.__lightboxStore.syncToLegacy === 'function') window.__lightboxStore.syncToLegacy();
+        }
+      } catch {}
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.stopImmediatePropagation) try { ev.stopImmediatePropagation(); } catch {}
+    }
+  }, true);
   document.addEventListener('keydown', (ev) => {
     if (PS.batchProcessingController && PS.batchProcessingController.handleKeydown(ev)) return;
     if (PS.batchSelectionController && PS.batchSelectionController.handleKeydown(ev)) return;
@@ -12077,6 +12162,16 @@
       ev.preventDefault();
       return;
     }
+    // 集锦列表/详情页打开时，屏蔽画廊快捷键的错误嵌入（c/q/f/e/s/Arrow 等）
+    // 灯箱除外：集锦内的灯箱仍需响应 q/Arrow/Esc
+    const isLbOpenForGuard = !els.lightbox.classList.contains('hidden') || (()=>{ try{ return !!(window.__lightboxStore && window.__lightboxStore.open); }catch{ return false; }})();
+    if ((state.collectionsOpen || state.collectionDetailOpen) && !isLbOpenForGuard) {
+      // 仅允许 Esc（已由 collections.js capture 处理，此处不再消费）
+      // 其它字母/方向键直接阻断，避免 c 触发对比、q 进入拾取等
+      if (ev.key && /^[a-zA-Z]$/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey) return;
+      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') return;
+      if (ev.key === 'Escape') return;
+    }
     if (PS.isTypingTarget(document.activeElement)) return;
     if (handleQuickEditShortcut(ev)) {
       ev.preventDefault();
@@ -12110,7 +12205,12 @@
       return;
     }
     if ((ev.key === 'c' || ev.key === 'C') && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-      if (!els.lightbox.classList.contains('hidden')) return;
+      if (PS.isTypingTarget(document.activeElement)) return;
+      if (!els.lightbox.classList.contains('hidden') && state.compare.lightbox) {
+        PS.closeLightbox();
+        ev.preventDefault(); PS.hideContextMenu(); return;
+      }
+      if (!els.lightbox.classList.contains('hidden') && !state.compare.lightbox) return;
       PS.toggleComparePanel();
       ev.preventDefault();
       PS.hideContextMenu();

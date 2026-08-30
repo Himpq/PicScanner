@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import re
 from dataclasses import dataclass, field
@@ -19,6 +20,26 @@ from app.backend.plugin_config import PluginConfigStore
 
 MODULES_DIR = Path(__file__).resolve().parent
 _KEY_RE = re.compile(r"^[a-z0-9_-]+$")
+
+
+def _external_plugins_dir() -> Path | None:
+    """exe 旁的外置插件目录（单文件 exe 时为 exe 所在目录/plugins）"""
+    try:
+        from app.backend.config_store import get_app_root
+
+        ext = Path(get_app_root()) / "plugins"
+        if ext.is_dir():
+            return ext
+    except Exception:
+        pass
+    # 开发期回退：项目根 plugins
+    try:
+        proj_plugins = Path(__file__).resolve().parents[2] / "plugins"
+        if proj_plugins.is_dir():
+            return proj_plugins
+    except Exception:
+        pass
+    return None
 
 
 @dataclass
@@ -55,8 +76,27 @@ def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=
     if plugin_configs is None and data_dir:
         plugin_configs = PluginConfigStore(Path(data_dir))
 
-    for manifest_path in sorted(MODULES_DIR.glob("*/module.json")):
+    # 收集内置 + 外置的 manifest（外置可覆盖/新增）
+    manifest_paths: list[Path] = sorted(MODULES_DIR.glob("*/module.json"))
+    ext_dir = _external_plugins_dir()
+    print(f"[PicScannerModules] built-in {len(manifest_paths)} at {MODULES_DIR}, ext_dir={ext_dir} exists={ext_dir.is_dir() if ext_dir else False}")
+    # 外置仅收集含 module.json 的独立插件（主题/新插件），避免把语义/人脸的纯库目录误扫
+    if ext_dir and ext_dir.resolve() != MODULES_DIR.resolve():
+        ext_manifests = sorted(ext_dir.glob("*/module.json"))
+        print(f"[PicScannerModules] external {len(ext_manifests)} at {ext_dir}: {[p.parent.name for p in ext_manifests]}")
+        for p in ext_manifests:
+            # 若 key 已在内置中则跳过（外置不覆盖内置代理）
+            try:
+                k = json.loads(p.read_text(encoding="utf-8")).get("key")
+                if k in modules or any(mp.parent.name == k for mp in manifest_paths):
+                    continue
+            except Exception:
+                pass
+            manifest_paths.append(p)
+
+    for manifest_path in manifest_paths:
         dir_name = manifest_path.parent.name
+        is_external = ext_dir is not None and manifest_path.is_relative_to(ext_dir) if hasattr(manifest_path, "is_relative_to") else str(manifest_path).startswith(str(ext_dir))
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             key = str(manifest.get("key") or "").strip()
@@ -70,7 +110,30 @@ def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=
                 print(f"[PicScannerModules] 跳过 {dir_name}：key {key} 已存在")
                 continue
 
-            backend = importlib.import_module(f"app.modules.{key}.backend")
+            if is_external:
+                # 外置插件：用文件路径动态加载，避免依赖 app.modules 包名
+                # 注意：不要在函数内 `import importlib` 会遮蔽全局 importlib，导致 UnboundLocalError
+                backend_path = manifest_path.parent / "backend.py"
+                if not backend_path.exists():
+                    print(f"[PicScannerModules] 外置插件 {key} 缺少 backend.py，跳过")
+                    continue
+                spec = importlib.util.spec_from_file_location(f"plugins.{key}.backend", str(backend_path))
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("无法创建外置插件 spec")
+                backend = importlib.util.module_from_spec(spec)
+                # 确保外置插件的 _libs 可被导入
+                import sys as _sys
+
+                _libs = manifest_path.parent / "_libs"
+                if _libs.is_dir() and str(_libs) not in _sys.path:
+                    _sys.path.insert(0, str(_libs))
+                # 插件包根也加入，防止 from plugins.xxx import
+                _pkg_root = str(ext_dir) if ext_dir else ""
+                if _pkg_root and _pkg_root not in _sys.path:
+                    _sys.path.insert(0, _pkg_root)
+                spec.loader.exec_module(backend)  # type: ignore
+            else:
+                backend = importlib.import_module(f"app.modules.{key}.backend")
             cls = _find_module_class(backend)
             if cls is None:
                 raise RuntimeError("backend.py 未提供带 api_methods() 的模块类")

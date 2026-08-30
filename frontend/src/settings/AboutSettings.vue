@@ -20,8 +20,8 @@ function openProject() {
       <div class="settings-panel-body">
         <div class="settings-row-item">
           <div>
-            <strong>PicScanner <span class="about-version">v1.0.1</span></strong>
-            <small>Himpq developed with Codex</small>
+            <strong>PicScanner <span class="about-version">v2.2.0</span></strong>
+            <small>Himpq developed with Codex · 语义集锦 · 详情灯箱</small>
           </div>
           <span>构建 {{ APP_BUILD || '--' }}</span>
         </div>

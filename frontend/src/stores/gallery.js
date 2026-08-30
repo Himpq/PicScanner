@@ -101,11 +101,12 @@ export const useGalleryStore = defineStore('gallery', () => {
     if (typeof PS.state.hiddenCount === 'number' && hiddenCount.value !== PS.state.hiddenCount) hiddenCount.value = PS.state.hiddenCount;
     if (PS.state.activeCategory !== undefined && activeCategory.value !== PS.state.activeCategory) activeCategory.value = PS.state.activeCategory;
     if (PS.state.activeFilter && typeof PS.state.activeFilter === 'object') {
-      const cur = activeFilter.value || {};
-      const next = PS.state.activeFilter;
-      let diff = Object.keys(cur).length !== Object.keys(next).length;
-      if (!diff) for (const k of Object.keys(next)) if (cur[k] !== next[k]) { diff = true; break; }
-      if (diff) activeFilter.value = { ...next };
+      const cur = normalizeFilter(activeFilter.value);
+      const next = normalizeFilter(PS.state.activeFilter);
+      if (JSON.stringify(cur) !== JSON.stringify(next)) activeFilter.value = { ...next };
+    }
+    if (PS.state.activeCategory !== undefined && activeCategory.value !== PS.state.activeCategory) {
+      activeCategory.value = PS.state.activeCategory;
     }
     if (PS.state.currentRootPath && currentRootPath.value !== PS.state.currentRootPath) currentRootPath.value = PS.state.currentRootPath;
     if (PS.state.currentSourceId && currentSourceId.value !== PS.state.currentSourceId) currentSourceId.value = PS.state.currentSourceId;
@@ -250,9 +251,21 @@ export const useGalleryStore = defineStore('gallery', () => {
     if (!SORT_OPTIONS.some((o) => o.key === key)) throw new Error('未知排序方式: ' + key);
     sortOpen.value = false;
     if (key === sortKey.value) return;
+    // 委托 legacy：PhotoGrid 已回退，真实渲染在 #gallery，由 legacy 的 loadOlderDates 驱动
+    const PS = (typeof window !== 'undefined' && window.PS) ? window.PS : null;
+    if (PS && typeof PS.applySort === 'function') {
+      sortKey.value = key;
+      // 同步过滤上下文，避免排序时丢失已选筛选
+      if (PS.state) {
+        try { PS.state.activeFilter = normalizeFilter(activeFilter.value); } catch {}
+        if (activeCategory.value !== null) PS.state.activeCategory = activeCategory.value;
+      }
+      try { PS.applySort(key); } catch (e) { console.warn('[gallery] PS.applySort delegate failed', e); }
+      return;
+    }
     sortKey.value = key;
     syncSortToLegacy();
-    // PR5 真源：排序改变重置分页，直接走 Pinia
+    // PR5 真源：排序改变重置分页，直接走 Pinia（Vue PhotoGrid 虚拟滚动时）
     dates.value = [];
     noMoreDates.value = false;
     dateCursor.value = null;
@@ -270,15 +283,31 @@ export const useGalleryStore = defineStore('gallery', () => {
     return filterOptions.value;
   }
 
-  // PR5 真源化：不再委托 PS.applyFilter，直接重置分页走 Pinia
+  // 修复：Vue 筛选需回写 PS.state 并走 legacy 渲染链路（PhotoGrid 回退，#gallery 由 legacy 驱动）
   function applyFilter(filter) {
     const clean = normalizeFilter(filter);
-    // 去重：相同 filter 不重复拉取
     const prev = JSON.stringify(normalizeFilter(activeFilter.value));
     const next = JSON.stringify(clean);
     activeFilter.value = clean;
     filterOpen.value = false;
     if (prev === next) return;
+    const PS = (typeof window !== 'undefined' && window.PS) ? window.PS : null;
+    if (PS && PS.state) PS.state.activeFilter = { ...clean };
+    if (PS && typeof PS.applyFilter === 'function') {
+      PS.applyFilter(clean);
+      return;
+    }
+    // 兜底：PS.applyFilter 尚未挂载但 legacy 渲染器已就绪时，直接调用 legacy 链路
+    if (PS && PS.state && typeof PS.resetGallery === 'function' && typeof PS.loadOlderDates === 'function') {
+      try { PS.resetGallery(); } catch {}
+      const scroll = PS.els && PS.els.galleryScroll;
+      if (scroll) try { scroll.scrollTo({ top: 0 }); } catch {}
+      PS.loadOlderDates({ allowScanRequest: false }).then(() => {
+        try { PS.schedulePlaceholderPhotoFill && PS.schedulePlaceholderPhotoFill(); } catch {}
+        try { PS.scheduleVisiblePreviewCheck && PS.scheduleVisiblePreviewCheck(); } catch {}
+      });
+      return;
+    }
     dates.value = [];
     noMoreDates.value = false;
     dateCursor.value = null;
@@ -292,6 +321,23 @@ export const useGalleryStore = defineStore('gallery', () => {
     activeFilter.value = {};
     filterOpen.value = false;
     if (!had) return;
+    const PS = (typeof window !== 'undefined' && window.PS) ? window.PS : null;
+    if (PS && PS.state) PS.state.activeFilter = {};
+    if (PS && typeof PS.clearActiveFilter === 'function') { PS.clearActiveFilter(); return; }
+    if (PS && typeof PS.applyFilter === 'function') { PS.applyFilter({}); return; }
+    if (PS && PS.state && typeof PS.resetGallery === 'function' && typeof PS.loadOlderDates === 'function') {
+      try { PS.resetGallery(); } catch {}
+      const scroll = PS.els && PS.els.galleryScroll;
+      if (scroll) try { scroll.scrollTo({ top: 0 }); } catch {}
+      try { PS.updateFilterButton && PS.updateFilterButton(); } catch {}
+      try { PS.closeFilterPop && PS.closeFilterPop(); } catch {}
+      try { PS.closeFilterMenu && PS.closeFilterMenu(); } catch {}
+      PS.loadOlderDates({ allowScanRequest: false }).then(() => {
+        try { PS.schedulePlaceholderPhotoFill && PS.schedulePlaceholderPhotoFill(); } catch {}
+        try { PS.scheduleVisiblePreviewCheck && PS.scheduleVisiblePreviewCheck(); } catch {}
+      });
+      return;
+    }
     dates.value = [];
     noMoreDates.value = false;
     dateCursor.value = null;
@@ -527,7 +573,10 @@ export const useGalleryStore = defineStore('gallery', () => {
   }
 
   const dateCount = computed(() => dates.value.length);
-  const hasActiveFilter = computed(() => Object.keys(normalizeFilter(activeFilter.value)).length > 0);
+  const hasActiveFilter = computed(() => {
+    if (activeCategory.value !== null) return true;
+    return Object.keys(normalizeFilter(activeFilter.value)).length > 0;
+  });
 
   return {
     dates,

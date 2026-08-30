@@ -1049,9 +1049,9 @@ h1 {
 }
 
 .sort-trigger {
-  height: 30px;
+  height: 32px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 0 10px;
   background: rgba(255,255,255,0.06);
   color: var(--text);
@@ -1059,6 +1059,7 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  box-sizing: border-box;
   cursor: default;
   transition: background .15s ease, border-color .15s ease;
 }
@@ -1205,11 +1206,12 @@ h1 {
   white-space: nowrap;
 }
 
-.filter-combo-trigger b {
+.filter-combo-trigger .filter-caret {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
+  flex-shrink: 0;
+  transition: transform .16s ease;
 }
+.filter-combo.open .filter-caret { transform: rotate(180deg); color: var(--text); }
 
 .filter-combo.open .filter-combo-trigger {
   background: rgba(224,164,90,0.18);
@@ -1307,7 +1309,7 @@ h1 {
 .settings-screen {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -6924,6 +6926,13 @@ h1 {
 
 .lightbox.loading .lightbox-img {
   opacity: 0;
+}
+.lightbox.previewing.loading .lightbox-img,
+.lightbox.previewing .lightbox-img {
+  opacity: 1;
+}
+.lightbox.previewing.loading .lightbox-img {
+  filter: blur(1.5px) brightness(0.96);
 }
 
 .lightbox-img.dragging {

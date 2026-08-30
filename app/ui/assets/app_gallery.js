@@ -635,7 +635,7 @@
       '<div class="filter-row">',
       '<label>' + PS.escapeHtml(label) + '</label>',
       '<div id="' + id + '" class="filter-combo" data-value="">',
-      '<button class="filter-combo-trigger" type="button"><span></span><b>v</b></button>',
+      '<button class="filter-combo-trigger" type="button"><span></span><svg class="filter-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>',
       '<div class="filter-combo-menu hidden">',
       filterOptionButtons(rows, emptyLabel),
       '</div>',
@@ -733,8 +733,10 @@
     closeFilterMenu();
     const pop = ensureFilterPop();
     const rect = els.filterTrigger.getBoundingClientRect();
-    pop.style.left = Math.min(rect.left, window.innerWidth - 356) + 'px';
+    const W = 340;
+    pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - W - 8)) + 'px';
     pop.style.top = (rect.bottom + 8) + 'px';
+    pop.style.transform = 'none';
     state.filterOpen = true;
     pop.classList.remove('hidden');
     const ready = state.filterOptions
@@ -882,7 +884,8 @@
       restoreSource();
       return;
     }
-    setTimeout(restoreSource, 160);
+    // 立即切回来源，避免“图库闪一下”：让设置页的 leaving 动画在来源页之上播放，而非先闪出图库
+    restoreSource();
   }
 
   function setSettingsTab(tabKey) {
@@ -913,6 +916,10 @@
     }
     if (tab.key === 'shortcuts') {
       renderShortcutsSettings();
+      return;
+    }
+    if (tab.key === 'plugins') {
+      renderPluginsSettings();
       return;
     }
     if (tab.key === 'about') {
@@ -1190,7 +1197,7 @@
     const panel = createSettingsPanel('关于', '');
     panel.body.innerHTML = [
       '<div class="settings-row-item">' +
-      '<div><strong>PicScanner <span class="about-version">v1.0.1</span></strong><small>Himpq developed with Codex</small></div>' +
+      '<div><strong>PicScanner <span class="about-version">v2.2.0</span></strong><small>Himpq developed with Codex · 语义集锦 · 详情灯箱</small></div>' +
       '<span>构建 ' + PS.escapeHtml(APP_BUILD || '--') + '</span>' +
       '</div>',
       '<div class="settings-row-item">' +
@@ -1367,6 +1374,89 @@
       row.appendChild(cover);
       row.appendChild(info);
       list.appendChild(row);
+    });
+  }
+
+  function renderPluginsSettings() {
+    const wrap = settingsStack();
+    const panel = createSettingsPanel('已装载插件', '来自 app/modules/*/module.json，经 loader 隔离加载');
+    const list = document.createElement('div');
+    list.className = 'settings-panel-body';
+    list.textContent = '读取中...';
+    panel.body.appendChild(list);
+    const note = document.createElement('div');
+    note.className = 'settings-panel-body';
+    note.innerHTML = '<div class="settings-row-item" style="display:block;white-space:normal;line-height:1.6;"><small style="white-space:normal;">状态经 <code style="background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;">get_modules</code> 查询，失败仅打日志跳过。</small></div>';
+    wrap.appendChild(panel);
+    wrap.appendChild(note);
+    els.settingsBody.appendChild(wrap);
+    call('get_modules').then((res)=>{
+      if(!res || !res.success) throw new Error(res && res.message || '获取失败');
+      const mods = res.modules || [];
+      list.textContent='';
+      if(!mods.length){
+        list.textContent='暂无插件';
+        list.className='settings-empty';
+        return;
+      }
+      mods.forEach((m)=>{
+        const row = document.createElement('div');
+        row.className='settings-row-item';
+        row.style.minHeight='64px';
+        row.style.gridTemplateColumns='minmax(0,1fr) auto';
+        const left=document.createElement('div');
+        left.style.display='grid'; left.style.gap='2px'; left.style.minWidth='0';
+        const title=document.createElement('strong');
+        title.style.display='flex'; title.style.alignItems='center'; title.style.gap='8px'; title.style.flexWrap='wrap';
+        title.innerHTML = PS.escapeHtml(m.name||m.key) + ' <span style="font-weight:400;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 6px;height:18px;display:inline-flex;align-items:center;">'+PS.escapeHtml(m.key)+'</span> <span style="font-weight:400;font-size:11px;color:rgba(255,255,255,.6);">v'+PS.escapeHtml(m.version||'')+'</span> <span style="font-size:11px;padding:0 6px;height:18px;border-radius:999px;display:inline-flex;align-items:center;background:rgba(255,255,255,.08);color:var(--muted);border:1px solid var(--line);">已加载</span>';
+        const desc=document.createElement('small');
+        desc.textContent=m.description||'—';
+        desc.style.whiteSpace='normal'; desc.style.lineHeight='1.4';
+        left.appendChild(title); left.appendChild(desc);
+        if(m.frontend_url){
+          const hint=document.createElement('small');
+          hint.textContent='有前端';
+          hint.style.color='#e0a45a';
+          left.appendChild(hint);
+        }
+        const right=document.createElement('span');
+        right.style.display='grid'; right.style.gap='4px'; right.style.justifyItems='end';
+        const badge=document.createElement('span');
+        badge.textContent=m.frontend_url?'有前端':'纯后端';
+        badge.style.fontSize='11px'; badge.style.color='var(--muted)'; badge.style.border='1px solid var(--line)'; badge.style.borderRadius='6px'; badge.style.padding='2px 6px';
+        right.appendChild(badge);
+        row.appendChild(left); row.appendChild(right);
+        list.appendChild(row);
+      });
+      // 异步补充状态（不阻塞主列表）
+      mods.forEach((m)=>{
+        const probe = (m.key==='collections'||m.key==='semantic_search'||m.key==='face_cluster');
+        if(!probe) return;
+        const method = m.key==='collections' ? 'status' : 'index_status';
+        call('module_api', m.key, method, '').then((r)=>{
+          if(!r || !r.success) return;
+          let detail='';
+          if(typeof r.collections==='number') detail = r.collections+' 集锦';
+          if(typeof r.total==='number') detail = (detail?detail+' · ':'') + r.total+' 向量' + (r.running?' · 索引中':'');
+          if(!detail) return;
+          // 找到对应行追加
+          const rows=list.querySelectorAll('.settings-row-item');
+          rows.forEach((row)=>{
+            if(row.textContent.includes(m.key)){
+              const s=row.querySelector('small:last-child');
+              if(s && s.textContent==='有前端'){
+                const d=document.createElement('small');
+                d.textContent=detail; d.style.color='#e0a45a';
+                s.parentNode.insertBefore(d, s);
+              }
+            }
+          });
+        }).catch(()=>{});
+      });
+    }).catch((err)=>{
+      list.className='settings-empty';
+      list.textContent=String(err && err.message || err);
+      list.style.color='var(--danger)';
     });
   }
 
@@ -2185,8 +2275,27 @@
   function setDateCover(dateKey, coverUrl) {
     if (!dateKey) return;
     const clean = String(coverUrl || '').trim();
-    if (clean) state.dateCovers.set(dateKey, clean);
-    else state.dateCovers.delete(dateKey);
+    if (!clean) {
+      state.dateCovers.delete(dateKey);
+      const pill0 = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
+      if (pill0) applyDateCover(pill0, dateKey);
+      return;
+    }
+    // 预检：确保封面可加载，避免 Sony 视频等不可预览图被当封面
+    const test = new Image();
+    test.onload = () => {
+      state.dateCovers.set(dateKey, clean);
+      const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
+      if (pill) applyDateCover(pill, dateKey);
+    };
+    test.onerror = () => {
+      state.dateCovers.delete(dateKey);
+      const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
+      if (pill) applyDateCover(pill, dateKey);
+    };
+    test.src = clean;
+    // 乐观设置，失败会自动回退
+    state.dateCovers.set(dateKey, clean);
     const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
     if (pill) applyDateCover(pill, dateKey);
   }
@@ -2194,9 +2303,28 @@
   function applyDateCover(pill, dateKey) {
     if (!pill) return;
     const coverUrl = state.dateCovers.get(dateKey) || '';
+    // 若该封面对应的照片在 usePreviewQueue 已标记失败，则不展示
+    try {
+      const failed = window.__previewFailedSet;
+      if (failed && coverUrl && failed.has(coverUrl)) {
+        pill.classList.remove('has-cover');
+        pill.style.removeProperty('--date-cover');
+        return;
+      }
+    } catch {}
     pill.classList.toggle('has-cover', !!coverUrl);
     if (coverUrl) {
       pill.style.setProperty('--date-cover', 'url("' + coverUrl.replace(/"/g, '\\"') + '")');
+      // 额外 onerror 兜底：若 CSS 背景加载失败，下次不再使用
+      const img = new Image();
+      img.onerror = () => {
+        if (state.dateCovers.get(dateKey) === coverUrl) {
+          state.dateCovers.delete(dateKey);
+          pill.classList.remove('has-cover');
+          pill.style.removeProperty('--date-cover');
+        }
+      };
+      img.src = coverUrl;
     } else {
       pill.style.removeProperty('--date-cover');
     }
@@ -2940,6 +3068,7 @@
   function openComparePanel() {
     PS.cancelQuickEditPicking();
     state.compare.open = true;
+    state.compare.lightbox = false;
     closeCategoryPicker();
     hideContextMenu();
     const panel = ensureComparePanel();
@@ -2949,11 +3078,13 @@
 
   function closeComparePanel() {
     state.compare.open = false;
+    state.compare.lightbox = false;
     if (state.compare.panel) state.compare.panel.classList.add('hidden');
     updateCompareCardHighlights();
   }
 
   function toggleComparePanel() {
+    if (state.compare.lightbox) { PS.closeLightbox(); return; }
     if (state.compare.open) closeComparePanel();
     else openComparePanel();
   }
@@ -4084,6 +4215,11 @@
   PS.renderSortMenu = renderSortMenu;
   PS.setSortOpen = setSortOpen;
   PS.currentSortOption = currentSortOption;
+  PS.applyFilter = applyFilter;
+  PS.clearActiveFilter = clearActiveFilter;
+  PS.hasActiveFilter = hasActiveFilter;
+  PS.normalizeFilter = normalizeFilter;
+  PS.filterPayload = filterPayload;
   PS.updateFilterButton = updateFilterButton;
   PS.openFilterPop = openFilterPop;
   PS.closeFilterPop = closeFilterPop;

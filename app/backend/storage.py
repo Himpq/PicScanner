@@ -65,6 +65,9 @@ PHOTO_COLUMNS = [
     "flash",
     "white_balance",
     "exposure_bias",
+    "gps_lat",
+    "gps_lon",
+    "gps_place",
     "renderable",
     "exif_status",
     "exif_error",
@@ -175,6 +178,9 @@ class Storage:
                     flash TEXT,
                     white_balance TEXT,
                     exposure_bias TEXT,
+                    gps_lat REAL,
+                    gps_lon REAL,
+                    gps_place TEXT,
                     renderable INTEGER NOT NULL DEFAULT 0,
                     exif_status TEXT NOT NULL DEFAULT 'pending',
                     exif_error TEXT NOT NULL DEFAULT '',
@@ -182,6 +188,36 @@ class Storage:
                     updated_at TEXT NOT NULL,
                     UNIQUE(source_id, relative_path)
                 );
+
+                CREATE TABLE IF NOT EXISTS collections (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    type TEXT NOT NULL DEFAULT 'semantic',
+                    title TEXT NOT NULL DEFAULT '',
+                    subtitle TEXT NOT NULL DEFAULT '',
+                    cover_photo_id INTEGER,
+                    photo_count INTEGER NOT NULL DEFAULT 0,
+                    centroid_model TEXT NOT NULL DEFAULT '',
+                    time_start TEXT,
+                    time_end TEXT,
+                    gps_lat REAL,
+                    gps_lon REAL,
+                    meta_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS collection_photos (
+                    collection_id TEXT NOT NULL,
+                    photo_id INTEGER NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    score REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY(collection_id, photo_id),
+                    FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_collections_source ON collections(source_id);
+                CREATE INDEX IF NOT EXISTS idx_collections_type ON collections(type);
+                CREATE INDEX IF NOT EXISTS idx_collection_photos_photo ON collection_photos(photo_id);
 
                 CREATE TABLE IF NOT EXISTS source_state (
                     source_id TEXT PRIMARY KEY,
@@ -275,7 +311,15 @@ class Storage:
                 conn.execute("ALTER TABLE photos ADD COLUMN lightbox_cache_size INTEGER NOT NULL DEFAULT 0")
             if "lightbox_cache_mtime" not in photo_columns:
                 conn.execute("ALTER TABLE photos ADD COLUMN lightbox_cache_mtime REAL NOT NULL DEFAULT 0")
+            if "gps_lat" not in photo_columns:
+                conn.execute("ALTER TABLE photos ADD COLUMN gps_lat REAL")
+            if "gps_lon" not in photo_columns:
+                conn.execute("ALTER TABLE photos ADD COLUMN gps_lon REAL")
+            if "gps_place" not in photo_columns:
+                conn.execute("ALTER TABLE photos ADD COLUMN gps_place TEXT")
             self._migrate_global_categories(conn)
+            # collections 表已在主脚本中 CREATE IF NOT EXISTS，这里补索引兼容老库
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_gps ON photos(gps_lat, gps_lon)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source_marks_category ON source_marks(source_id, item_type, category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source_categories_source ON source_categories(source_id)")
 
@@ -402,6 +446,9 @@ class Storage:
                 flash TEXT,
                 white_balance TEXT,
                 exposure_bias TEXT,
+                gps_lat REAL,
+                gps_lon REAL,
+                gps_place TEXT,
                 renderable INTEGER NOT NULL DEFAULT 0,
                 exif_status TEXT NOT NULL DEFAULT 'pending',
                 exif_error TEXT NOT NULL DEFAULT '',
@@ -988,6 +1035,9 @@ class Storage:
             "flash": meta.get("flash"),
             "white_balance": meta.get("white_balance"),
             "exposure_bias": meta.get("exposure_bias"),
+            "gps_lat": meta.get("gps_lat"),
+            "gps_lon": meta.get("gps_lon"),
+            "gps_place": meta.get("gps_place"),
             "renderable": int(meta.get("renderable") or 0),
             "exif_status": meta.get("exif_status") or "complete",
             "exif_error": meta.get("exif_error") or "",
@@ -1408,14 +1458,17 @@ class Storage:
                        COUNT(*) AS count,
                        SUM(CASE WHEN p.exif_status='complete' THEN 1 ELSE 0 END) AS exif_count,
                        (
-                           SELECT cp.path
+                           SELECT GROUP_CONCAT(path, '|')
+                            FROM (
+                                SELECT cp.path AS path
                            FROM photos AS cp
                            WHERE cp.source_id=p.source_id
                              AND cp.date_key=p.date_key
                              AND (cp.renderable=1 OR cp.is_raw=1)
                              AND {cover_display_filter}{cover_scope_sql}{cover_filter_sql}
                            ORDER BY COALESCE(cp.datetime_original, '') DESC, cp.mtime DESC, cp.id DESC
-                           LIMIT 1
+                           LIMIT 5
+                            )
                        ) AS cover_path
                 FROM photos AS p
                 {where}
@@ -1473,14 +1526,17 @@ class Storage:
                        COUNT(p.id) AS count,
                        SUM(CASE WHEN p.exif_status='complete' THEN 1 ELSE 0 END) AS exif_count,
                        (
-                           SELECT cp.path
+                           SELECT GROUP_CONCAT(path, '|')
+                            FROM (
+                                SELECT cp.path AS path
                            FROM photos AS cp
                            WHERE cp.source_id=dm.source_id
                              AND cp.date_key=dm.item_key
                              AND (cp.renderable=1 OR cp.is_raw=1)
                              AND {cover_display_filter}{cover_scope_sql}{cover_filter_sql}
                            ORDER BY COALESCE(cp.datetime_original, '') DESC, cp.mtime DESC, cp.id DESC
-                           LIMIT 1
+                           LIMIT 5
+                            )
                        ) AS cover_path
                 FROM source_marks AS dm
                 JOIN photos AS p
@@ -1564,14 +1620,17 @@ class Storage:
                 SELECT p.date_key, COUNT(*) AS count,
                        SUM(CASE WHEN p.exif_status='complete' THEN 1 ELSE 0 END) AS exif_count,
                        (
-                           SELECT cp.path
-                           FROM photos AS cp
-                           WHERE cp.date_key=p.date_key
-                             AND (cp.renderable=1 OR cp.is_raw=1)
-                             AND {cover_display_filter}{cover_scope_sql}{cover_filter_sql}
-                           ORDER BY COALESCE(cp.datetime_original, '') DESC, cp.mtime DESC, cp.id DESC
-                           LIMIT 1
-                       ) AS cover_path
+                            SELECT GROUP_CONCAT(path, '|')
+                            FROM (
+                                SELECT cp.path AS path
+                            FROM photos AS cp
+                            WHERE cp.date_key=p.date_key
+                              AND (cp.renderable=1 OR cp.is_raw=1)
+                              AND {cover_display_filter}{cover_scope_sql}{cover_filter_sql}
+                            ORDER BY COALESCE(cp.datetime_original, '') DESC, cp.mtime DESC, cp.id DESC
+                                LIMIT 5
+                            )
+                        ) AS cover_path
                 FROM photos AS p
                 {where}
                 GROUP BY p.date_key
@@ -2167,6 +2226,199 @@ class Storage:
                 }
                 for row in rows
             }
+
+    # ---------- Collections ----------
+    def save_collections(self, source_id: str, collections: list[dict], replace: bool = False, dedup: bool = True, jaccard_thresh: float = 0.85) -> dict:
+        """批量保存集锦，collections 每项含 {id,type,title,subtitle,cover_photo_id,photo_ids,meta}。
+        默认 append + 去重；replace=True 时全量覆盖（旧行为）。
+        返回 {inserted, skipped, total}。
+        去重规则：photo_ids 集合完全相等 或 Jaccard 相似度 >= jaccard_thresh 即判重。
+        """
+        import json as _json
+        import uuid as _uuid
+        sid = str(source_id or "").strip()
+        if not sid:
+            raise ValueError("source_id 不能为空")
+        try:
+            _thr = float(jaccard_thresh)
+        except Exception:
+            _thr = 0.85
+        _thr = max(0.0, min(1.0, _thr))
+        now = now_text()
+        with self._lock, self._connect() as conn:
+            if replace:
+                conn.execute("DELETE FROM collection_photos WHERE collection_id IN (SELECT id FROM collections WHERE source_id=?)", (sid,))
+                conn.execute("DELETE FROM collections WHERE source_id=?", (sid,))
+                existing_sets: list[frozenset] = []
+                existing_ids: set[str] = set()
+            else:
+                # 拉取已存集锦的 photo_ids 集合用于去重
+                existing_sets = []
+                existing_ids = set()
+                try:
+                    rows = conn.execute("SELECT id FROM collections WHERE source_id=?", (sid,)).fetchall()
+                    for r in rows:
+                        cid0 = str(r["id"])
+                        existing_ids.add(cid0)
+                        prow = conn.execute("SELECT photo_id FROM collection_photos WHERE collection_id=?", (cid0,)).fetchall()
+                        s = frozenset(int(x["photo_id"]) for x in prow)
+                        if s:
+                            existing_sets.append(s)
+                except Exception:
+                    existing_sets = []
+            inserted = 0
+            skipped = 0
+            # 本批次内去重也需记录
+            batch_sets: list[frozenset] = []
+            for col in collections:
+                photo_ids = [int(x) for x in (col.get("photo_ids") or []) if int(x or 0)]
+                if not photo_ids:
+                    skipped += 1
+                    continue
+                # 去重后的有序去重（保持原序但用于集合判重用 set）
+                # 保留原序 photo_ids 供存储，集合用 frozenset
+                pset = frozenset(photo_ids)
+                # dedup 检查
+                is_dup = False
+                if dedup:
+                    # 与已存对比
+                    for es in existing_sets:
+                        if pset == es:
+                            is_dup = True
+                            break
+                        # Jaccard
+                        inter = len(pset & es)
+                        if inter:
+                            union = len(pset | es)
+                            if union and (inter / union) >= _thr:
+                                is_dup = True
+                                break
+                    if not is_dup:
+                        for bs in batch_sets:
+                            if pset == bs:
+                                is_dup = True
+                                break
+                            inter = len(pset & bs)
+                            if inter:
+                                union = len(pset | bs)
+                                if union and (inter / union) >= _thr:
+                                    is_dup = True
+                                    break
+                if is_dup:
+                    skipped += 1
+                    continue
+                cid = str(col.get("id") or _uuid.uuid4().hex[:12])
+                # id 碰撞（append 场景）→ 重新生成
+                if cid in existing_ids:
+                    cid = _uuid.uuid4().hex[:12]
+                meta = col.get("meta") or {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                # photo_ids 去重保持原序：若有重复 id，保留首次出现
+                seen = set()
+                ordered_ids: list[int] = []
+                for pid in photo_ids:
+                    if pid not in seen:
+                        seen.add(pid)
+                        ordered_ids.append(pid)
+                photo_ids = ordered_ids
+                conn.execute(
+                    """
+                    INSERT INTO collections(id, source_id, type, title, subtitle, cover_photo_id, photo_count, centroid_model, time_start, time_end, gps_lat, gps_lon, meta_json, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        cid, sid, str(col.get("type") or "semantic"), str(col.get("title") or "未命名"),
+                        str(col.get("subtitle") or ""), int(col.get("cover_photo_id") or (photo_ids[0] if photo_ids else 0)),
+                        len(photo_ids), str(col.get("centroid_model") or ""), str(col.get("time_start") or ""),
+                        str(col.get("time_end") or ""), col.get("gps_lat"), col.get("gps_lon"),
+                        _json.dumps(meta, ensure_ascii=False), now, now,
+                    ),
+                )
+                for order, pid in enumerate(photo_ids):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO collection_photos(collection_id, photo_id, sort_order, score) VALUES (?,?,?,?)",
+                        (cid, int(pid), int(order), float(col.get("scores", {}).get(str(pid), 0) if isinstance(col.get("scores"), dict) else 0)),
+                    )
+                inserted += 1
+                existing_ids.add(cid)
+                existing_sets.append(pset)
+                batch_sets.append(pset)
+            # 兼容旧调用：若 replace 模式，total 即 inserted；否则返回详细
+            return {"inserted": inserted, "skipped": skipped, "total": len(collections)}
+
+    def list_collections(self, source_id: str = "", limit: int = 50) -> list[dict]:
+        import json as _json
+        sid = str(source_id or "").strip()
+        args: list = []
+        where = ""
+        if sid:
+            where = "WHERE c.source_id=?"
+            args.append(sid)
+        args.append(int(limit or 50))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(f"SELECT * FROM collections AS c {where} ORDER BY c.created_at DESC, c.id DESC LIMIT ?", args).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["meta"] = _json.loads(d.get("meta_json") or "{}")
+                except Exception:
+                    d["meta"] = {}
+                # 拉取 photo_ids
+                prow = conn.execute("SELECT photo_id FROM collection_photos WHERE collection_id=? ORDER BY sort_order ASC", (d["id"],)).fetchall()
+                d["photo_ids"] = [int(x["photo_id"]) for x in prow]
+                # 封面缩略图可后续在 api 层补
+                out.append(d)
+            return out
+
+    def get_collection(self, collection_id: str) -> dict | None:
+        import json as _json
+        cid = str(collection_id or "").strip()
+        if not cid:
+            return None
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM collections WHERE id=?", (cid,)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            try:
+                d["meta"] = _json.loads(d.get("meta_json") or "{}")
+            except Exception:
+                d["meta"] = {}
+            prow = conn.execute("SELECT photo_id, sort_order, score FROM collection_photos WHERE collection_id=? ORDER BY sort_order ASC", (cid,)).fetchall()
+            d["photos"] = [dict(x) for x in prow]
+            d["photo_ids"] = [int(x["photo_id"]) for x in prow]
+            # 顺便带 photo 详情
+            if d["photo_ids"]:
+                placeholders = ",".join("?" for _ in d["photo_ids"])
+                photos = conn.execute(f"SELECT * FROM photos WHERE id IN ({placeholders})", d["photo_ids"]).fetchall()
+                pmap = {int(r["id"]): dict(r) for r in photos}
+                d["photo_details"] = [pmap.get(pid) for pid in d["photo_ids"] if pid in pmap]
+            return d
+
+    def clear_collections(self, source_id: str = "") -> int:
+        sid = str(source_id or "").strip()
+        with self._lock, self._connect() as conn:
+            if sid:
+                conn.execute("DELETE FROM collection_photos WHERE collection_id IN (SELECT id FROM collections WHERE source_id=?)", (sid,))
+                cur = conn.execute("DELETE FROM collections WHERE source_id=?", (sid,))
+            else:
+                conn.execute("DELETE FROM collection_photos")
+                cur = conn.execute("DELETE FROM collections")
+            return int(cur.rowcount or 0)
+
+    def photos_by_ids(self, photo_ids: list[int]) -> list[dict]:
+        if not photo_ids:
+            return []
+        ids = [int(x) for x in photo_ids if int(x or 0)]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(f"SELECT * FROM photos WHERE id IN ({placeholders})", ids).fetchall()
+            pmap = {int(r["id"]): dict(r) for r in rows}
+            return [pmap[i] for i in ids if i in pmap]
 
 
 storage = Storage()

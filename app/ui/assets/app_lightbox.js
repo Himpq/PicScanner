@@ -1361,8 +1361,16 @@
 
   function closeLightbox() {
     if (state.lightbox.embedded) return;
+    const wasCompare = !!state.compare.lightbox;
     hide(els.lightbox);
     state.compare.lightbox = false;
+    // 退出对比灯箱时同步收起上层 ComparePanel 并清空选中，避免仅关灯箱却留面板/角标
+    if (wasCompare) {
+      state.compare.open = false;
+      if (state.compare.panel) state.compare.panel.classList.add('hidden');
+      state.compare.selected = [null, null];
+      if (typeof PS.renderComparePanel === 'function') try { PS.renderComparePanel(); } catch {}
+    }
     state.compare.infoDragging = -1;
     state.compare.panes.forEach((pane, index) => {
       pane.loadToken += 1;

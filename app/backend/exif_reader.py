@@ -178,6 +178,70 @@ def _read_dimensions(path: Path, tags: dict) -> tuple[int | None, int | None]:
     return width, height
 
 
+def _gps_to_deg(value: Any) -> float | None:
+    """EXIF GPS 坐标通常为 [度,分,秒] 的 Ratio 列表，返回十进制度。"""
+    if value is None:
+        return None
+    # exifread 的 GPS 值：IfdTag.values 为 Ratio 列表
+    vals = getattr(value, "values", None)
+    if vals is not None:
+        value = vals
+    if isinstance(value, (list, tuple)):
+        try:
+            nums = []
+            for v in value:
+                if hasattr(v, "num") and hasattr(v, "den"):
+                    den = float(v.den)
+                    nums.append(float(v.num) / den if den else 0)
+                else:
+                    nums.append(float(str(v).strip().split("/")[0]) / float(str(v).strip().split("/")[1]) if "/" in str(v) else float(v))
+            if len(nums) >= 3:
+                return float(nums[0] + nums[1] / 60.0 + nums[2] / 3600.0)
+            if len(nums) == 2:
+                return float(nums[0] + nums[1] / 60.0)
+            if len(nums) == 1:
+                return float(nums[0])
+        except Exception:
+            return None
+    # 回退：尝试解析 "51 deg 28' 40.12''" 之类 printable
+    try:
+        text = _display(value)
+        if text:
+            import re
+            parts = re.findall(r"[\d.]+", text)
+            if len(parts) >= 3:
+                return float(parts[0]) + float(parts[1]) / 60 + float(parts[2]) / 3600
+            if len(parts) == 1:
+                return float(parts[0])
+    except Exception:
+        pass
+    return None
+
+
+def _parse_gps(tags: dict) -> tuple[float | None, float | None]:
+    lat_val = _tag(tags, "GPS GPSLatitude")
+    lat_ref = _display(_tag(tags, "GPS GPSLatitudeRef"))
+    lon_val = _tag(tags, "GPS GPSLongitude")
+    lon_ref = _display(_tag(tags, "GPS GPSLongitudeRef"))
+    if lat_val is None or lon_val is None:
+        return None, None
+    lat = _gps_to_deg(lat_val)
+    lon = _gps_to_deg(lon_val)
+    if lat is None or lon is None:
+        return None, None
+    if lat_ref and lat_ref.strip().upper().startswith("S"):
+        lat = -abs(lat)
+    if lon_ref and lon_ref.strip().upper().startswith("W"):
+        lon = -abs(lon)
+    # 合法性校验
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None, None
+    # 过滤 0,0 这种无效占位
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+        return None, None
+    return round(lat, 6), round(lon, 6)
+
+
 def read_metadata(path: str | Path) -> dict:
     p = Path(path)
     meta = {
@@ -232,6 +296,7 @@ def read_metadata(path: str | Path) -> dict:
     dt_raw = _display(_tag(tags, "EXIF DateTimeOriginal", "Image DateTime"))
     datetime_original, date_key = _parse_exif_datetime(dt_raw)
     width, height = _read_dimensions(p, tags)
+    gps_lat, gps_lon = _parse_gps(tags)
 
     meta.update(
         {
@@ -255,6 +320,9 @@ def read_metadata(path: str | Path) -> dict:
             "flash": _display(_tag(tags, "EXIF Flash")),
             "white_balance": _display(_tag(tags, "EXIF WhiteBalance")),
             "exposure_bias": _display(_tag(tags, "EXIF ExposureBiasValue")),
+            "gps_lat": gps_lat,
+            "gps_lon": gps_lon,
+            "gps_place": None,
         }
     )
     return _finalize(meta)

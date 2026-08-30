@@ -11,14 +11,64 @@ const open = computed(() => store.open);
 const photo = computed(() => store.photo);
 
 function close() {
+  const PS = window.PS;
+  // 对比灯箱退出时同步收起上层 ComparePanel 并清空选中，关闭按钮/Esc 行为一致
+  if (store.compareOpen) {
+    store.compareOpen = false;
+    store.compareSelected = [null, null];
+    store.syncToLegacy();
+    if (PS && PS.state && PS.state.compare) {
+      PS.state.compare.lightbox = false;
+      PS.state.compare.open = false;
+      PS.state.compare.selected = [null, null];
+      try { if (PS.state.compare.panel) PS.state.compare.panel.classList.add('hidden'); } catch {}
+      try { if (typeof PS.renderComparePanel === 'function') PS.renderComparePanel(); } catch {}
+      try { if (typeof PS.updateCompareCardHighlights === 'function') PS.updateCompareCardHighlights(); } catch {}
+    }
+    if (PS && typeof PS._origCloseLightbox === 'function') {
+      try { PS._origCloseLightbox(); } catch {}
+    } else if (PS && PS.els) {
+      try {
+        if (PS.els.lightbox) PS.els.lightbox.classList.add('hidden');
+        if (PS.els.lightboxCompare) PS.els.lightboxCompare.classList.add('hidden');
+        if (PS.els.compareToolbar) PS.els.compareToolbar.classList.add('hidden');
+        if (PS.els.lightbox) PS.els.lightbox.classList.remove('compare-mode');
+      } catch {}
+    }
+    store.open = false;
+    return;
+  }
   store.closeLightbox();
 }
 
 function onKeydown(e) {
+  // 仅当 Vue 灯箱真正打开时才拦截键盘；画廊里的对比面板（c 打开的 compare.open）
+  // 完全由 legacy app.js 的 document keydown 处理，Vue 不抢占避免 Esc 失效。
   if (!open.value) return;
-  if (e.key === 'Escape') close();
-  if (e.key === 'ArrowLeft') store.prevPhoto();
-  if (e.key === 'ArrowRight') store.nextPhoto();
+  if (e.target && typeof e.target.closest === 'function') {
+    const tag = String(e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+  }
+  // 灯箱内按 c：若处于对比则退出对比（等同 Esc 关闭灯箱），否则不处理（legacy 在灯箱非对比时 c 无动作）
+  if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (store.compareOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+    return;
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    return;
+  }
+  if (!store.compareOpen) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); store.prevPhoto(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); store.nextPhoto(); }
+  }
 }
 
 function isVueLightboxEnabled() {
@@ -57,8 +107,36 @@ function hijackLegacy() {
   };
   PS.closeLightbox = () => {
     if (!isVueLightboxEnabled()) return origClose ? origClose() : null;
+    const wasCompare = !!store.compareOpen;
     store.open = false;
+    store.compareOpen = false;
+    if (wasCompare) store.compareSelected = [null, null];
     store.syncToLegacy();
+    if (PS.state && PS.state.compare) {
+      PS.state.compare.lightbox = false;
+      if (wasCompare) {
+        PS.state.compare.open = false;
+        PS.state.compare.selected = [null, null];
+        try { if (PS.state.compare.panel) PS.state.compare.panel.classList.add('hidden'); } catch {}
+        try { if (typeof PS.renderComparePanel === 'function') PS.renderComparePanel(); } catch {}
+        try { if (typeof PS.updateCompareCardHighlights === 'function') PS.updateCompareCardHighlights(); } catch {}
+      }
+    }
+    // 若是对比关闭，仍需清理 legacy 的 DOM（compare-mode 等），否则下次打开会有残留
+    if (wasCompare && origClose) {
+      try { origClose(); } catch {}
+      return;
+    }
+    // 非对比的普通关闭也确保 legacy DOM 隐藏（Vue 已通过 v-if 隐藏，但 legacy 的 #lightbox 可能仍需 hidden）
+    try {
+      const els = PS.els;
+      if (els) {
+        if (els.lightbox) els.lightbox.classList.add('hidden');
+        if (els.lightboxCompare) els.lightboxCompare.classList.add('hidden');
+        if (els.compareToolbar) els.compareToolbar.classList.add('hidden');
+        if (els.lightbox) els.lightbox.classList.remove('compare-mode');
+      }
+    } catch {}
   };
   // 劫持翻页
   if (PS.lightboxNext) {

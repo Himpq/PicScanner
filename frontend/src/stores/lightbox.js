@@ -63,7 +63,18 @@ export const useLightboxStore = defineStore('lightbox', () => {
       } catch { infoX.value = Number(lb.infoX || 18); infoY.value = Number(lb.infoY || 18); }
       infoDetailsCollapsed.value = !!PS.state.lightboxInfoDetailsCollapsed;
       if (PS.state.compare) {
-        compareOpen.value = !!PS.state.compare.open;
+        // Vue 的 compareOpen 仅对应灯箱内的对比（legacy 的 compare.lightbox），
+        // 画廊里的对比面板（compare.open && !lightbox）由 legacy DOM 自行管理，
+        // Vue 不应将其镜像为 compareOpen，否则会抢占 Esc 导致面板无法关闭。
+        const lightboxCompare = !!PS.state.compare.lightbox;
+        const hasVueLightbox = !!(open.value || (PS.els && PS.els.lightbox && !PS.els.lightbox.classList.contains('hidden')) || document.getElementById('vue-lightbox')?.childElementCount);
+        // 仅当 Vue 灯箱已打开或 legacy 处于 lightbox 对比时，才以 lightbox 标志为准
+        if (open.value || lightboxCompare) {
+          compareOpen.value = lightboxCompare;
+        } else {
+          // 画廊对比面板打开时，保持 Vue 的 compareOpen 为 false，避免拦截 Esc
+          if (!PS.state.compare.open) compareOpen.value = false;
+        }
         compareSelected.value = [...(PS.state.compare.selected || [null, null])];
         compareLocked.value = !!PS.state.compare.locked;
       }
@@ -98,9 +109,16 @@ export const useLightboxStore = defineStore('lightbox', () => {
     PS.state.lightbox.infoY = infoY.value;
     PS.state.lightboxInfoDetailsCollapsed = infoDetailsCollapsed.value;
     if (PS.state.compare) {
-      PS.state.compare.open = compareOpen.value;
       PS.state.compare.selected = [...compareSelected.value];
       PS.state.compare.locked = compareLocked.value;
+      // Vue 的 compareOpen 语义为“灯箱内对比”（legacy lightbox），
+      // 仅当 Vue 灯箱相关状态变化时才同步到 legacy，避免覆盖画廊对比面板（compare.open && !lightbox）。
+      // 画廊对比面板完全由 legacy 自管，Vue 在 lightbox 关闭且自身 compareOpen 为 false 时不得覆写 open。
+      if (open.value || compareOpen.value || PS.state.compare.lightbox) {
+        PS.state.compare.open = compareOpen.value;
+        PS.state.compare.lightbox = compareOpen.value;
+      }
+      // else：画廊对比面板打开期间（lightbox=false, Vue compareOpen=false），保留 legacy 的 open=true，不触碰
     }
   }
 
@@ -165,11 +183,24 @@ export const useLightboxStore = defineStore('lightbox', () => {
   }
 
   function closeLightbox() {
+    const wasCompare = !!compareOpen.value;
     open.value = false;
+    if (wasCompare) {
+      compareOpen.value = false;
+      compareSelected.value = [null, null];
+    }
     syncToLegacy();
     if (isVueLightboxEnabled()) {
       const PS = window.PS;
       if (PS && PS.state && PS.state.lightbox) PS.state.lightbox.photo = null;
+      if (wasCompare && PS && PS.state && PS.state.compare) {
+        PS.state.compare.open = false;
+        PS.state.compare.lightbox = false;
+        PS.state.compare.selected = [null, null];
+        if (PS.state.compare.panel) try { PS.state.compare.panel.classList.add('hidden'); } catch {}
+        if (typeof PS.renderComparePanel === 'function') try { PS.renderComparePanel(); } catch {}
+        if (typeof PS.updateCompareCardHighlights === 'function') try { PS.updateCompareCardHighlights(); } catch {}
+      }
       return;
     }
     const PS = window.PS;

@@ -22,9 +22,18 @@ _cached_encoder_id = None
 _encoder_lock = threading.Lock()
 _encoder_loading_logged = False
 
+_PLUGIN_MISSING_HINT = "语义插件未安装/依赖缺失：请将 semantic_search 插件包解压到 plugins/semantic_search（含 _libs/onnxruntime、tokenizers）且确保 data/plugins/semantic_search/model_onnx 存在"
+
+def _raise_plugin_missing(cause: Exception | str = "") -> None:
+    msg = _PLUGIN_MISSING_HINT
+    if cause:
+        msg += f"（{cause}）"
+    raise RuntimeError(msg)
+
 def _get_encoder():
     global _cached_encoder, _cached_encoder_id, _encoder_loading_logged
-    # 优先走 ONNX（0.2s 导入，无 torch 依赖），缺 onnx 文件时回退 torch
+    # 代理模式：优先 ONNX（主 exe 已排除 onnxruntime/tokenizers，由插件 _libs 提供）
+    # 插件缺失时抛可识别的 RuntimeError，上层转友好提示，绝不阻断主程序启动
     try:
         from plugins.semantic_search.encoder_onnx import ClipEncoder as OnnxClipEncoder, resolve_model_source as onnx_resolve, onnx_available
 
@@ -35,10 +44,13 @@ def _get_encoder():
         else:
             raise ImportError("onnx not exported yet")
     except Exception as _e:
-        from plugins.semantic_search.encoder import ClipEncoder, resolve_model_source
+        # 尝试 torch 后端（同样由插件提供，主包已排除）
+        try:
+            from plugins.semantic_search.encoder import ClipEncoder, resolve_model_source  # type: ignore
 
-        _backend_kind = "torch"
-        # _log(f"回退 torch 后端: {_e}")
+            _backend_kind = "torch"
+        except Exception as _e2:
+            _raise_plugin_missing(f"{_e2 or _e}")
     src = resolve_model_source()
     cache_key = f"{_backend_kind}:{src}"
     # 快路径：已缓存直接返回
@@ -117,6 +129,43 @@ class SemanticSearchModule:
             "cancel_index": self.cancel_index,
             "clear_index": self.clear_index,
             "warmup_model": self.warmup_model,
+            "plugin_status": self.plugin_status,
+        }
+
+    def plugin_status(self):
+        """供前端/诊断调用：判断插件是否可用，不触发模型加载。"""
+        try:
+            from plugins.semantic_search.encoder_onnx import onnx_available  # type: ignore
+
+            has_onnx = onnx_available()
+        except Exception:
+            has_onnx = False
+        try:
+            from plugins.semantic_search.vector_core.store import VectorStore  # type: ignore
+
+            has_core = True
+        except Exception as exc:
+            has_core = False
+            has_core_err = str(exc)
+        else:
+            has_core_err = ""
+        # 尝试判断 _libs 是否存在
+        from pathlib import Path as _P
+
+        libs_exists = (_P(__file__).resolve().parents[3] / "plugins" / "semantic_search" / "_libs").is_dir()
+        onnx_libs = (_P(__file__).resolve().parents[3] / "plugins" / "semantic_search" / "_libs" / "onnxruntime").is_dir()
+        tok_libs = (_P(__file__).resolve().parents[3] / "plugins" / "semantic_search" / "_libs" / "tokenizers").is_dir()
+        available = has_core and (has_onnx or libs_exists)
+        return {
+            "success": True,
+            "available": available,
+            "has_core": has_core,
+            "has_core_error": has_core_err,
+            "has_onnx": has_onnx,
+            "libs_exists": libs_exists,
+            "libs_onnx": onnx_libs,
+            "libs_tokenizers": tok_libs,
+            "hint": "" if available else _PLUGIN_MISSING_HINT,
         }
 
     # ---------- 后台懒加载模型（启动预热，不阻塞） ----------
@@ -297,8 +346,9 @@ class SemanticSearchModule:
         except Exception as exc:
             import traceback
             traceback.print_exc()
-            _log(f"模型加载失败: {exc}")
-            self._push_event("semantic_index_progress", {"phase": "failed", "error": str(exc)})
+            hint = _PLUGIN_MISSING_HINT if "语义插件" in str(exc) else str(exc)
+            _log(f"模型加载失败: {hint}")
+            self._push_event("semantic_index_progress", {"phase": "failed", "error": hint})
             return
         self._push_event("semantic_index_progress", {"phase": "indexing", "done": 0, "total": todo, "source_id": source_id})
         _log(f"开始编码 {todo} 张")
@@ -432,6 +482,8 @@ class SemanticSearchModule:
                 audit["source_id"] = sid
             return {"success": True, "total": total, "audit": audit, "running": bool(self._index_thread and self._index_thread.is_alive())}
         except Exception as exc:
+            if "vector_core" in str(exc) or "No module" in str(exc):
+                return {"success": False, "message": _PLUGIN_MISSING_HINT, "hint": _PLUGIN_MISSING_HINT}
             return {"success": False, "message": str(exc)}
 
     def search(self, query: str, top_k: int = 8, source_id: str = "", filters: dict | None = None, dedup: bool | None = None, dedup_thresh: float | None = None):
@@ -465,8 +517,9 @@ class SemanticSearchModule:
         except Exception as exc:
             import traceback
             traceback.print_exc()
-            _log(f"搜索模型加载失败: {exc}")
-            return {"success": False, "message": f"模型加载失败: {exc}"}
+            hint = _PLUGIN_MISSING_HINT if "语义插件" in str(exc) else str(exc)
+            _log(f"搜索模型加载失败: {hint}")
+            return {"success": False, "message": f"模型加载失败: {hint}", "hint": _PLUGIN_MISSING_HINT}
         try:
             from plugins.semantic_search.vector_core.store import VectorStore
 

@@ -864,12 +864,30 @@
     }
 
     function segmentControls(anchors, dx, dy, radius) {
-      return anchors.map(function (anchor) {
-        return {
-          fx: anchor.fx, fy: anchor.fy,
-          dx: dx * anchor.weight, dy: dy * anchor.weight, r: radius,
-        };
-      });
+      // 折线修复：沿曲线密采样使弧连续，但能量归一避免 10px→100px 放大
+      if (anchors.length <= 2) {
+        return anchors.map(function (a) { return { fx: a.fx, fy: a.fy, dx: dx * a.weight, dy: dy * a.weight, r: radius }; });
+      }
+      var origSum = 0; for (var k = 0; k < anchors.length; k++) origSum += anchors[k].weight;
+      var dense = [];
+      var steps = 2; // 5点→9点，足够平滑且不过度叠加
+      for (var i = 0; i < anchors.length - 1; i++) {
+        var a0 = anchors[Math.max(0, i - 1)], a1 = anchors[i], a2 = anchors[i + 1], a3 = anchors[Math.min(anchors.length - 1, i + 2)];
+        for (var s = 0; s < steps; s++) {
+          var t = s / steps;
+          var fx = 0.5 * ((2 * a1.fx) + (-a0.fx + a2.fx) * t + (2 * a0.fx - 5 * a1.fx + 4 * a2.fx - a3.fx) * t * t + (-a0.fx + 3 * a1.fx - 3 * a2.fx + a3.fx) * t * t * t);
+          var fy = 0.5 * ((2 * a1.fy) + (-a0.fy + a2.fy) * t + (2 * a0.fy - 5 * a1.fy + 4 * a2.fy - a3.fy) * t * t + (-a0.fy + 3 * a1.fy - 3 * a2.fy + a3.fy) * t * t * t);
+          var centerDist = Math.abs(i + t - (anchors.length - 1) / 2);
+          var w = Math.exp(-0.65 * centerDist * centerDist);
+          var baseW = (a1.weight + a2.weight) / 2;
+          var weight = w * 0.82 + baseW * 0.18;
+          dense.push({ fx: fx, fy: fy, w: weight, r: radius });
+        }
+      }
+      dense.push({ fx: anchors[anchors.length - 1].fx, fy: anchors[anchors.length - 1].fy, w: anchors[anchors.length - 1].weight, r: radius });
+      var denseSum = 0; for (var j = 0; j < dense.length; j++) denseSum += dense[j].w;
+      var scale = denseSum > 1e-6 ? origSum / denseSum : 1;
+      return dense.map(function (d) { return { fx: d.fx, fy: d.fy, dx: dx * d.w * scale, dy: dy * d.w * scale, r: d.r }; });
     }
 
     function brushRadiusNormalized() {

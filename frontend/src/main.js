@@ -6,6 +6,7 @@ import ShortcutsSettings from './settings/ShortcutsSettings.vue';
 import AboutSettings from './settings/AboutSettings.vue';
 import ExportSettings from './settings/ExportSettings.vue';
 import InterfaceSettings from './settings/InterfaceSettings.vue';
+import PluginsSettings from './settings/PluginsSettings.vue';
 import LightboxInfoContent from './lightbox/LightboxInfoContent.vue';
 import QuickEditSliders from './quickedit/QuickEditSliders.vue';
 import SourceScreen from './islands/SourceScreen.vue';
@@ -26,6 +27,7 @@ const COMPONENTS = {
   about: AboutSettings,
   export: ExportSettings,
   interface: InterfaceSettings,
+  plugins: PluginsSettings,
 };
 
 // 单例 Pinia，供所有岛屿共享（双轨期与 PS.state 共存）
@@ -221,7 +223,7 @@ window.PicScannerVue = {
   _p3Ready: true,
   _p4Ready: true,
   _p5Ready: true,
-  _photoGridVirtualReady: false, // legacy 画廊激活，Vue PhotoGrid 已回退
+  // PhotoGrid Vue 实现已彻底移除（2026-09-02），画廊固定由 legacy #gallery 渲染，防止误挂载
 };
 
 // PR2: DateRail 原位岛 — 特性开关，默认关闭，?vue_date=1 或 localStorage vue_date=1 开启
@@ -288,12 +290,9 @@ window.toggleVueCategory = (on) => {
 };
 autoMountCategory();
 
-// PR4: PhotoGrid 已回退至 legacy — Vue 版不再自动挂载
-// 画廊渲染完全由 legacy app_gallery.js 接管（#gallery / IntersectionsObserver）
-// 如需恢复 Vue 版，恢复 PhotoGrid.vue 完整实现并在此处恢复 autoMount 逻辑
-window.toggleVuePhoto = () => {
-  console.warn('[PicScanner] PhotoGrid Vue 已回退，当前为 legacy 画廊。按 git 历史恢复 PhotoGrid.vue 即可重新启用。');
-};
+// PR4: PhotoGrid Vue 实现已删除 — 画廊固定由 legacy 渲染，防止误挂载导致筛选/排序/滚动等双轨竞态
+// 文件 frontend/src/components/gallery/PhotoGrid.vue 与 composables/useVirtualGrid.js 已移除，
+// #vue-photo-grid 容器亦从 index.html 移除，任何 vue_photo 开关均不再生效
 
 // PR5: Toolbar 工具栏 — 特性开关 ?vue_toolbar=1 / localStorage，默认灰度开启
 function isVueToolbarEnabled() {

@@ -1,0 +1,299 @@
+/* ============================================================
+   PicScanner 集锦页 · 俄罗斯方块拼贴（无边框，第一张最大）
+   参考 settings 顶栏 + stats 滚动风格，保持同色系。
+   ============================================================ */
+
+.collections-screen {
+  --col-gap: 2px;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.collections-screen.entering .collections-topbar,
+.collections-screen.entering .collections-scroll {
+  animation: workspace-enter .34s cubic-bezier(.2,.72,.22,1) both;
+}
+.collections-screen.entering .collections-scroll { animation-delay: .04s; }
+.collections-screen.leaving { animation: panel-screen-leave .13s cubic-bezier(.4,0,.2,1) both; pointer-events: none; }
+
+.collections-topbar {
+  flex: none;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.collections-topbar .collections-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.collections-topbar .collections-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 6px;
+}
+.collections-topbar .toolbar-spacer { flex:1; }
+.collections-topbar .ghost-btn.small {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+
+.collections-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 16px 14px 28px;
+}
+
+.collections-empty {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 28px 0;
+  margin: 12px 0;
+}
+
+/* 网格：每行自适应，卡片宽度 340-520 */
+.collections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.collection-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  transition: border-color .15s ease, transform .15s ease;
+}
+.collection-card:hover {
+  border-color: rgba(255,255,255,0.16);
+  transform: translateY(-1px);
+}
+
+.collection-head {
+  padding: 12px 14px 10px;
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.collection-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-head .sub {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-head .badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.72);
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* 马赛克：无边框，gap 2px，首张 2x2，其余 1x1，第四张起跨2列形成方块错落 */
+.mosaic {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 92px;
+  gap: var(--col-gap);
+  background: #050505;
+  min-height: 184px;
+}
+.mosaic-item {
+  position: relative;
+  overflow: hidden;
+  background: #0a0a0c;
+  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+}
+.mosaic-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1);
+  transition: transform .18s ease, filter .18s ease;
+}
+.mosaic-item:hover img { transform: scale(1.04); }
+.mosaic-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  pointer-events: none;
+}
+/* 第一张最大 2x2 */
+.mosaic-item:first-child { grid-column: span 2; grid-row: span 2; }
+/* 让第四张横跨2列，形成俄罗斯方块错落 */
+.mosaic-item:nth-child(4) { grid-column: span 2; }
+.mosaic-item:nth-child(6) { grid-column: span 2; }
+/* 单张时占满 */
+.mosaic.single .mosaic-item:first-child { grid-column: span 4; grid-row: span 2; }
+/* 2张时：第一张2x2，第二张占剩余2列x2行 */
+.mosaic.count-2 .mosaic-item:nth-child(2) { grid-column: span 2; grid-row: span 2; }
+
+.collection-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+}
+.collection-foot .ghost-btn.small {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.mosaic-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+
+/* ========== 集锦详情页：同样俄罗斯方块，但图稍大 ========== */
+.collection-detail-screen {
+  --col-gap: 3px;
+  position: absolute;
+  inset: 0;
+  z-index: 41; /* 盖过列表页，仍在灯箱(80)之下 */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+.collection-detail-screen.entering .collection-detail-topbar,
+.collection-detail-screen.entering .collection-detail-scroll {
+  animation: workspace-enter .34s cubic-bezier(.2,.72,.22,1) both;
+}
+.collection-detail-screen.entering .collection-detail-scroll { animation-delay: .04s; }
+.collection-detail-screen.leaving { animation: panel-screen-leave .13s cubic-bezier(.4,0,.2,1) both; pointer-events: none; }
+
+.collection-detail-topbar {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.collection-detail-title {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 520px;
+  letter-spacing: .2px;
+  flex: none;
+}
+.collection-detail-topbar .collections-meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.collection-detail-topbar .detail-date,
+.collection-detail-topbar .detail-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#collection-detail-count:empty,
+#collection-detail-subtitle:empty,
+#collection-detail-status:empty { display: none; }
+.collection-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 20px 14px 32px;
+  margin: 0 10%;
+  box-sizing: border-box;
+}
+.collection-detail-scroll .mosaic--detail {
+  min-height: 240px;
+  width: 100%;
+}
+@media (max-width: 900px) {
+  .collection-detail-scroll { margin: 0 4%; }
+}
+/* 详情页拼贴：图更大且以正方形为主，减少长方体；dense 填充避免竖向空洞 */
+.mosaic.mosaic--detail {
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: auto;
+  grid-auto-flow: dense;
+  gap: 6px;
+  background: transparent;
+}
+.mosaic.mosaic--detail .mosaic-item {
+  aspect-ratio: 1 / 1;
+}
+.mosaic.mosaic--detail .mosaic-item:first-child {
+  grid-column: span 2;
+  grid-row: span 2;
+  aspect-ratio: 1 / 1;
+}
+.mosaic.mosaic--detail .mosaic-item:nth-child(4),
+.mosaic.mosaic--detail .mosaic-item:nth-child(6) {
+  grid-column: span 2;
+  aspect-ratio: 2 / 1;
+}
+.mosaic.mosaic--detail.single .mosaic-item:first-child { grid-column: 1 / -1; grid-row: span 2; aspect-ratio: 2 / 1; }
+.mosaic.mosaic--detail.count-2 .mosaic-item:nth-child(2) { grid-column: span 2; grid-row: span 2; aspect-ratio: 1 / 1; }
+
+@media (max-width: 720px) {
+  .collections-grid { grid-template-columns: 1fr; }
+  .mosaic { grid-auto-rows: 84px; }
+  .mosaic.mosaic--detail { grid-template-columns: repeat(3, 1fr); gap: 3px; }
+  .collection-detail-title, .collection-detail-subtitle { max-width: 180px; }
+}

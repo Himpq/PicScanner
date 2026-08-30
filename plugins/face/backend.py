@@ -1,6 +1,6 @@
 """人脸修颜模块后端：mediapipe 关键点检测（带磁盘缓存）+ 变形图保存。
 
-mediapipe 为懒加载：未安装时模块照常加载，调用 detect 才返回友好错误。
+外置插件化：主 exe 已排除 mediapipe，缺失时返回 plugin_status 友好提示，不阻断主程序。
 """
 
 from __future__ import annotations
@@ -14,7 +14,25 @@ import threading
 import urllib.request
 from pathlib import Path
 
-FACE_ALGORITHM_VERSION = "face-detector-full-range-landmarker-v14-lip-bodymask"
+_FACE_PLUGIN_HINT = "人脸修颜插件未安装/依赖缺失：请将 face 插件包解压到 plugins/face（含 _libs/onnxruntime 或 mediapipe）或 pip install mediapipe"
+
+# ONNX 轻量分支（保留；已按液化折线问题修复，开启 ONNX 供手动验证）
+#  - 不删代码：encoder_onnx.py / model_onnx 完整保留
+#  - 折线已修：mesh 扩框对齐 mediapipe 1.8×、掩膜精确扣眼唇、_face_outline 贴边生效
+#  - 开关：环境变量 PICSCANNER_FACE_ONNX 控制，手动测试期默认 1（ONNX 优先）
+_FACE_PREFER_ONNX = os.environ.get("PICSCANNER_FACE_ONNX", "1").strip() not in ("0", "false", "False")
+try:
+    from .encoder_onnx import FaceOnnxDetector as _FaceOnnxDetector, onnx_available as _onnx_available
+    _ONNX_IMPORTED = True
+except Exception:
+    _FaceOnnxDetector = None  # type: ignore
+    _onnx_available = lambda: False  # type: ignore
+    _ONNX_IMPORTED = False
+
+_onnx_detector = None
+_onnx_lock = threading.Lock()
+
+FACE_ALGORITHM_VERSION = "face-detector-full-range-landmarker-v15-onnxfix-arc"
 LANDMARK_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
     "face_landmarker/float16/1/face_landmarker.task"
@@ -112,6 +130,24 @@ class FaceModule:
 
     def _segmenter_model_path(self):
         return self._task_model_path("selfie_multiclass_256x256.tflite", SEGMENTER_MODEL_URL)
+
+    def _get_onnx_detector(self):
+        global _onnx_detector
+        if _onnx_detector is not None:
+            return _onnx_detector
+        with _onnx_lock:
+            if _onnx_detector is not None:
+                return _onnx_detector
+            if not _ONNX_IMPORTED or not _onnx_available():
+                return None
+            try:
+                _onnx_detector = _FaceOnnxDetector()
+                if getattr(_onnx_detector, "yunet", None) is None:
+                    return None
+                return _onnx_detector
+            except Exception as exc:
+                print(f"[face] ONNX 检测器初始化失败，回退 mediapipe: {exc}")
+                return None
 
     def _get_detector(self):
         global _detector
@@ -558,6 +594,50 @@ class FaceModule:
             )
         return faces, outlines, profiles
 
+    def _detect_with_onnx(self, bgr, width, height):
+        """ONNX 分支：YuNet 检测 + face_mesh ONNX 关键点（真实 478）+ 与 mediapipe 同套轮廓逻辑。
+
+        关键点由真实 face_mesh 模型给出（468 点补齐到 478）；轮廓/侧脸/遮挡处理
+        直接复用 mediapipe 分支的 _face_outline / _estimate_profile / _repair_occluded_side，
+        保证两路曲线质量一致。皮肤掩膜用 face_mesh 脸廓几何掩膜顶替 mediapipe 分割器输出。
+        """
+        onnx_det = self._get_onnx_detector()
+        if onnx_det is None:
+            return None
+        try:
+            import numpy as np
+            dets = onnx_det.detect_faces(bgr)
+            if not dets:
+                return None
+            faces = []
+            outlines = []
+            profiles = []
+            for d in dets:
+                bbox = d["bbox"]
+                lmk5 = d["landmarks_5"]
+                pts478 = onnx_det.landmarks_478(bgr, bbox, lmk5)
+                if not pts478 or len(pts478) < 478:
+                    _log("ONNX 关键点不足 478，跳过该脸")
+                    continue
+                # 转成纯 Python float，避免 numpy float32 无法 JSON 序列化（_face_outline 输出也会受影响）
+                pts_py = [[float(p[0]), float(p[1])] for p in pts478]
+                faces.append(pts_py)
+            if not faces:
+                return None
+            # 几何皮肤掩膜（脸廓多边形），作为 _face_outline 的边缘贴合依据
+            face_skin, body_skin = onnx_det.segment_masks(bgr, faces)
+            skin_bool = np.asarray(face_skin, dtype=bool)
+            for landmarks in faces:
+                is_profile = self._estimate_profile(landmarks, width, height)
+                profiles.append(is_profile)
+                outlines.append(self._face_outline(landmarks, skin_bool, width, height, is_profile))
+            return faces, outlines, profiles, face_skin, body_skin
+        except Exception as exc:
+            _log(f"ONNX 检测失败回退 mediapipe: {exc}")
+            import traceback
+            _log(traceback.format_exc())
+            return None
+
     # ---------- 缓存 ----------
 
     def _cache_key(self, path: Path) -> str:
@@ -572,6 +652,134 @@ class FaceModule:
         try:
             return json.loads(cache_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            return None
+
+    def _detect_with_mediapipe(self, path, key, image=None):
+        """MediaPipe 分支（精确 478 点 + 自拍分割掩膜），返回 payload 或 None。
+
+        模型/依赖缺失或异常时返回 None，由 detect() 回退到 ONNX 分支。
+        image 为 detect() 已解码的 PIL Image（RAW 已开发），传入则复用。
+        """
+        try:
+            face_detector = self._get_face_detector()
+            landmark_detector = self._get_detector()
+            segmenter = self._get_segmenter()
+        except Exception:
+            return None
+        if face_detector is None or landmark_detector is None or segmenter is None:
+            return None
+        try:
+            import mediapipe as mp
+            import numpy as np
+            from PIL import Image, ImageOps
+
+            if image is None:
+                with Image.open(path) as opened:
+                    image = ImageOps.exif_transpose(opened).convert("RGB")
+            rgb = np.ascontiguousarray(image)
+            width, height = image.size
+            face_skin, body_skin = self._segment_skin_masks(mp, rgb)
+            faces, outlines, profiles = self._detect_faces(mp, np, Image, rgb, width, height, face_skin)
+            skin_mask_fm = self._face_skin_mask_from_landmarks(faces, width, height, Image)
+            skin_mask_b64 = self._encode_mask_png(skin_mask_fm, Image)
+            lip_mask_fm = self._face_lip_mask_from_landmarks(faces, width, height, Image)
+            lip_mask_b64 = self._encode_mask_png(lip_mask_fm, Image)
+            body_skin_arr = np.asarray(body_skin, dtype=np.uint8) * 255
+            bscale = min(1.0, 1024 / max(body_skin_arr.shape[1], body_skin_arr.shape[0]))
+            if bscale < 1.0:
+                body_skin_arr = np.asarray(
+                    Image.fromarray(body_skin_arr, "L").resize(
+                        (
+                            max(1, round(body_skin_arr.shape[1] * bscale)),
+                            max(1, round(body_skin_arr.shape[0] * bscale)),
+                        ),
+                        Image.BILINEAR,
+                    ),
+                    dtype=np.uint8,
+                )
+            body_skin_b64 = self._encode_mask_png(body_skin_arr, Image)
+            _log(f"轮廓解析完成：{len(outlines)} 张脸")
+        except Exception as exc:
+            _log(f"MediaPipe 检测失败回退 ONNX: {exc}")
+            return None
+
+        payload = {
+            "width": int(width),
+            "height": int(height),
+            "faces": faces,
+            "outlines": outlines,
+            "profiles": profiles,
+            "skin_mask": skin_mask_b64,
+            "lip_mask": lip_mask_b64,
+            "body_skin_mask": body_skin_b64,
+        }
+        if faces:
+            self._write_cache(key, payload)
+        return {"success": True, "cached": False, **payload}
+
+    def _detect_with_onnx_pipeline(self, path, key, image=None):
+        """ONNX 分支封装：读图→检测→编码掩膜→返回 payload 或 None。
+        image 为 detect() 已解码的 PIL Image（RAW 已开发），传入则复用。"""
+        onnx_det = self._get_onnx_detector()
+        if onnx_det is None:
+            return None
+        try:
+            import numpy as np
+            from PIL import Image, ImageOps
+            if image is None:
+                with Image.open(path) as opened:
+                    image = ImageOps.exif_transpose(opened).convert("RGB")
+            rgb = np.ascontiguousarray(image)
+            width, height = image.size
+            bgr = rgb[:, :, ::-1].copy()
+            onnx_res = self._detect_with_onnx(bgr, width, height)
+            if not onnx_res:
+                return None
+            faces, outlines, profiles, face_skin, body_skin = onnx_res
+            from PIL import Image as _Img2
+            face_skin_arr = (np.asarray(face_skin, dtype=np.uint8) * 255).astype(np.uint8) if face_skin is not None else np.zeros((height, width), dtype=np.uint8)
+            body_skin_arr = (np.asarray(body_skin, dtype=np.uint8) * 255).astype(np.uint8) if body_skin is not None else np.zeros((height, width), dtype=np.uint8)
+            skin_mask_fm = face_skin_arr
+            skin_mask_b64 = self._encode_mask_png(skin_mask_fm, _Img2)
+            # 唇部掩膜：用真实嘴部关键点中心画椭圆（face_mesh 有 478 点）
+            lip_mask_fm = np.zeros((face_skin_arr.shape[0], face_skin_arr.shape[1]), dtype=np.uint8)
+            if faces and len(faces) > 0:
+                try:
+                    import PIL.ImageDraw as _ID
+                    f0 = faces[0]
+                    mouth_idx = [0, 13, 14, 17, 61, 291, 78, 308]
+                    pts = [f0[i] for i in mouth_idx if i < len(f0)]
+                    if pts:
+                        cx = int(sum(p[0] for p in pts) / len(pts) * width)
+                        cy = int(sum(p[1] for p in pts) / len(pts) * height)
+                        lx = f0[61][0] * width if 61 < len(f0) else cx
+                        rx = f0[291][0] * width if 291 < len(f0) else cx
+                        mw = max(24, abs(rx - lx) * 1.6)
+                        _lip = Image.new("L", (skin_mask_fm.shape[1], skin_mask_fm.shape[0]), 0)
+                        _draw = _ID.Draw(_lip)
+                        _draw.ellipse([cx - mw / 2, cy - 14, cx + mw / 2, cy + 14], fill=255)
+                        lip_mask_fm = np.asarray(_lip, dtype=np.uint8)
+                except Exception as exc:
+                    _log(f"唇部掩膜生成失败: {exc}")
+                    lip_mask_fm = np.zeros_like(face_skin_arr)
+            lip_mask_b64 = self._encode_mask_png(lip_mask_fm, _Img2)
+            bscale = min(1.0, 1024 / max(body_skin_arr.shape[1], body_skin_arr.shape[0])) if body_skin_arr.size else 1.0
+            if bscale < 1.0:
+                body_skin_arr = np.asarray(
+                    _Img2.fromarray(body_skin_arr, "L").resize(
+                        (max(1, round(body_skin_arr.shape[1] * bscale)), max(1, round(body_skin_arr.shape[0] * bscale))),
+                        _Img2.BILINEAR,
+                    ),
+                    dtype=np.uint8,
+                )
+            body_skin_b64 = self._encode_mask_png(body_skin_arr, _Img2)
+            payload = {"width": int(width), "height": int(height), "faces": faces, "outlines": outlines, "profiles": profiles, "skin_mask": skin_mask_b64, "lip_mask": lip_mask_b64, "body_skin_mask": body_skin_b64}
+            if faces:
+                self._write_cache(key, payload)
+            _log(f"ONNX 检测完成：{path.name}，{len(faces)} 张脸")
+            return {"success": True, "cached": False, **payload}
+        except Exception as exc:
+            _log(f"ONNX 分支异常: {exc}")
             return None
 
     def _write_cache(self, key: str, payload: dict):
@@ -605,71 +813,53 @@ class FaceModule:
             if cached:
                 return {"success": True, "cached": True, **cached}
 
+        # 统一解码：RAW（.arw/.cr2/.nef 等）用 rawpy 开发成 RGB，其余用 PIL 打开。
+        # 两个 detect 分支共享同一张已解码图片，避免重复解码且支持 RAW。
+        decoded_image = None
         try:
-            face_detector = self._get_face_detector()
-            landmark_detector = self._get_detector()
-            segmenter = self._get_segmenter()
+            from PIL import Image
+            from app.backend.thumbnailer import is_raw_image
+
+            if is_raw_image(path):
+                try:
+                    from app.backend.raw_developer import develop_raw_array, _rgb_to_uint8
+                    rgb, _clean = develop_raw_array(path, output_bps=8)
+                    if rgb is not None:
+                        decoded_image = Image.fromarray(_rgb_to_uint8(rgb)).convert("RGB")
+                except Exception as exc:
+                    _log(f"RAW 显影失败，尝试直接打开: {exc}")
+            if decoded_image is None:
+                from PIL import ImageOps
+                with Image.open(path) as opened:
+                    decoded_image = ImageOps.exif_transpose(opened).convert("RGB")
         except Exception as exc:
-            return {"success": False, "message": f"人脸模型初始化失败: {exc}"}
-        if face_detector is None or landmark_detector is None or segmenter is None:
-            return {
-                "success": False,
-                "message": "未安装 mediapipe，无法检测人脸（pip install mediapipe）",
-            }
+            return {"success": False, "message": f"图片解码失败: {exc}"}
+        if decoded_image is None:
+            return {"success": False, "message": "图片解码失败"}
 
-        try:
-            import mediapipe as mp
-            import numpy as np
-            from PIL import Image, ImageOps
-
-            with Image.open(path) as opened:
-                # 与浏览器解码方向保持一致，landmarks 坐标在"已定向"像素空间
-                image = ImageOps.exif_transpose(opened).convert("RGB")
-                rgb = np.ascontiguousarray(image)
-                width, height = image.size
-            face_skin, body_skin = self._segment_skin_masks(mp, rgb)
-            faces, outlines, profiles = self._detect_faces(mp, np, Image, rgb, width, height, face_skin)
-            # 返回给前端的皮肤掩膜改用 FaceMesh 关键点渲染（脸廓减眼唇，边界精确、
-            # 天然避开五官）；分割掩膜仍用于上面的轮廓拟合。
-            skin_mask_fm = self._face_skin_mask_from_landmarks(faces, width, height, Image)
-            skin_mask_b64 = self._encode_mask_png(skin_mask_fm, Image)
-            # 唇部掩膜（FaceMesh 唇形）供唇色调色；全身皮肤掩膜（身体|脸部）供肤色调整。
-            lip_mask_fm = self._face_lip_mask_from_landmarks(faces, width, height, Image)
-            lip_mask_b64 = self._encode_mask_png(lip_mask_fm, Image)
-            body_skin_arr = np.asarray(body_skin, dtype=np.uint8) * 255
-            # 全身皮肤掩膜是全图分辨率，肤色调整对边界精度要求不高，降到最长边 1024 控制体积。
-            bscale = min(1.0, 1024 / max(body_skin_arr.shape[1], body_skin_arr.shape[0]))
-            if bscale < 1.0:
-                body_skin_arr = np.asarray(
-                    Image.fromarray(body_skin_arr, "L").resize(
-                        (
-                            max(1, round(body_skin_arr.shape[1] * bscale)),
-                            max(1, round(body_skin_arr.shape[0] * bscale)),
-                        ),
-                        Image.BILINEAR,
-                    ),
-                    dtype=np.uint8,
-                )
-            body_skin_b64 = self._encode_mask_png(body_skin_arr, Image)
-            _log(f"轮廓解析完成：{len(outlines)} 张脸")
-        except Exception as exc:
-            return {"success": False, "message": f"人脸检测或轮廓解析失败: {exc}"}
-
-        payload = {
-            "width": int(width),
-            "height": int(height),
-            "faces": faces,
-            "outlines": outlines,
-            "profiles": profiles,
-            "skin_mask": skin_mask_b64,
-            "lip_mask": lip_mask_b64,
-            "body_skin_mask": body_skin_b64,
+        # 默认切回 MediaPipe（ONNX 代码保留，仅作回退）；置 PICSCANNER_FACE_ONNX=1 可切回 ONNX 优先
+        if _FACE_PREFER_ONNX:
+            result = self._detect_with_onnx_pipeline(path, key, image=decoded_image)
+            if result is not None:
+                _log("检测路径：ONNX 优先（环境变量 PICSCANNER_FACE_ONNX=1）")
+                return result
+            result = self._detect_with_mediapipe(path, key, image=decoded_image)
+            if result is not None:
+                return result
+        else:
+            result = self._detect_with_mediapipe(path, key, image=decoded_image)
+            if result is not None:
+                return result
+            result = self._detect_with_onnx_pipeline(path, key, image=decoded_image)
+            if result is not None:
+                _log("检测路径：MediaPipe 失败，回退到 ONNX（代码保留）")
+                return result
+        # 两条路都不可用：给出友好提示（模型缺失等）
+        return {
+            "success": False,
+            "message": _FACE_PLUGIN_HINT,
+            "hint": _FACE_PLUGIN_HINT,
         }
-        # 空结果不缓存，避免一次误检把该照片永久锁定为“无人脸”。
-        if faces:
-            self._write_cache(key, payload)
-        _log(f"检测完成：{path.name}，{len(faces)} 张脸")
-        return {"success": True, "cached": False, **payload}
 
     def save_warped(self, data_url, source_path):
         text = str(data_url or "")
@@ -701,6 +891,53 @@ class FaceModule:
             "path": str(target),
             "filename": target.name,
             "message": f"已保存到 {target}",
+        }
+
+    def plugin_status(self):
+        libs = Path(__file__).resolve().parents[3] / "plugins" / "face" / "_libs"
+        # 状态上报：默认 mediapipe 优先，ONNX 仅回退（代码保留）
+        has_onnx = False
+        onnx_mode = "missing"
+        try:
+            if _ONNX_IMPORTED and _onnx_available():
+                has_onnx = True
+                # 尝试读取真实 detector 的 mode（yunet+mesh / geom）
+                try:
+                    _det = self._get_onnx_detector()
+                    onnx_mode = getattr(_det, "mode", "onnx-yunet-geom") if _det else "onnx-yunet-geom"
+                except Exception:
+                    onnx_mode = "onnx-yunet-geom"
+        except Exception:
+            has_onnx = False
+        try:
+            import mediapipe  # type: ignore
+
+            has_mp = True
+            mp_ver = getattr(mediapipe, "__version__", "?")
+        except Exception as exc:
+            has_mp = False
+            mp_ver = str(exc)
+        available = has_onnx or has_mp
+        # 默认切回 mediapipe：两者皆可用时 mode=mediapipe；仅当 PICSCANNER_FACE_ONNX=1 且 onnx 可用时才报 onnx
+        if _FACE_PREFER_ONNX and has_onnx:
+            mode = "onnx"
+        elif has_mp:
+            mode = "mediapipe"
+        elif has_onnx:
+            mode = "onnx"
+        else:
+            mode = "missing"
+        return {
+            "success": True,
+            "available": available,
+            "mode": mode,
+            "has_onnx": has_onnx,
+            "onnx_mode": onnx_mode,
+            "has_mediapipe": has_mp,
+            "mediapipe_version": mp_ver,
+            "libs_exists": libs.is_dir(),
+            "prefer_onnx": _FACE_PREFER_ONNX,
+            "hint": "" if available else _FACE_PLUGIN_HINT,
         }
 
 

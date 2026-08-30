@@ -1,8 +1,6 @@
 """人脸聚类模块：EXIF下方手动扫描，人脸按人物聚类。
 
-- 检测+识别：优先 YuNet+SFace（~3MB CPU），缺模型/依赖回退 dummy，保证演示不断
-- 存储：plugins.face_cluster vector_core face-identity 索引，media_type=face
-- 增量：mtime:size，不做 Path.stat 风暴，todo==0 不导库
+外置插件化：主 exe 已排除 opencv/onnx，缺失时走 dummy 不阻断，可通过 plugin_status 查询。
 """
 from __future__ import annotations
 
@@ -18,13 +16,18 @@ def _log(msg: str) -> None:
     print(f"[{ts}][face_cluster] {msg}", flush=True)
 
 
+_FACE_CLUSTER_HINT = "人脸聚类插件未安装/依赖缺失：请将 face_cluster 插件包解压到 plugins/face_cluster（含 _libs/opencv、onnxruntime）或 pip install opencv-contrib-python"
+
 _cached_encoder = None
 _cached_encoder_id = None
 
 
 def _get_encoder():
     global _cached_encoder, _cached_encoder_id
-    from plugins.face_cluster.encoder import MODEL_ID, MODEL_VERSION  # noqa
+    try:
+        from plugins.face_cluster.encoder import MODEL_ID, MODEL_VERSION  # noqa
+    except Exception as exc:
+        raise RuntimeError(f"{_FACE_CLUSTER_HINT}（{exc}）") from exc
 
     key = f"{MODEL_ID}:{MODEL_VERSION}"
     if _cached_encoder is not None and _cached_encoder_id == key:
@@ -98,6 +101,27 @@ class FaceClusterModule:
             "clusters": self.clusters,
             "search_by_face": self.search_by_face,
             "search": self.search_by_face,  # 别名，便于复用
+            "plugin_status": self.plugin_status,
+        }
+
+    def plugin_status(self):
+        libs = Path(__file__).resolve().parents[3] / "plugins" / "face_cluster" / "_libs"
+        try:
+            from plugins.face_cluster.encoder import FaceEncoder  # type: ignore
+
+            enc = FaceEncoder()
+            mode = getattr(enc, "mode", "?")
+            has_enc = True
+        except Exception as exc:
+            mode = str(exc)[:120]
+            has_enc = False
+        return {
+            "success": True,
+            "available": has_enc,
+            "mode": mode,
+            "libs_exists": libs.is_dir(),
+            "libs_opencv": (libs / "cv2").is_dir() if libs.is_dir() else False,
+            "hint": "" if has_enc else _FACE_CLUSTER_HINT,
         }
 
     def _on_scan_finished(self, root_path: str, source_id: str, status: str) -> None:

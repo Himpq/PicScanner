@@ -1,0 +1,7 @@
+{
+  "key": "collections",
+  "name": "集锦",
+  "version": "0.1.0",
+  "description": "语义+EXIF自动聚类生成集锦，支持语义标题与地理分组",
+  "frontend": ""
+}

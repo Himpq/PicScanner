@@ -26,12 +26,25 @@ function label(dateKey) {
   return s.length > 5 ? s.slice(5) : s;
 }
 
+const failedCoverUrls = new Set();
 function hasCover(d) {
-  return store.dateCovers.has(d.date_key) && !!store.dateCovers.get(d.date_key);
+  const url = store.dateCovers.get(d.date_key);
+  if (!url || failedCoverUrls.has(url)) return false;
+  return true;
 }
 function coverStyle(d) {
   const url = store.dateCovers.get(d.date_key) || '';
-  return url ? { '--date-cover': `url("${url.replace(/"/g, '\\"')}")` } : {};
+  if (!url || failedCoverUrls.has(url)) return {};
+  // 异步预检：若封面加载失败则剔除，避免 Sony 视频等不可预览图长期占位
+  try {
+    const test = new Image();
+    test.onerror = () => {
+      failedCoverUrls.add(url);
+      if (store.dateCovers.get(d.date_key) === url) store.dateCovers.delete(d.date_key);
+    };
+    test.src = url;
+  } catch {}
+  return { '--date-cover': `url("${url.replace(/"/g, '\\"')}")` };
 }
 function isVisible(d) { return store.visibleDates.has(d.date_key); }
 function isFocus(d) { const f = store.dateFocus.get(d.date_key); return typeof f === 'number' && f >= 0.72; }

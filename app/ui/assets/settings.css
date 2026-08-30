@@ -562,6 +562,85 @@
 
 /* ---------- 窄屏适配 ---------- */
 
+/* ---------- 插件卡片 ---------- */
+.plugin-panel .plugin-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.plugin-panel .plugin-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.plugin-panel .plugin-head code {
+  background: rgba(255,255,255,.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.plugin-refresh {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+  flex: none;
+  border-radius: 8px;
+}
+.plugin-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0,1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--st-hairline, rgba(255,255,255,.055));
+  transition: background .15s ease;
+}
+.plugin-card:last-child { border-bottom: 0; }
+.plugin-card:hover { background: rgba(255,255,255,.03); }
+.plugin-icon {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 16px; font-weight: 800;
+}
+.plugin-main { min-width: 0; display: grid; gap: 3px; }
+.plugin-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.plugin-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.plugin-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.plugin-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.45;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.plugin-detail { font-size: 12px; color: var(--muted); opacity: .9; }
+.plugin-foot {
+  font-size: 11.5px;
+  color: var(--muted);
+  opacity: .7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 720px) {
   .settings-topbar {
     gap: 6px;

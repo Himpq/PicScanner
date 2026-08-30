@@ -464,8 +464,29 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
     def _date_cover_url(self, cover_path: str | Path | None) -> str:
         if not cover_path:
             return ""
-        thumb = existing_thumbnail(cover_path)
-        return _versioned_file_uri(thumb) if thumb else ""
+        raw = str(cover_path).strip()
+        candidates = [p.strip() for p in raw.split("|") if p.strip()] if "|" in raw else [raw]
+        for cand in candidates:
+            try:
+                cand_path = Path(cand)
+                if not cand_path.exists() or not cand_path.is_file():
+                    continue
+                from .thumbnailer import is_previewable_image, existing_thumbnail, ensure_thumbnail, ThumbnailError
+                if not is_previewable_image(cand_path):
+                    continue
+                thumb = existing_thumbnail(cand_path)
+                if not thumb:
+                    try:
+                        thumb = ensure_thumbnail(cand_path)
+                    except ThumbnailError:
+                        continue
+                    except Exception:
+                        continue
+                if thumb and thumb.exists() and thumb.stat().st_size > 0:
+                    return _versioned_file_uri(thumb)
+            except Exception:
+                continue
+        return ""
 
     def _source_summary(self, root_path: str) -> dict:
         context = self._source_context(root_path)

@@ -39,6 +39,8 @@ const draftStart = ref('');
 const draftEnd = ref('');
 const lensOpen = ref(false);
 const focalOpen = ref(false);
+const filterTriggerRef = ref(null);
+const filterPopRef = ref(null);
 
 function syncDraftFromStore() {
   const f = store.activeFilter || {};
@@ -183,6 +185,8 @@ function highlightParts(text, query) {
 function changeSource(){ const PS=window.PS; if(PS&&PS.showSourceChooser) PS.showSourceChooser(); }
 function openStats(){ const PS=window.PS; if(PS&&PS.openStatsPage) PS.openStatsPage(); }
 function openSettings(){ const PS=window.PS; if(PS&&PS.openSettingsPage) PS.openSettingsPage('interface'); }
+function openCollections(){ const PS=window.PS; if(PS&&PS.openCollections) PS.openCollections(); else { // fallback: dispatch legacy button click
+  const btn=document.getElementById('open-collections'); if(btn) btn.click(); else console.warn('openCollections not ready'); } }
 
 // 全局点击收起
 function onDocClick(e){
@@ -193,7 +197,26 @@ function onDocClick(e){
 }
 function onKey(e){
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='f'){ e.preventDefault(); toggleSearch(); }
-  if (e.key==='Escape'){ if(searchOpen.value) closeSearch(); if(filterOpen.value) closeFilter(); if(sortOpen.value) store.sortOpen=false; }
+  if (e.key==='Escape'){
+    // 优先关闭画廊对比面板（legacy），避免被 Vue 的 filter/search 抢占导致 Esc 失效
+    try {
+      const PS = window.PS;
+      if (PS && PS.state && PS.state.compare && PS.state.compare.open && !PS.state.compare.lightbox) {
+        if (typeof PS.closeComparePanel === 'function') PS.closeComparePanel();
+        else if (PS.state.compare.panel) PS.state.compare.panel.classList.add('hidden');
+        PS.state.compare.open = false;
+        e.preventDefault(); e.stopPropagation();
+        return;
+      }
+    } catch {}
+    if(searchOpen.value) closeSearch();
+    if(filterOpen.value) closeFilter();
+    if(sortOpen.value) store.sortOpen=false;
+    // 若 document 层级已处理，仍确保阻止冒泡避免重复触发
+    if (searchOpen.value || filterOpen.value || sortOpen.value) {
+      // 已在上行关闭，无需额外阻止
+    }
+  }
 }
 watch(()=>store.searchQuery, v=>{ searchQuery.value=String(v||''); });
 watch(()=>store.searchScope, v=>{ searchScope.value=String(v||'all'); });
@@ -204,11 +227,14 @@ onMounted(()=>{
   searchScope.value = String(store.searchScope||'all');
   syncDraftFromStore();
   document.addEventListener('click', onDocClick);
-  document.addEventListener('keydown', onKey);
+  // 捕获阶段监听 Esc，确保 compare-picker 优先于 legacy 的其它 Esc 分支关闭
+  document.addEventListener('keydown', onKey, true);
+  window.addEventListener('keydown', onKey, true);
 });
 onBeforeUnmount(()=>{
   document.removeEventListener('click', onDocClick);
-  document.removeEventListener('keydown', onKey);
+  document.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('keydown', onKey, true);
   clearTimeout(debounceTimer);
 });
 
@@ -226,11 +252,47 @@ const timeRange = computed(()=>{
 <template>
   <div class="toolbar-wrap">
     <div class="toolbar" id="vanilla-toolbar" v-if="false"></div>
-    <div class="toolbar" id="vue-toolbar">
+    <div class="toolbar" id="vue-toolbar-content">
       <button class="ghost-btn back-btn" title="返回选择来源" @click="changeSource"><span aria-hidden="true">←</span><span>返回上一级</span></button>
       <button class="icon-btn" title="设置" @click="openSettings">⚙</button>
+      <button class="ghost-btn" @click="openCollections">集锦</button>
       <button class="ghost-btn" @click="openStats">统计信息</button>
-      <button class="ghost-btn filter-trigger" type="button" :class="{ active: hasFilter }" @click="toggleFilter" @contextmenu="onFilterContextMenu" :title="hasFilter?'点击清除筛选 / 右键筛已收藏':'筛选'">{{ hasFilter ? '筛选中' : '筛选' }}</button>
+      <div class="filter-anchor">
+        <button ref="filterTriggerRef" class="ghost-btn filter-trigger" type="button" :class="{ active: hasFilter }" @click="toggleFilter" @contextmenu="onFilterContextMenu" :title="hasFilter?'点击清除筛选 / 右键筛已收藏':'筛选'">{{ hasFilter ? '筛选中' : '筛选' }}</button>
+        <div ref="filterPopRef" v-if="filterOpen" class="filter-pop">
+      <div class="filter-form" v-if="filterLoading">读取中…</div>
+      <div v-else-if="filterError" class="filter-form" style="color:var(--danger)">{{ filterError }}</div>
+      <div v-else class="filter-form">
+        <label class="filter-check"><input type="checkbox" v-model="draftFavorite"> 已收藏</label>
+
+        <div class="filter-row">
+          <label>镜头</label>
+          <div class="filter-combo" :class="{ open: lensOpen }" :data-value="draftLens">
+            <button class="filter-combo-trigger" type="button" @click="lensOpen=!lensOpen; focalOpen=false"><span>{{ draftLens || '全部镜头' }}</span><svg class="filter-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <div class="filter-combo-menu" :class="{ hidden: !lensOpen }">
+              <button class="filter-option" :class="{selected: !draftLens}" type="button" @click="draftLens=''; lensOpen=false">全部镜头</button>
+              <button v-for="r in lenses" :key="r.name" class="filter-option" :class="{selected: draftLens===r.name}" type="button" @click="draftLens=r.name; lensOpen=false">{{ r.name }} ({{ r.count }})</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <label>焦段范围</label>
+          <div class="filter-combo" :class="{ open: focalOpen }" :data-value="draftFocal">
+            <button class="filter-combo-trigger" type="button" @click="focalOpen=!focalOpen; lensOpen=false"><span>{{ draftFocal || '全部焦段' }}</span><svg class="filter-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <div class="filter-combo-menu" :class="{ hidden: !focalOpen }">
+              <button class="filter-option" :class="{selected: !draftFocal}" type="button" @click="draftFocal=''; focalOpen=false">全部焦段</button>
+              <button v-for="r in focals" :key="r.name" class="filter-option" :class="{selected: draftFocal===r.name}" type="button" @click="draftFocal=r.name; focalOpen=false">{{ r.name }} ({{ r.count }})</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-row"><label>开始日期</label><input type="date" v-model="draftStart" :min="dateRange.earliest||''" :max="dateRange.latest||''"></div>
+        <div class="filter-row"><label>结束日期</label><input type="date" v-model="draftEnd" :min="dateRange.earliest||''" :max="dateRange.latest||''"></div>
+        <div class="filter-actions"><button class="ghost-btn" type="button" @click="closeFilter">取消</button><button class="primary-btn" type="button" @click="applyFilter">应用</button></div>
+      </div>
+    </div>
+      </div>
 
       <div class="sort-dropdown" id="sort-dropdown">
         <button class="sort-trigger" type="button" aria-haspopup="listbox" :aria-expanded="sortOpen?'true':'false'" @click="toggleSort">
@@ -244,41 +306,6 @@ const timeRange = computed(()=>{
 
       <div class="toolbar-spacer"></div>
       <span class="time-range">{{ timeRange }}</span>
-    </div>
-
-    <!-- 筛选弹层：复用 filter-pop 样式，定位跟随 trigger -->
-    <div v-if="filterOpen" class="filter-pop" style="display:block; position:fixed; z-index:40; left:50%; top:120px; transform:translateX(-50%); max-width:360px; width:92vw;">
-      <div class="filter-form" v-if="filterLoading">读取中…</div>
-      <div v-else-if="filterError" class="filter-form" style="color:var(--danger)">{{ filterError }}</div>
-      <div v-else class="filter-form">
-        <label class="filter-check"><input type="checkbox" v-model="draftFavorite"> 已收藏</label>
-
-        <div class="filter-row">
-          <label>镜头</label>
-          <div class="filter-combo" :class="{ open: lensOpen }" :data-value="draftLens">
-            <button class="filter-combo-trigger" type="button" @click="lensOpen=!lensOpen; focalOpen=false"><span>{{ draftLens || '全部镜头' }}</span><b>v</b></button>
-            <div class="filter-combo-menu" :class="{ hidden: !lensOpen }">
-              <button class="filter-option" :class="{selected: !draftLens}" type="button" @click="draftLens=''; lensOpen=false">全部镜头</button>
-              <button v-for="r in lenses" :key="r.name" class="filter-option" :class="{selected: draftLens===r.name}" type="button" @click="draftLens=r.name; lensOpen=false">{{ r.name }} ({{ r.count }})</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="filter-row">
-          <label>焦段范围</label>
-          <div class="filter-combo" :class="{ open: focalOpen }" :data-value="draftFocal">
-            <button class="filter-combo-trigger" type="button" @click="focalOpen=!focalOpen; lensOpen=false"><span>{{ draftFocal || '全部焦段' }}</span><b>v</b></button>
-            <div class="filter-combo-menu" :class="{ hidden: !focalOpen }">
-              <button class="filter-option" :class="{selected: !draftFocal}" type="button" @click="draftFocal=''; focalOpen=false">全部焦段</button>
-              <button v-for="r in focals" :key="r.name" class="filter-option" :class="{selected: draftFocal===r.name}" type="button" @click="draftFocal=r.name; focalOpen=false">{{ r.name }} ({{ r.count }})</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="filter-row"><label>开始日期</label><input type="date" v-model="draftStart" :min="dateRange.earliest||''" :max="dateRange.latest||''"></div>
-        <div class="filter-row"><label>结束日期</label><input type="date" v-model="draftEnd" :min="dateRange.earliest||''" :max="dateRange.latest||''"></div>
-        <div class="filter-actions"><button class="ghost-btn" type="button" @click="closeFilter">取消</button><button class="primary-btn" type="button" @click="applyFilter">应用</button></div>
-      </div>
     </div>
 
     <section v-if="searchOpen" class="search-panel" aria-label="搜索">
@@ -318,6 +345,32 @@ const timeRange = computed(()=>{
 <style scoped>
 .toolbar-wrap { display:block; position:relative; }
 .toolbar { position:relative; }
+/* 归一化 toolbar 按钮高度：抹平全局 style.css 中 .sort-trigger 30px vs .ghost-btn 32px 的差异 */
+#vue-toolbar .ghost-btn,
+#vue-toolbar .icon-btn,
+#vue-toolbar .sort-trigger {
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#vue-toolbar .sort-trigger { border-radius: 8px; }
+.filter-anchor { position: relative; display: inline-flex; align-items: center; }
+.filter-anchor .filter-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 340px;
+  max-width: min(340px, calc(100vw - 24px));
+  z-index: 100;
+  background: var(--panel-2, #121216);
+  border:1px solid var(--line);
+  border-radius:10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  padding:10px;
+}
 .filter-pop { background: var(--panel-2, #121216); border:1px solid var(--line); border-radius:10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); padding:10px; }
 .search-panel { position: absolute; z-index: 75; top: 56px; left: 16px; right: 16px; margin-top:0; }
 .search-box { width: min(760px, 100%); max-height: min(620px, calc(100vh - var(--titlebar-h) - 96px)); overflow:auto; }
@@ -327,6 +380,8 @@ const timeRange = computed(()=>{
 .filter-row label { width:70px; font-size:12px; color:var(--muted); }
 .filter-combo { flex:1; position:relative; }
 .filter-combo-trigger { width:100%; display:flex; align-items:center; justify-content:space-between; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background: var(--panel); cursor:pointer; }
+.filter-caret { color: var(--muted); flex-shrink:0; transition: transform .16s ease; }
+.filter-combo.open .filter-caret { transform: rotate(180deg); color: var(--text); }
 .filter-combo-menu { position:absolute; left:0; right:0; top:calc(100% + 6px); max-height:220px; overflow:auto; background: var(--panel); border:1px solid var(--line); border-radius:8px; z-index:5; }
 .filter-combo-menu.hidden { display:none; }
 .filter-option { display:block; width:100%; text-align:left; padding:6px 8px; border:none; background:transparent; cursor:pointer; }

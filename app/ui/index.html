@@ -4,11 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PicScanner</title>
-  <link rel="stylesheet" href="assets/style.css?v=workspace-fix-20260828-3" />
-  <link rel="stylesheet" href="assets/settings.css?v=settings-tabs-1" />
+  <link rel="stylesheet" href="assets/style.css?v=fix6-20260901" />
+  <link rel="stylesheet" href="assets/settings.css?v=fix6-20260901" />
   <link rel="stylesheet" href="assets/source_conflicts.css?v=source-id-discovery-20260716-1" />
   <link rel="stylesheet" href="assets/batch_processing.css?v=selected-frame-zindex-1" />
-  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=pr6-gallery1-20260829" />
+  <link rel="stylesheet" href="assets/collections.css?v=fix6-20260901" />
+  <link rel="stylesheet" href="assets/vue/picscanner-frontend.css?v=fix6-20260901" />
 </head>
 <body>
   <div id="app">
@@ -100,6 +101,7 @@
           <div class="toolbar">
             <button id="change-source" class="ghost-btn back-btn" title="返回选择来源"><span aria-hidden="true">←</span><span>返回上一级</span></button>
             <button id="open-settings" class="icon-btn" title="设置">⚙</button>
+            <button id="open-collections" class="ghost-btn" title="集锦">集锦</button>
             <button id="open-stats" class="ghost-btn">统计信息</button>
             <button id="filter-trigger" class="ghost-btn filter-trigger" type="button">筛选</button>
             <div id="sort-dropdown" class="sort-dropdown">
@@ -133,7 +135,6 @@
         <div id="vue-toolbar" class="hidden" aria-label="工具栏（Vue）"></div>
         <div id="gallery-scroll" class="gallery-scroll">
           <div id="gallery" class="gallery"></div>
-          <div id="vue-photo-grid" class="hidden" aria-label="照片墙（Vue虚拟滚动）"></div>
           <div id="older-sentinel" class="older-sentinel">检查更早日期...</div>
         </div>
       </section>
@@ -143,6 +144,37 @@
         <div id="date-rail-list" class="date-rail-list"></div>
       </nav>
       <nav class="date-rail hidden" id="vue-date-rail" aria-label="日期（Vue）"></nav>
+
+      <section id="collections-screen" class="collections-screen hidden" aria-label="集锦">
+        <div class="collections-topbar">
+          <button id="close-collections" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
+          <div class="collections-title">集锦</div>
+          <span id="collections-count" class="collections-meta"></span>
+          <span id="collections-status" class="collections-meta" style="margin-left:8px;opacity:.7"></span>
+          <div class="toolbar-spacer"></div>
+          <button id="collections-refresh" class="ghost-btn small">刷新</button>
+          <button id="collections-generate" class="ghost-btn small" style="background:rgba(224,164,90,0.18);border-color:rgba(224,164,90,0.4)">生成集锦</button>
+        </div>
+        <div class="collections-scroll">
+          <div id="collections-empty" class="collections-empty hidden">暂无集锦，点击“生成集锦”基于语义聚类创建</div>
+          <div id="collections-grid" class="collections-grid"></div>
+        </div>
+      </section>
+
+      <section id="collection-detail-screen" class="collection-detail-screen hidden" aria-label="集锦详情">
+        <div class="collection-detail-topbar">
+          <button id="close-collection-detail" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回集锦</span></button>
+          <div id="collection-detail-title" class="collection-detail-title">—</div>
+          <div class="toolbar-spacer"></div>
+          <span id="collection-detail-subtitle" class="collections-meta detail-date"></span>
+          <span id="collection-detail-count" class="collections-meta detail-count"></span>
+          <span id="collection-detail-status" class="collections-meta" style="opacity:.7"></span>
+        </div>
+        <div class="collection-detail-scroll">
+          <div id="collection-detail-empty" class="collections-empty hidden">该集锦暂无照片</div>
+          <div id="collection-detail-grid" class="mosaic mosaic--detail"></div>
+        </div>
+      </section>
 
       <section id="settings-screen" class="settings-screen hidden">
         <div class="settings-topbar">
@@ -351,11 +383,13 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=1787946316332"></script>
-  <script src="assets/app_core.js?v=f12-native-20260828-3"></script>
-  <script src="assets/app_gallery.js?v=vue-gallery1-20260829"></script>
+  <script src="assets/vue/picscanner-vue.js?v=1788031978701"></script>
+  <script src="assets/vue/toolbar_fix.js?v=toolbar-fix-20260902"></script>
+  <script src="assets/app_core.js?v=plugins-20260901-1"></script>
+  <script src="assets/app_gallery.js?v=fix6-20260901"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>
   <script src="assets/app_modules.js?v=modules-20260723-2"></script>
-  <script src="assets/app.js?v=vue-gallery1-20260829"></script>
+  <script src="assets/collections.js?v=fix6-20260901"></script>
+  <script src="assets/app.js?v=fix7-20260902"></script>
 </body>
 </html>

@@ -1,0 +1,7 @@
+{
+  "key": "onnx_runtime",
+  "name": "ONNX Runtime",
+  "version": "1.29.0",
+  "description": "共享 ONNX 运行时（onnxruntime + cv2 + tokenizers），供 face/face_cluster/semantic_search 依赖",
+  "frontend": ""
+}

@@ -74,17 +74,8 @@
     });
   }
 
-  function renderStatsGroup(el, rows) {
-    el.innerHTML = '';
-    (rows || []).slice(0, 8).forEach((row) => {
-      const chip = document.createElement('div');
-      chip.className = 'chip';
-      chip.innerHTML = '<span></span><b></b>';
-      chip.querySelector('span').textContent = row.name || '?';
-      chip.querySelector('b').textContent = row.count || 0;
-      el.appendChild(chip);
-    });
-  }
+  // P3 统计屏迁移时漏删的死函数：全仓库零调用（统计屏已由 StatsScreen.vue 渲染），
+  // 原用于往 #stats-* 的容器里塞 .chip 小卡片。
 
   function currentSortOption() {
     const option = SORT_OPTIONS.find((item) => item.key === state.sortKey);

@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, onBeforeUnmount } from 'vue';
+import { computed } from 'vue';
 import { useGalleryStore } from '../stores/gallery.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 
 const store = useGalleryStore();
 const dates = computed(() => store.dates);
@@ -50,12 +51,8 @@ function isVisible(d) { return store.visibleDates.has(d.date_key); }
 function isFocus(d) { const f = store.dateFocus.get(d.date_key); return typeof f === 'number' && f >= 0.72; }
 function note(d) { return store.dateNotes.get(d.date_key) || ''; }
 
-let timer = null;
-onMounted(() => {
-  store.hydrateFromLegacy();
-  timer = setInterval(() => store.hydrateFromLegacy(), 400);
-});
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+// P1：真源代理生效后由 rAF 合并同步驱动；代理未安装时才回退 400ms 轮询
+useLegacySync(() => store.hydrateFromLegacy(), 400);
 </script>
 
 <template>

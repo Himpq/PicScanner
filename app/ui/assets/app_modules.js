@@ -179,6 +179,7 @@
     activeKey = key;
     activeDef = def;
     PS.state.openModuleKey = key;
+    if (typeof PS.notifyVue === 'function') PS.notifyVue();
     screenEl = pageEl;
     moduleTabEl = tabBtn;
 
@@ -200,6 +201,7 @@
     activeDef = null;
     activeKey = '';
     PS.state.openModuleKey = '';
+    if (typeof PS.notifyVue === 'function') PS.notifyVue();
     try { if (def.unmount) def.unmount(); } catch (err) {
       console.error('[PicScannerModules] 模块卸载失败:', err);
     }

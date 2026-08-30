@@ -13,48 +13,11 @@
 </head>
 <body>
   <div id="app">
-    <section id="source-screen" class="source-screen">
-      <div class="source-layout">
-        <div class="source-panel">
-          <div class="source-head">
-            <div>
-              <h1>来源首页</h1>
-              <p>按 PicScanner 来源标记识别当前可用路径。</p>
-            </div>
-            <div class="source-head-actions">
-              <button id="source-open-settings" class="icon-btn" title="设置">⚙</button>
-              <button id="refresh-sources" class="icon-btn" title="刷新磁盘">↻</button>
-            </div>
-          </div>
-          <div class="source-pages">
-            <section class="source-page" data-source-page="connected" role="tabpanel">
-              <div class="source-page-head">
-                <div class="section-title">可用来源 <span id="source-connected-count">0</span></div>
-                <p>仅显示来源 ID 唯一且标记可访问的当前路径。</p>
-              </div>
-              <div id="drive-list" class="source-grid"></div>
-            </section>
-          </div>
-        </div>
-        <aside class="shortcut-panel" aria-label="快捷键">
-          <div class="shortcut-title">快捷键</div>
-          <div class="shortcut-list">
-            <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>F</kbd><span>搜索照片</span></div>
-            <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>滚轮</kbd><span>调整照片墙缩略图</span></div>
-            <div class="shortcut-row"><kbd>Alt</kbd><span>立即显示悬停照片参数</span></div>
-            <div class="shortcut-row"><kbd>滚轮</kbd><span>灯箱缩放图片</span></div>
-            <div class="shortcut-row"><kbd>Q</kbd><span>选择照片快速调整</span></div>
-            <div class="shortcut-row"><kbd>灯箱</kbd><kbd>Q</kbd><span>调整当前照片</span></div>
-            <div class="shortcut-row"><kbd>C</kbd><span>对比图片</span></div>
-            <div class="shortcut-row"><kbd>F</kbd><span>收藏悬停照片</span></div>
-            <div class="shortcut-row"><kbd>E</kbd><span>编辑悬停照片笔记</span></div>
-            <div class="shortcut-row"><kbd>R</kbd><span>编辑当前日期笔记</span></div>
-            <div class="shortcut-row"><kbd>S</kbd><span>设置悬停照片分类</span></div>
-            <div class="shortcut-row"><kbd>Shift</kbd><kbd>Enter</kbd><span>笔记换行</span></div>
-          </div>
-        </aside>
-      </div>
-    </section>
+    <!-- P3：来源首页整体由 Vue 渲染（islands/SourceScreen.vue），直接挂载到本元素上。
+         #source-screen 是 display:grid + place-items:center，只有一个子项位，
+         真正的两列布局在组件根节点的 .source-layout 上，所以组件是单根（与统计屏/设置屏相反）。
+         外层容器仍由 legacy 的 showSourceChooser / 显隐逻辑控制 entering / hidden。 -->
+    <section id="source-screen" class="source-screen" aria-label="来源首页"></section>
 
     <main id="workspace" class="workspace hidden">
       <aside class="side">
@@ -145,117 +108,35 @@
       </nav>
       <nav class="date-rail hidden" id="vue-date-rail" aria-label="日期（Vue）"></nav>
 
-      <section id="collections-screen" class="collections-screen hidden" aria-label="集锦">
-        <div class="collections-topbar">
-          <button id="close-collections" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
-          <div class="collections-title">集锦</div>
-          <span id="collections-count" class="collections-meta"></span>
-          <span id="collections-status" class="collections-meta" style="margin-left:8px;opacity:.7"></span>
-          <div class="toolbar-spacer"></div>
-          <button id="collections-refresh" class="ghost-btn small">刷新</button>
-          <button id="collections-generate" class="ghost-btn small" style="background:rgba(224,164,90,0.18);border-color:rgba(224,164,90,0.4)">生成集锦</button>
-        </div>
-        <div class="collections-scroll">
-          <div id="collections-empty" class="collections-empty hidden">暂无集锦，点击“生成集锦”基于语义聚类创建</div>
-          <div id="collections-grid" class="collections-grid"></div>
-        </div>
-      </section>
+      <!-- P3：集锦列表屏由 Vue 渲染（islands/CollectionsScreen.vue），直接挂载到本元素上。
+           .collections-screen 是 flex column，组件的 .collections-topbar(flex:none)
+           与 .collections-scroll(flex:1) 必须成为它的直接子项。
+           外层容器仍由 legacy 的 openScreen / closeScreen 控制 entering / leaving / hidden。
+           注意：集锦详情屏（下方 #collection-detail-screen）仍是 legacy，本轮不动。 -->
+      <section id="collections-screen" class="collections-screen hidden" aria-label="集锦"></section>
 
-      <section id="collection-detail-screen" class="collection-detail-screen hidden" aria-label="集锦详情">
-        <div class="collection-detail-topbar">
-          <button id="close-collection-detail" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回集锦</span></button>
-          <div id="collection-detail-title" class="collection-detail-title">—</div>
-          <div class="toolbar-spacer"></div>
-          <span id="collection-detail-subtitle" class="collections-meta detail-date"></span>
-          <span id="collection-detail-count" class="collections-meta detail-count"></span>
-          <span id="collection-detail-status" class="collections-meta" style="opacity:.7"></span>
-        </div>
-        <div class="collection-detail-scroll">
-          <div id="collection-detail-empty" class="collections-empty hidden">该集锦暂无照片</div>
-          <div id="collection-detail-grid" class="mosaic mosaic--detail"></div>
-        </div>
-      </section>
+      <!-- P3：集锦详情屏由 Vue 渲染（islands/CollectionDetailScreen.vue），直接挂载到本元素上。
+           .collection-detail-screen 是 flex column，组件的 .collection-detail-topbar(flex:none)
+           与 .collection-detail-scroll(flex:1) 必须成为它的直接子项 ——
+           .entering 动画也是直接作用在它们俩上的。
+           外层容器仍由 legacy 的 openCollectionDetail / closeCollectionDetail 控制
+           entering / leaving / hidden。 -->
+      <section id="collection-detail-screen" class="collection-detail-screen hidden" aria-label="集锦详情"></section>
 
-      <section id="settings-screen" class="settings-screen hidden">
-        <div class="settings-topbar">
-          <button id="close-settings" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
-          <nav id="settings-nav" class="settings-nav" aria-label="设置分页"></nav>
-        </div>
-        <div class="settings-scroll">
-          <div id="settings-body" class="settings-body"></div>
-        </div>
-      </section>
+      <!-- P3：设置屏整体由 Vue 渲染（islands/SettingsScreen.vue），直接挂载到本元素上。
+           .settings-screen 是 flex column，组件的多根节点 .settings-topbar(flex:none)
+           与 .settings-scroll(flex:1) 必须成为它的直接子项，中间不能多包一层 div。
+           外层容器仍由 legacy 的 openSettingsPage / closeSettingsPage 控制
+           entering / leaving / hidden 显隐动画（Vue 不会动容器自身的 class）。 -->
+      <section id="settings-screen" class="settings-screen hidden" aria-label="设置"></section>
 
-      <section id="stats-screen" class="stats-screen hidden">
-        <aside class="stats-side">
-          <div class="brand-block">
-            <div class="brand-title">统计信息</div>
-            <div id="stats-source" class="brand-sub"></div>
-          </div>
-          <div id="stats-storage-list" class="storage-list compact"></div>
-        </aside>
-        <section class="stats-main">
-          <div class="settings-toolbar">
-            <button id="close-stats" class="ghost-btn back-btn"><span aria-hidden="true">←</span><span>返回图库</span></button>
-            <div class="toolbar-spacer"></div>
-          </div>
-          <div class="stats-content">
-            <div id="stats-tabs" class="stats-tabs" role="tablist" aria-label="统计分页">
-              <button class="stats-tab active" type="button" data-stats-tab="overview">概览</button>
-              <button class="stats-tab" type="button" data-stats-tab="gear">器材</button>
-              <button class="stats-tab" type="button" data-stats-tab="params">拍摄参数</button>
-              <button class="stats-tab" type="button" data-stats-tab="time">时间</button>
-            </div>
-            <div id="stats-pane-overview" class="stats-pane active" data-stats-pane="overview">
-              <div id="stats-summary" class="stats-summary"></div>
-            </div>
-            <div id="stats-pane-gear" class="stats-pane" data-stats-pane="gear">
-              <div class="stats-grid stats-grid-gear">
-                <section class="stats-panel">
-                  <h2>镜头排行</h2>
-                  <div id="lens-chart" class="stats-chart"></div>
-                </section>
-                <section class="stats-panel">
-                  <h2>机身统计</h2>
-                  <div id="camera-chart" class="stats-chart"></div>
-                </section>
-              </div>
-            </div>
-            <div id="stats-pane-params" class="stats-pane" data-stats-pane="params">
-              <div class="stats-grid stats-grid-params">
-                <section class="stats-panel">
-                  <h2>焦段范围</h2>
-                  <div id="focal-chart" class="stats-chart"></div>
-                </section>
-                <section class="stats-panel">
-                  <h2>光圈分布</h2>
-                  <div id="aperture-chart" class="stats-chart"></div>
-                </section>
-                <section class="stats-panel">
-                  <h2>ISO 分布</h2>
-                  <div id="iso-chart" class="stats-chart"></div>
-                </section>
-                <section class="stats-panel">
-                  <h2>快门分布</h2>
-                  <div id="shutter-chart" class="stats-chart"></div>
-                </section>
-              </div>
-            </div>
-            <div id="stats-pane-time" class="stats-pane" data-stats-pane="time">
-              <div class="stats-grid stats-grid-time">
-                <section class="stats-panel">
-                  <h2>拍摄时段</h2>
-                  <div id="hour-chart" class="stats-chart"></div>
-                </section>
-                <section class="stats-panel">
-                  <h2>月份分布</h2>
-                  <div id="month-chart" class="stats-chart"></div>
-                </section>
-              </div>
-            </div>
-          </div>
-        </section>
-      </section>
+      <!-- P3：统计屏内容全部由 Vue 渲染（islands/StatsScreen.vue），直接挂载到本元素上。
+           必须挂在 #stats-screen 本身而不是内部再套一层 div —— .stats-screen 是
+           display:grid（280px 侧栏 + 1fr 主区），组件的多根节点必须成为它的直接网格项，
+           否则 grid 只认到一个普通 div，侧栏拿不到高度约束，overflow 也不生效。
+           外层容器仍由 legacy 的 openStatsPage / closeStatsPage 控制
+           entering / leaving / hidden 显隐动画（Vue 不会动容器自身的 class）。 -->
+      <section id="stats-screen" class="stats-screen hidden" aria-label="统计信息"></section>
     </main>
   </div>
 
@@ -383,8 +264,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=1788031978701"></script>
-  <script src="assets/vue/toolbar_fix.js?v=toolbar-fix-20260902"></script>
+  <script src="assets/vue/picscanner-vue.js?v=1788087048825"></script>
   <script src="assets/app_core.js?v=plugins-20260901-1"></script>
   <script src="assets/app_gallery.js?v=fix6-20260901"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>

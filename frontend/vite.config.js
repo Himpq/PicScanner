@@ -42,6 +42,9 @@ export default defineConfig({
       fileName: () => 'picscanner-vue.js',
     },
     outDir: '../app/ui/assets/vue',
-    emptyOutDir: true,
+    // lib 模式文件名固定（picscanner-vue.js / picscanner-frontend.css），
+    // 直接覆盖即可。不做清空：部分环境下回收站删除会失败，
+    // 一旦清空步骤出错就会连上一版产物一起弄没，导致界面白屏。
+    emptyOutDir: false,
   },
 });

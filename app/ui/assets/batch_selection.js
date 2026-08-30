@@ -62,6 +62,8 @@
       bar.classList.toggle('hidden', count === 0);
       document.body.classList.toggle('batch-selection-active', count > 0);
       if (typeof config.onChange === 'function') config.onChange(snapshot());
+      // P1：批量选择变更的唯一收口点，通知 Vue 同步（替代 900ms 轮询）
+      if (window.PS && typeof window.PS.notifyVue === 'function') window.PS.notifyVue();
     }
 
     function snapshot() {

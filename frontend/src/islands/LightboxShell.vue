@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useLightboxStore } from '../stores/lightbox.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 import LightboxStage from '../components/lightbox/LightboxStage.vue';
 import LightboxInfoPanel from '../components/lightbox/LightboxInfoPanel.vue';
 import LightboxToolbar from '../components/lightbox/LightboxToolbar.vue';
@@ -150,8 +151,11 @@ function hijackLegacy() {
   console.log('[lightbox] hijack ready, vue=' + isVueLightboxEnabled());
 }
 
+// P1：灯箱开关走 app_lightbox.js 的 PS.notifyVue()，由 rAF 合并驱动；
+// 代理未安装时才回退 800ms 轮询
+useLegacySync(() => store.hydrateFromLegacy(), 800);
+
 onMounted(() => {
-  store.hydrateFromLegacy();
   if (typeof window !== 'undefined') window.__lightboxStore = store;
   // 延迟劫持，等待 app_lightbox.js 定义 PS（最多 8s）
   let tries = 0;
@@ -160,24 +164,26 @@ onMounted(() => {
     if (!window.PS || !window.PS._vueLightboxHijacked) { if (tries++ < 32) setTimeout(tryHijack, 250); }
   };
   tryHijack();
-  // 兜底：若未劫持成功，仍轮询同步 legacy 状态
-  const timer = setInterval(() => {
-    if (window.PS && window.PS._vueLightboxHijacked) {
-      // 已劫持时，若 legacy 被意外打开则同步关闭
-      try {
-        const el = document.getElementById('lightbox');
-        if (el && !el.classList.contains('hidden') && store.open) el.classList.add('hidden');
-      } catch {}
-      return;
-    }
-    store.hydrateFromLegacy();
-  }, 800);
-  window.__lightboxShellSyncTimer = timer;
+  // 已劫持时，若 legacy #lightbox 被意外显示，则立即收起（改用 MutationObserver，不再轮询）
+  watchLegacyVisibility();
   window.addEventListener('keydown', onKeydown);
 });
 
+// legacy #lightbox 显隐对账。用 MutationObserver 取代原先定时器里的每轮 classList 检查
+let legacyObserver = null;
+function watchLegacyVisibility() {
+  const el = document.getElementById('lightbox');
+  if (!el || typeof MutationObserver === 'undefined') return;
+  legacyObserver = new MutationObserver(() => {
+    try {
+      if (!el.classList.contains('hidden') && store.open) el.classList.add('hidden');
+    } catch {}
+  });
+  legacyObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+}
+
 onBeforeUnmount(() => {
-  if (window.__lightboxShellSyncTimer) { clearInterval(window.__lightboxShellSyncTimer); delete window.__lightboxShellSyncTimer; }
+  if (legacyObserver) { legacyObserver.disconnect(); legacyObserver = null; }
   window.removeEventListener('keydown', onKeydown);
 });
 

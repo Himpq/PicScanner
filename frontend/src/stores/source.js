@@ -79,6 +79,31 @@ export const useSourceStore = defineStore('source', () => {
     return created;
   }
 
+  // P3：来源屏整体归 Vue 后，legacy 的 loadSources / showSourceStartupError
+  // 都改走这里。显隐动画（entering / hidden）仍由 legacy 操作 #source-screen 完成。
+  const open = ref(false);
+
+  function openPage() {
+    open.value = true;
+    return fetchSources();
+  }
+
+  // legacy 的 loadSources() 调这个。失败时把错误显示在来源网格里，
+  // 而不是像原来那样往 #drive-list 塞 DOM（该节点已随迁移移除）
+  function refresh() {
+    return fetchSources().catch((err) => {
+      error.value = String((err && err.message) || err || '来源加载失败');
+    });
+  }
+
+  // legacy 的 showSourceStartupError(prefix, err) 调这个
+  function showStartupError(prefix, err) {
+    const message = err instanceof Error ? err.message : String(err || '未知错误');
+    error.value = String(prefix || '来源加载失败') + ': ' + message;
+    sources.value = [];
+    open.value = true;
+  }
+
   function selectSource(source) {
     if (!source || source.unavailable) return false;
     selectedPath.value = source?.path || source?.root_path || '';
@@ -105,11 +130,15 @@ export const useSourceStore = defineStore('source', () => {
     config,
     hasSources,
     count,
+    open,
     fetchSources,
     chooseFolder,
     selectSource,
     sourceSummaryText,
     hydrateFromLegacy,
     syncToLegacy,
+    openPage,
+    refresh,
+    showStartupError,
   };
 });

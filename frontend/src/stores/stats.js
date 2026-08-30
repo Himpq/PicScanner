@@ -8,6 +8,10 @@ export const useStatsStore = defineStore('stats', () => {
   const sources = ref([]);
   const statistics = ref({});
   const activeTab = ref('overview');
+  // P3：统计屏内容归 Vue 后，开关与数据源都落在 store 上。
+  // 注意显隐动画（entering / leaving / hidden）仍由 legacy 的
+  // openStatsPage / closeStatsPage 操作 #stats-screen 完成，Vue 只负责内容。
+  const open = ref(false);
 
   const total = computed(() => Number(statistics.value.total_files || 0));
   const exifComplete = computed(() => Number(statistics.value.exif_complete || 0));
@@ -16,6 +20,7 @@ export const useStatsStore = defineStore('stats', () => {
     const PS = window.PS;
     if (!PS || !PS.state) return;
     if (PS.state.statsTab) activeTab.value = PS.state.statsTab;
+    if (typeof PS.state.statsOpen === 'boolean') open.value = PS.state.statsOpen;
   }
 
   function setTab(key) {
@@ -39,19 +44,10 @@ export const useStatsStore = defineStore('stats', () => {
     try {
       const rp = rootPath !== undefined ? rootPath : (currentPath() || null);
       const sid = sourceId !== undefined ? sourceId : (currentSourceId() || null);
-      // 双轨期：若 legacy 已有 renderStatsWindow，优先复用以保持图表逻辑一致，但 Vue 侧仍镜像数据
       const res = await call('get_statistics_detail', rp, sid);
       if (!res || !res.success) throw new Error(res?.message || '读取统计信息失败');
       sources.value = res.sources || [];
       statistics.value = res.statistics || {};
-      // 同步 signature 到 legacy，避免重复刷新
-      const PS = window.PS;
-      if (PS && res.statistics) {
-        try {
-          const sig = JSON.stringify(res.statistics).slice(0, 120);
-          PS.state.lastStatsSignature = sig;
-        } catch {}
-      }
       return res;
     } catch (err) {
       error.value = String(err?.message || err);
@@ -59,6 +55,20 @@ export const useStatsStore = defineStore('stats', () => {
     } finally {
       loading.value = false;
     }
+  }
+
+  // P3：legacy 的 openStatsPage 调这个来触发取数，不再自己渲染
+  function openPage() {
+    open.value = true;
+    const PS = window.PS;
+    if (PS && PS.state) PS.state.statsOpen = true;
+    return fetchDetail().catch(() => {});
+  }
+
+  function closePage() {
+    open.value = false;
+    const PS = window.PS;
+    if (PS && PS.state) PS.state.statsOpen = false;
   }
 
   // 供图表复用的纯函数（从 app_gallery.js 抽离，不依赖 DOM）
@@ -94,10 +104,13 @@ export const useStatsStore = defineStore('stats', () => {
     sources,
     statistics,
     activeTab,
+    open,
     total,
     exifComplete,
     hydrateFromLegacy,
     setTab,
+    openPage,
+    closePage,
     fetchDetail,
     chartRows,
     compactNumber,

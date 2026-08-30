@@ -20,6 +20,20 @@ import CategoryPanelIsland from './islands/CategoryPanelIsland.vue';
 import ToolbarIsland from './islands/ToolbarIsland.vue';
 import { syncToLegacyPS } from './constants.js';
 import { syncBridgeToLegacyPS } from './bridge/index.js';
+import { installLegacyStateProxy, isSsotActive, registerLegacySyncer } from './bridge/legacyStateProxy.js';
+import * as layout from './gallery/layout.js';
+import { useGalleryStore } from './stores/gallery.js';
+import { useBatchStore } from './stores/batch.js';
+import { useModulesStore } from './stores/modules.js';
+import { useQuickEditStore } from './stores/quickEdit.js';
+import { useLightboxStore } from './stores/lightbox.js';
+import { useStatsStore } from './stores/stats.js';
+import { useSettingsStore } from './stores/settings.js';
+import { useSourceStore } from './stores/source.js';
+import { useCollectionsStore } from './stores/collections.js';
+import CollectionsScreen from './islands/CollectionsScreen.vue';
+import CollectionDetailScreen from './islands/CollectionDetailScreen.vue';
+import SettingsScreen from './islands/SettingsScreen.vue';
 
 const COMPONENTS = {
   storage: StorageSettings,
@@ -33,6 +47,60 @@ const COMPONENTS = {
 // 单例 Pinia，供所有岛屿共享（双轨期与 PS.state 共存）
 const pinia = createPinia();
 
+// P1：把所有 store 的 hydrate 注册成同步器。
+// 之后 legacy 的任何状态改动（集合字段走 notifying proxy，控制器改动走 PS.notifyVue）
+// 都汇入同一个 rAF 合并器，各岛屿不再需要各自的 setInterval。
+[
+  () => useGalleryStore(pinia).hydrateFromLegacy(),
+  () => useBatchStore(pinia).hydrateFromLegacy(),
+  () => useModulesStore(pinia).hydrateFromLegacy(),
+  () => useQuickEditStore(pinia).hydrateFromLegacy(),
+  () => useLightboxStore(pinia).hydrateFromLegacy(),
+].forEach(registerLegacySyncer);
+
+// P3：供 legacy 的 openStatsPage / closeStatsPage 调用。
+// 统计屏内容已归 Vue，legacy 只负责外层容器的显隐动画，取数交给 store。
+const statsBridge = {
+  open: () => useStatsStore(pinia).openPage(),
+  close: () => useStatsStore(pinia).closePage(),
+};
+
+// P3：供 legacy 的 openSettingsPage / closeSettingsPage 调用。
+// 设置屏整体已归 Vue，legacy 只负责外层容器的显隐动画。
+const settingsBridge = {
+  open: () => useSettingsStore(pinia).openPage(),
+  close: () => useSettingsStore(pinia).closePage(),
+};
+
+// P3：供 legacy 的 openScreen / closeScreen / openCollectionDetail / closeCollectionDetail 调用。
+// 集锦列表屏与详情屏的内容都归 Vue；legacy 只保留两个容器的显隐与动画。
+const collectionsBridge = {
+  open: () => useCollectionsStore(pinia).openPage(),
+  close: () => useCollectionsStore(pinia).closePage(),
+  fetch: () => useCollectionsStore(pinia).fetchList(),
+  sync: (items) => { useCollectionsStore(pinia).items = items || []; },
+  setStatus: (msg) => { useCollectionsStore(pinia).status = msg || ''; },
+  // 详情屏：legacy 只保留容器显隐与动画，取数与渲染都在 store 里
+  openDetail: (col) => useCollectionsStore(pinia).openDetail(col),
+  closeDetail: () => useCollectionsStore(pinia).closeDetail(),
+  refreshDetail: () => useCollectionsStore(pinia).refreshDetail(),
+  setDetailStatus: (msg) => { useCollectionsStore(pinia).detailStatus = msg || ''; },
+};
+
+// P3：供 legacy 的 loadSources / showSourceStartupError 调用。
+// 来源首页已归 Vue，legacy 只保留启动编排与外层容器的显隐。
+const sourceBridge = {
+  refresh: () => useSourceStore(pinia).refresh(),
+  showError: (prefix, err) => useSourceStore(pinia).showStartupError(prefix, err),
+  chooseFolder: () => {
+    const store = useSourceStore(pinia);
+    return store.chooseFolder().then((created) => {
+      if (created) store.selectSource(created);
+      return created;
+    });
+  },
+};
+
 let app = null;
 
 const lightboxInfoState = reactive({ photo: null });
@@ -44,6 +112,9 @@ let quickEditSlidersInstance = null;
 let sourceScreenApp = null;
 let galleryShellApp = null;
 let statsScreenApp = null;
+let settingsScreenApp = null;
+let collectionsScreenApp = null;
+let collectionDetailScreenApp = null;
 let lightboxShellApp = null;
 let quickEditShellApp = null;
 let batchModulesShellApp = null;
@@ -77,6 +148,13 @@ function resyncToLegacyPS() {
   } catch (e) {
     console.warn('[PicScannerVue] resyncToLegacyPS failed', e);
   }
+  // P1 真源反转：此刻 window.PS 已存在，把 PS.state 代理到 Pinia。
+  // 安装成功后各岛屿不再起轮询定时器；失败则自动回退到原来的轮询，行为不变。
+  try {
+    installLegacyStateProxy(pinia);
+  } catch (e) {
+    console.warn('[PicScannerVue] installLegacyStateProxy failed', e);
+  }
 }
 
 function withPinia(vueApp) {
@@ -89,10 +167,23 @@ window.PicScannerVue = {
   pinia,
   // P2: app_core.js 定义 window.PS 后调用，把 Vue 侧常量/桥接重同步进 PS
   resyncToLegacyPS,
+  // 设置面板的独立挂载入口。P3 之后设置屏整体由 SettingsScreen 岛屿渲染，
+  // 但 collections.js 仍会调 mount('plugins', <#settings-body>)（该节点已随迁移移除），
+  // 因此这里对 el 为空的情况改为驱动 settings store 切页，避免那个兜底按钮失效。
   mount(tabKey, el) {
     const component = COMPONENTS[tabKey];
     if (!component) return false;
     if (app) app.unmount();
+    if (!el) {
+      try {
+        const s = useSettingsStore(pinia);
+        if (!s.setTab(tabKey)) return false;
+        s.openPage();
+        return true;
+      } catch {
+        return false;
+      }
+    }
     app = withPinia(createApp(component));
     app.mount(el);
     return true;
@@ -152,6 +243,27 @@ window.PicScannerVue = {
     if (statsScreenApp) statsScreenApp.unmount();
     statsScreenApp = withPinia(createApp(StatsScreen));
     statsScreenApp.mount(el);
+    return true;
+  },
+  mountSettingsScreen(el) {
+    if (!el) return false;
+    if (settingsScreenApp) settingsScreenApp.unmount();
+    settingsScreenApp = withPinia(createApp(SettingsScreen));
+    settingsScreenApp.mount(el);
+    return true;
+  },
+  mountCollectionsScreen(el) {
+    if (!el) return false;
+    if (collectionsScreenApp) collectionsScreenApp.unmount();
+    collectionsScreenApp = withPinia(createApp(CollectionsScreen));
+    collectionsScreenApp.mount(el);
+    return true;
+  },
+  mountCollectionDetailScreen(el) {
+    if (!el) return false;
+    if (collectionDetailScreenApp) collectionDetailScreenApp.unmount();
+    collectionDetailScreenApp = withPinia(createApp(CollectionDetailScreen));
+    collectionDetailScreenApp.mount(el);
     return true;
   },
   unmountStatsScreen() {
@@ -223,142 +335,140 @@ window.PicScannerVue = {
   _p3Ready: true,
   _p4Ready: true,
   _p5Ready: true,
-  // PhotoGrid Vue 实现已彻底移除（2026-09-02），画廊固定由 legacy #gallery 渲染，防止误挂载
+  // PhotoGrid 由 legacy #gallery 渲染（P4 前不做 Vue 版，避免双轨竞态）
+  // P2 纯函数高度模型，供 legacy 与未来的 Vue PhotoGrid 共用
+  layout,
+  // P1 真源代理状态
+  isSsotActive,
+  registerLegacySyncer,
+  // P3：统计屏桥接，供 legacy 的 openStatsPage / closeStatsPage 调用
+  stats: statsBridge,
+  // P3：设置屏桥接，供 legacy 的 openSettingsPage / closeSettingsPage 调用
+  settings: settingsBridge,
+  // P3：来源屏桥接，供 legacy 的 loadSources / showSourceStartupError 调用
+  source: sourceBridge,
+  // P3：集锦列表屏桥接，供 legacy 的 openScreen / closeScreen 调用
+  collections: collectionsBridge,
 };
 
-// PR2: DateRail 原位岛 — 特性开关，默认关闭，?vue_date=1 或 localStorage vue_date=1 开启
-function isVueDateRailEnabled() {
+// ---------------------------------------------------------------------------
+// 岛屿注册表（P0 收敛）
+//
+// 原先每个岛都有三件套：isVueXxxEnabled / autoMountXxx / toggleVueXxx，
+// 六份几乎一样的代码。这里收敛成一张表 + 两个通用函数。
+//
+// flag 优先级：URL 查询参数 > localStorage > defaultOn
+//   ?vue_toolbar=0  -> 临时关
+//   localStorage    -> 持久开关
+//   defaultOn       -> 灰度默认值
+// ---------------------------------------------------------------------------
+const ISLANDS = [
+  {
+    name: 'dateRail',
+    vueId: 'vue-date-rail',
+    vanillaId: 'vanilla-date-rail',
+    flag: 'vue_date',
+    defaultOn: false,
+    mount: (el) => window.PicScannerVue.mountDateRailIsland(el),
+  },
+  {
+    name: 'category',
+    vueId: 'vue-category-panel',
+    vanillaId: 'vanilla-category-panel',
+    flag: 'vue_category',
+    defaultOn: false,
+    mount: (el) => window.PicScannerVue.mountCategoryPanelIsland(el),
+  },
+  {
+    name: 'toolbar',
+    vueId: 'vue-toolbar',
+    vanillaId: 'vanilla-toolbar',
+    flag: 'vue_toolbar',
+    defaultOn: true,
+    mount: (el) => window.PicScannerVue.mountToolbarIsland(el),
+  },
+  {
+    name: 'lightbox',
+    vueId: 'vue-lightbox',
+    vanillaId: null, // 全局覆盖层，无 vanilla 对应容器，显隐由 store.open 控制
+    flag: 'vue_lightbox',
+    defaultOn: true,
+    retryMs: 200,
+    mount: (el) => window.PicScannerVue.mountLightboxShell(el),
+  },
+];
+
+function isIslandEnabled(cfg) {
   try {
     const params = new URLSearchParams(location.search);
-    if (params.has('vue_date')) return params.get('vue_date') !== '0';
-    return localStorage.getItem('vue_date') === '1';
-  } catch { return false; }
-}
-function autoMountDateRail() {
-  if (!isVueDateRailEnabled()) return;
-  const vueEl = document.getElementById('vue-date-rail');
-  const vanillaEl = document.getElementById('vanilla-date-rail');
-  if (!vueEl) return;
-  vueEl.classList.remove('hidden');
-  if (vanillaEl) vanillaEl.classList.add('hidden');
-  const tryMount = () => {
-    if (window.PicScannerVue && typeof window.PicScannerVue.mountDateRailIsland === 'function') {
-      window.PicScannerVue.mountDateRailIsland(vueEl);
-    } else setTimeout(tryMount, 100);
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
-  else tryMount();
-}
-window.toggleVueDateRail = (on) => {
-  try {
-    if (on) localStorage.setItem('vue_date', '1');
-    else localStorage.removeItem('vue_date');
-    location.reload();
-  } catch {}
-};
-autoMountDateRail();
-
-// PR3: CategoryPanel 原位岛 — 特性开关 ?vue_category=1 / localStorage
-function isVueCategoryEnabled() {
-  try {
-    const params = new URLSearchParams(location.search);
-    if (params.has('vue_category')) return params.get('vue_category') !== '0';
-    return localStorage.getItem('vue_category') === '1';
-  } catch { return false; }
-}
-function autoMountCategory() {
-  if (!isVueCategoryEnabled()) return;
-  const vueEl = document.getElementById('vue-category-panel');
-  const vanillaEl = document.getElementById('vanilla-category-panel');
-  if (!vueEl) return;
-  vueEl.classList.remove('hidden');
-  if (vanillaEl) vanillaEl.classList.add('hidden');
-  const tryMount = () => {
-    if (window.PicScannerVue && typeof window.PicScannerVue.mountCategoryPanelIsland === 'function') {
-      window.PicScannerVue.mountCategoryPanelIsland(vueEl);
-    } else setTimeout(tryMount, 100);
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
-  else tryMount();
-}
-window.toggleVueCategory = (on) => {
-  try {
-    if (on) localStorage.setItem('vue_category', '1');
-    else localStorage.removeItem('vue_category');
-    location.reload();
-  } catch {}
-};
-autoMountCategory();
-
-// PR4: PhotoGrid Vue 实现已删除 — 画廊固定由 legacy 渲染，防止误挂载导致筛选/排序/滚动等双轨竞态
-// 文件 frontend/src/components/gallery/PhotoGrid.vue 与 composables/useVirtualGrid.js 已移除，
-// #vue-photo-grid 容器亦从 index.html 移除，任何 vue_photo 开关均不再生效
-
-// PR5: Toolbar 工具栏 — 特性开关 ?vue_toolbar=1 / localStorage，默认灰度开启
-function isVueToolbarEnabled() {
-  try {
-    const params = new URLSearchParams(location.search);
-    if (params.has('vue_toolbar')) return params.get('vue_toolbar') !== '0';
-    const v = localStorage.getItem('vue_toolbar');
+    if (params.has(cfg.flag)) return params.get(cfg.flag) !== '0';
+    const v = localStorage.getItem(cfg.flag);
     if (v === '0') return false;
     if (v === '1') return true;
-    return true;
-  } catch { return true; }
+    return !!cfg.defaultOn;
+  } catch {
+    return !!cfg.defaultOn;
+  }
 }
-function autoMountToolbar() {
-  if (!isVueToolbarEnabled()) return;
-  const vueEl = document.getElementById('vue-toolbar');
-  const vanillaEl = document.getElementById('vanilla-toolbar');
+
+// 统一的开关入口，替代原先的 toggleVueDateRail / toggleVueCategory /
+// toggleVueToolbar / toggleVueLightbox 四个全局函数
+window.setVueIsland = function setVueIsland(name, on) {
+  const cfg = ISLANDS.find((c) => c.name === name);
+  if (!cfg) return false;
+  try {
+    if (on === false) localStorage.setItem(cfg.flag, '0');
+    else if (on === true) localStorage.setItem(cfg.flag, '1');
+    else localStorage.removeItem(cfg.flag);
+    location.reload();
+  } catch {}
+  return true;
+};
+
+function autoMountIsland(cfg) {
+  if (!isIslandEnabled(cfg)) return;
+  const vueEl = document.getElementById(cfg.vueId);
   if (!vueEl) return;
-  vueEl.classList.remove('hidden');
+  const vanillaEl = cfg.vanillaId ? document.getElementById(cfg.vanillaId) : null;
   if (vanillaEl) vanillaEl.classList.add('hidden');
+  vueEl.classList.remove('hidden');
   const tryMount = () => {
-    if (window.PicScannerVue && typeof window.PicScannerVue.mountToolbarIsland === 'function') window.PicScannerVue.mountToolbarIsland(vueEl);
+    if (window.PicScannerVue && typeof cfg.mount === 'function') cfg.mount(vueEl);
+    else setTimeout(tryMount, cfg.retryMs || 100);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}
+
+ISLANDS.forEach(autoMountIsland);
+
+// P3：统计屏 / 设置屏常驻挂载。
+//
+// 两条共同约束（迁移整屏前务必先确认）：
+//   1) 必须挂到外层容器本身，不能挂到它内部的子 div
+//   2) 组件必须用多根模板，让各分区成为外层容器的直接子项
+//
+// #stats-screen 是 display:grid（280px 侧栏 + 1fr 主区），
+// #settings-screen 是 display:flex column（topbar flex:none + scroll flex:1）。
+// 只要中间多一层普通 wrapper，grid / flex 的子项计算、高度约束与 overflow 全部失效。
+//
+// 显隐与动画仍由 legacy 操作容器的 hidden / entering / leaving 完成，
+// Vue 不会动容器自身的 class，只负责内容。
+function autoMountScreen(id, mountName) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const tryMount = () => {
+    const PV = window.PicScannerVue;
+    if (PV && typeof PV[mountName] === 'function') PV[mountName](el);
     else setTimeout(tryMount, 100);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
   else tryMount();
 }
-window.toggleVueToolbar = (on) => {
-  try {
-    if (on === false) localStorage.setItem('vue_toolbar', '0');
-    else if (on === true) localStorage.setItem('vue_toolbar', '1');
-    else localStorage.removeItem('vue_toolbar');
-    location.reload();
-  } catch {}
-};
-autoMountToolbar();
 
-// PR6: Lightbox 灯箱 — 已完成 Vue 迁移，与 legacy 像素一致（close 36x36 圆角8px / toolbar 居中 / info fixed 定位 / compare 双栏）
-// 特性开关 ?vue_lightbox=0 可回退 legacy，默认开启 Vue 版
-function isVueLightboxEnabled() {
-  try {
-    const p = new URLSearchParams(location.search);
-    if (p.has('vue_lightbox')) return p.get('vue_lightbox') !== '0';
-    const v = localStorage.getItem('vue_lightbox');
-    if (v === '0') return false;
-    if (v === '1') return true;
-    return true;
-  } catch { return true; }
-}
-function autoMountLightbox() {
-  if (!isVueLightboxEnabled()) return;
-  const el = document.getElementById('vue-lightbox');
-  if (!el) return;
-  // 灯箱为全局覆盖层，无需 hidden 切换，由 store.open 控制显隐
-  const tryMount = () => {
-    if (window.PicScannerVue && typeof window.PicScannerVue.mountLightboxShell === 'function') window.PicScannerVue.mountLightboxShell(el);
-    else setTimeout(tryMount, 200);
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
-  else tryMount();
-}
-window.toggleVueLightbox = (on) => {
-  try {
-    if (on === false) localStorage.setItem('vue_lightbox', '0');
-    else if (on === true) localStorage.setItem('vue_lightbox', '1');
-    else localStorage.removeItem('vue_lightbox');
-    location.reload();
-  } catch {}
-};
-autoMountLightbox();
+autoMountScreen('stats-screen', 'mountStatsScreen');
+autoMountScreen('settings-screen', 'mountSettingsScreen');
+autoMountScreen('source-screen', 'mountSourceScreen');
+autoMountScreen('collections-screen', 'mountCollectionsScreen');
+autoMountScreen('collection-detail-screen', 'mountCollectionDetailScreen');
+

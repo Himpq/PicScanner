@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue';
+import { onMounted, ref, computed } from 'vue';
 import { useGalleryStore } from '../stores/gallery.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 import GalleryToolbar from '../components/gallery/GalleryToolbar.vue';
 import CategoryPanel from '../components/gallery/CategoryPanel.vue';
 import DateRail from '../components/gallery/DateRail.vue';
@@ -24,7 +25,6 @@ function syncTimeRange() {
 }
 
 onMounted(() => {
-  store.hydrateFromLegacy();
   // 同步来源上下文
   const PS = window.PS;
   if (PS?.state) {
@@ -33,20 +33,12 @@ onMounted(() => {
     if (!store.categories.length) store.fetchCategories().catch(() => {});
     if (!store.dates.length) store.fetchDates().catch(() => {});
   }
+});
+// P1：真源代理生效后由 rAF 合并同步驱动；代理未安装时才回退 1000ms 轮询
+useLegacySync(() => {
+  store.hydrateFromLegacy();
   syncTimeRange();
-  // 监听 legacy 的日期变化（轮询轻量同步，双轨期）
-  const timer = setInterval(() => {
-    store.hydrateFromLegacy();
-    syncTimeRange();
-  }, 1000);
-  window.__galleryShellSyncTimer = timer;
-});
-onBeforeUnmount(() => {
-  if (window.__galleryShellSyncTimer) {
-    clearInterval(window.__galleryShellSyncTimer);
-    delete window.__galleryShellSyncTimer;
-  }
-});
+}, 1000);
 
 function onGallerySizeInput(e) {
   store.applyGallerySize(e.target.value);

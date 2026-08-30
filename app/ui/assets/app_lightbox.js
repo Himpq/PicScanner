@@ -1317,6 +1317,8 @@
     PS.hoverCard = null;
     hide(els.exifPop);
     state.lightbox.photo = photo;
+    // P1：通知 Vue 同步（rAF 合并，同一同步块内的后续赋值一并生效）
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
     state.lightbox.zoom = 1;
     state.lightbox.panX = 0;
     state.lightbox.panY = 0;
@@ -1363,6 +1365,8 @@
     if (state.lightbox.embedded) return;
     const wasCompare = !!state.compare.lightbox;
     hide(els.lightbox);
+    // P1：通知 Vue 同步（rAF 合并）
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
     state.compare.lightbox = false;
     // 退出对比灯箱时同步收起上层 ComparePanel 并清空选中，避免仅关灯箱却留面板/角标
     if (wasCompare) {

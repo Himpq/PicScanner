@@ -515,10 +515,8 @@
   const els = {
     sourceScreen: document.getElementById('source-screen'),
     workspace: document.getElementById('workspace'),
-    sourceConnectedCount: document.getElementById('source-connected-count'),
-    driveList: document.getElementById('drive-list'),
-    sourceOpenSettings: document.getElementById('source-open-settings'),
-    refreshSources: document.getElementById('refresh-sources'),
+    // P3：来源首页改由 Vue 渲染，sourceConnectedCount / driveList /
+    // sourceOpenSettings / refreshSources 四个节点已从 index.html 移除
     confirmModal: document.getElementById('confirm-modal'),
     confirmPath: document.getElementById('confirm-path'),
     confirmScan: document.getElementById('confirm-scan'),
@@ -594,24 +592,14 @@
     lightboxZoom: document.getElementById('lightbox-zoom'),
     lightboxApscFocal: document.getElementById('lightbox-apsc-focal'),
     lightboxFocal: document.getElementById('lightbox-focal'),
+    // P3：设置屏整体改由 Vue 渲染，仅保留外层容器做显隐动画。
+    // 原先的 closeSettings / settingsNav / settingsBody 已随设置屏内容移入
+    // islands/SettingsScreen.vue，index.html 里也不再有这些节点。
     settingsScreen: document.getElementById('settings-screen'),
-    closeSettings: document.getElementById('close-settings'),
-    settingsNav: document.getElementById('settings-nav'),
-    settingsBody: document.getElementById('settings-body'),
+    // P3：统计屏内容改由 Vue 渲染，仅保留外层容器做显隐动画。
+    // 原先的 closeStats / statsSource / statsStorageList / statsTabs / statsSummary
+    // 及各 *-chart 容器已从 index.html 移除，这里的引用一并删除。
     statsScreen: document.getElementById('stats-screen'),
-    closeStats: document.getElementById('close-stats'),
-    statsSource: document.getElementById('stats-source'),
-    statsStorageList: document.getElementById('stats-storage-list'),
-    statsTabs: document.getElementById('stats-tabs'),
-    statsSummary: document.getElementById('stats-summary'),
-    hourChart: document.getElementById('hour-chart'),
-    monthChart: document.getElementById('month-chart'),
-    lensChart: document.getElementById('lens-chart'),
-    focalChart: document.getElementById('focal-chart'),
-    cameraChart: document.getElementById('camera-chart'),
-    apertureChart: document.getElementById('aperture-chart'),
-    isoChart: document.getElementById('iso-chart'),
-    shutterChart: document.getElementById('shutter-chart'),
   };
   const lightboxHomeParent = els.lightbox.parentNode;
   const lightboxHomeNextSibling = els.lightbox.nextSibling;
@@ -747,6 +735,12 @@
       .replace(/"/g, '&quot;');
   }
 
+  // P1：供 legacy 显式通知 Vue 的同步口子。
+  // 预置空实现，保证下方各调用点（批量选择、灯箱开关、快速调整开关、模块开关）
+  // 在 Vue 包尚未加载或真源代理安装失败时也不会报错。
+  // Vue 侧 installNotifyHook() 会在 PS 定义后把它替换成真正的同步触发器。
+  function notifyVue() {}
+
   window.PS = {
     state,
     els,
@@ -754,6 +748,7 @@
     lightboxHomeNextSibling,
     api,
     call,
+    notifyVue,
     quickEditGeometryApi,
     missingStartupApiMethods,
     startupApiReady,

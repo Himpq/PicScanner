@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted, onBeforeUnmount, computed } from 'vue';
+import { onMounted, computed } from 'vue';
 import { useBatchStore } from '../stores/batch.js';
 import { useModulesStore } from '../stores/modules.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 import BatchQueue from '../components/batch/BatchQueue.vue';
 
 const batch = useBatchStore();
@@ -21,15 +22,14 @@ function openMod(key) { mods.openModule(key); mods.setMenuOpen(false); }
 function closeMod() { mods.closeModule(); }
 
 onMounted(() => {
+  mods.bootstrap().catch(()=>{});
+});
+// P1：批量选择变更走 batch_selection.js 的 PS.notifyVue()，模块开关走 app_modules.js 的，
+// 由 rAF 合并驱动；代理未安装时才回退 900ms 轮询
+useLegacySync(() => {
   batch.hydrateFromLegacy();
   mods.hydrateFromLegacy();
-  mods.bootstrap().catch(()=>{});
-  const t = setInterval(() => { batch.hydrateFromLegacy(); mods.hydrateFromLegacy(); }, 900);
-  window.__batchModulesSyncTimer = t;
-});
-onBeforeUnmount(() => {
-  if (window.__batchModulesSyncTimer) { clearInterval(window.__batchModulesSyncTimer); delete window.__batchModulesSyncTimer; }
-});
+}, 900);
 </script>
 
 <template>

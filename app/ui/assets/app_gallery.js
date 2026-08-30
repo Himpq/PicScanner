@@ -796,27 +796,7 @@
     openFilterMenu(ev.clientX, ev.clientY);
   }
 
-  function currentSettingsTab() {
-    const tab = SETTINGS_TABS.find((item) => item.key === state.settingsTab);
-    if (!tab) throw new Error('未知设置栏目: ' + state.settingsTab);
-    return tab;
-  }
-
-  function renderSettingsNav() {
-    els.settingsNav.innerHTML = '';
-    SETTINGS_TABS.forEach((tab) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.settingsTab = tab.key;
-      const label = document.createElement('span');
-      label.className = 'settings-nav-label';
-      label.textContent = tab.label;
-      btn.appendChild(label);
-      btn.classList.toggle('active', tab.key === state.settingsTab);
-      btn.addEventListener('click', () => setSettingsTab(tab.key));
-      els.settingsNav.appendChild(btn);
-    });
-  }
+  // P3：currentSettingsTab 随设置屏渲染代码一起删除（标签切换改由 Vue store 负责）
 
   function openSettingsPage(options) {
     const opts = options || {};
@@ -837,8 +817,9 @@
       hide(els.sourceScreen);
       show(els.workspace);
     }
-    renderSettingsNav();
-    renderSettingsBody();
+    // P3：顶栏 / 标签 / 内容全部由 Vue 渲染，这里只负责显隐动画与通知 Vue 打开
+    const bridge = window.PicScannerVue && window.PicScannerVue.settings;
+    if (bridge && typeof bridge.open === 'function') bridge.open();
     els.settingsScreen.classList.remove('leaving');
     show(els.settingsScreen);
     els.settingsScreen.classList.add('entering');
@@ -871,6 +852,9 @@
     const opts = options && !options.currentTarget ? options : {};
     const returnToSource = state.settingsReturnTarget === 'source' && opts.returnToSource !== false;
     state.settingsOpen = false;
+    // P3：通知 Vue 收起（内容由 Vue 渲染）
+    const bridge = window.PicScannerVue && window.PicScannerVue.settings;
+    if (bridge && typeof bridge.close === 'function') bridge.close();
     closePanelScreen(els.settingsScreen, opts);
     state.settingsReturnTarget = 'workspace';
     if (!returnToSource) return;
@@ -888,577 +872,23 @@
     restoreSource();
   }
 
-  function setSettingsTab(tabKey) {
-    if (!SETTINGS_TABS.some((item) => item.key === tabKey)) throw new Error('未知设置栏目: ' + tabKey);
-    state.settingsTab = tabKey;
-    renderSettingsNav();
-    renderSettingsBody();
-  }
+  // P3 · 设置屏渲染代码已删除
+  //
+  // 原先从 setSettingsTab 一直到 renderPluginsSettings 共 572 行：
+  //   renderSettingsNav / renderSettingsBody / setSettingsTab / currentSettingsTab /
+  //   settingsStack / createSettingsPanel / appendSettingsSwitch /
+  //   renderInterfaceSettings / renderShortcutsSettings / renderAboutSettings /
+  //   renderExportSettings / exportPresetPayload / saveExportPreset /
+  //   renderStorageSettings / renderStorageRows / renderPluginsSettings
+  //
+  // 其中 loadPhotoTotal 与 activeScopeLabel 只被导出、从无调用，一并清掉。
+  //
+  // 设置屏整体改由 frontend/src/islands/SettingsScreen.vue 渲染：
+  // 外壳（顶栏 + 标签 + 滚动区）+ 6 个 settings/*.vue 面板。
+  // legacy 侧只保留 openSettingsPage / closeSettingsPage 的显隐动画。
+  //
+  // 注意：closePanelScreen 保留在上方，closeStatsPage / closeSettingsPage 都要用。
 
-  function renderSettingsBody() {
-    const tab = currentSettingsTab();
-    if (window.PicScannerVue) window.PicScannerVue.unmount();
-    els.settingsBody.innerHTML = '';
-    if (window.PicScannerVue && window.PicScannerVue.mount(tab.key, els.settingsBody)) {
-      return;
-    }
-    if (tab.key === 'interface') {
-      renderInterfaceSettings();
-      return;
-    }
-    if (tab.key === 'storage') {
-      renderStorageSettings();
-      return;
-    }
-    if (tab.key === 'export') {
-      renderExportSettings();
-      return;
-    }
-    if (tab.key === 'shortcuts') {
-      renderShortcutsSettings();
-      return;
-    }
-    if (tab.key === 'plugins') {
-      renderPluginsSettings();
-      return;
-    }
-    if (tab.key === 'about') {
-      renderAboutSettings();
-      return;
-    }
-    const empty = document.createElement('div');
-    empty.className = 'settings-empty';
-    empty.textContent = '暂无设置项';
-    els.settingsBody.appendChild(empty);
-  }
-
-  function settingsStack() {
-    const wrap = document.createElement('div');
-    wrap.className = 'settings-stack';
-    return wrap;
-  }
-
-  function createSettingsPanel(title, subtitle) {
-    const panel = document.createElement('section');
-    panel.className = 'settings-panel';
-    const head = document.createElement('div');
-    head.className = 'settings-panel-head';
-    const textWrap = document.createElement('div');
-    const h3 = document.createElement('h3');
-    h3.textContent = title;
-    const p = document.createElement('p');
-    p.textContent = subtitle || '';
-    textWrap.appendChild(h3);
-    if (subtitle) textWrap.appendChild(p);
-    head.appendChild(textWrap);
-    const body = document.createElement('div');
-    body.className = 'settings-panel-body';
-    panel.appendChild(head);
-    panel.appendChild(body);
-    return { panel, body, head };
-  }
-
-  function loadedPhotoTotal() {
-    return state.dates.reduce((sum, item) => sum + Number(item.count || 0), 0);
-  }
-
-  function activeScopeLabel() {
-    if (!state.activeCategory) return '全部照片';
-    if (state.activeCategory === FAVORITE_CATEGORY) return '收藏照片';
-    return '分类：' + state.activeCategory;
-  }
-
-  function appendSettingsSwitch(body, title, detail, checked, onChange) {
-    const label = document.createElement('label');
-    label.className = 'settings-switch-row';
-    const textWrap = document.createElement('span');
-    const strong = document.createElement('strong');
-    strong.textContent = title;
-    const small = document.createElement('small');
-    small.textContent = detail || '';
-    textWrap.appendChild(strong);
-    if (detail) textWrap.appendChild(small);
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = !!checked;
-    const control = document.createElement('i');
-    control.setAttribute('aria-hidden', 'true');
-    label.appendChild(textWrap);
-    label.appendChild(input);
-    label.appendChild(control);
-    input.addEventListener('change', () => onChange(input.checked));
-    body.appendChild(label);
-    return input;
-  }
-
-  function renderInterfaceSettings() {
-    const wrap = settingsStack();
-
-    const gallery = createSettingsPanel('图库');
-    const rangeRow = document.createElement('div');
-    rangeRow.className = 'settings-range-row';
-    const rangeLabel = document.createElement('span');
-    rangeLabel.textContent = '缩略图大小';
-    const range = document.createElement('input');
-    range.type = 'range';
-    range.min = '112';
-    range.max = '280';
-    range.step = '1';
-    range.value = String(state.galleryItemSize);
-    const readout = document.createElement('output');
-    readout.value = String(state.galleryItemSize);
-    readout.textContent = state.galleryItemSize + ' px';
-    range.addEventListener('input', () => {
-      applyGalleryItemSize(range.value);
-      readout.value = String(state.galleryItemSize);
-      readout.textContent = state.galleryItemSize + ' px';
-    });
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'ghost-btn';
-    reset.textContent = '重置';
-    reset.addEventListener('click', () => {
-      range.value = '168';
-      applyGalleryItemSize(168);
-      readout.value = String(state.galleryItemSize);
-      readout.textContent = state.galleryItemSize + ' px';
-    });
-    rangeRow.appendChild(rangeLabel);
-    rangeRow.appendChild(range);
-    rangeRow.appendChild(readout);
-    rangeRow.appendChild(reset);
-    gallery.body.appendChild(rangeRow);
-    wrap.appendChild(gallery.panel);
-
-    const lightbox = createSettingsPanel('灯箱');
-    appendSettingsSwitch(
-      lightbox.body,
-      '打开灯箱时显示参数',
-      '',
-      state.lightboxInfoPreferredVisible,
-      (checked) => PS.setLightboxInfoVisible(checked),
-    );
-    appendSettingsSwitch(
-      lightbox.body,
-      '详细参数默认折叠',
-      '',
-      state.lightboxInfoDetailsCollapsed,
-      (checked) => PS.setLightboxInfoDetailsCollapsed(checked),
-    );
-    const layout = document.createElement('div');
-    layout.className = 'settings-inline-tools';
-    const layoutText = document.createElement('span');
-    const sizeText = state.lightboxInfoPreferredSize
-      ? state.lightboxInfoPreferredSize.width + ' × ' + state.lightboxInfoPreferredSize.height
-      : '自动尺寸';
-    layoutText.textContent = '面板尺寸：' + sizeText;
-    const resetPosition = document.createElement('button');
-    resetPosition.type = 'button';
-    resetPosition.className = 'ghost-btn';
-    resetPosition.textContent = '恢复默认位置';
-    resetPosition.addEventListener('click', () => {
-      const position = PS.defaultLightboxInfoPosition();
-      state.lightboxInfoPreferredPosition = position;
-      state.lightbox.infoX = position.x;
-      state.lightbox.infoY = position.y;
-      PS.clampLightboxInfoPosition();
-      call('set_lightbox_info_position', position).then((res) => {
-        if (!res || !res.success) throw new Error(res && res.message ? res.message : '参数面板位置保存失败');
-        showToast('参数面板位置已重置');
-      }).catch((err) => showToast(String(err && err.message ? err.message : err), 'error'));
-    });
-    layout.appendChild(layoutText);
-    layout.appendChild(resetPosition);
-    lightbox.body.appendChild(layout);
-    wrap.appendChild(lightbox.panel);
-
-    const quick = createSettingsPanel('快速调整 · 默认折叠');
-    const sections = PS.quickEditCollapsedSections();
-    appendSettingsSwitch(
-      quick.body,
-      '影调',
-      '',
-      sections.tone,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { tone: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      '饱和度与色温',
-      '',
-      sections.color,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { color: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      '效果',
-      '',
-      sections.effects,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { effects: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      '黑白混色',
-      '',
-      sections.blackWhite,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { blackWhite: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      '色调分离',
-      '',
-      sections.splitTone,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { splitTone: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      'HSL',
-      '',
-      sections.hsl,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { hsl: checked })),
-    );
-    appendSettingsSwitch(
-      quick.body,
-      'LUT',
-      '',
-      sections.lut,
-      (checked) => PS.setQuickEditCollapsedSections(Object.assign({}, PS.quickEditCollapsedSections(), { lut: checked })),
-    );
-    wrap.appendChild(quick.panel);
-    els.settingsBody.appendChild(wrap);
-  }
-
-  function renderShortcutsSettings() {
-    const wrap = settingsStack();
-    const intro = createSettingsPanel('快捷键');
-    const groups = [
-      {
-        title: '图库',
-        items: [
-          { keys: ['Ctrl', 'F'], text: '搜索照片' },
-          { keys: ['Ctrl', '滚轮'], text: '调整照片墙缩略图' },
-          { keys: ['Alt'], text: '立即显示悬停照片参数' },
-          { keys: ['C'], text: '打开或关闭对比选图' },
-          { keys: ['F'], text: '收藏或取消收藏悬停照片' },
-          { keys: ['E'], text: '编辑悬停照片笔记' },
-          { keys: ['R'], text: '编辑当前日期笔记' },
-          { keys: ['S'], text: '设置悬停照片分类' },
-        ],
-      },
-      {
-        title: '快速调整',
-        items: [
-          { keys: ['Q'], text: '在图库选择照片快速调整' },
-          { keys: ['灯箱', 'Q'], text: '调整当前照片' },
-          { keys: ['Ctrl', 'S'], text: '保存调整结果' },
-          { keys: ['Ctrl', 'Z'], text: '撤销调整' },
-          { keys: ['Esc'], text: '退出快速调整或关闭弹层' },
-        ],
-      },
-      {
-        title: '灯箱',
-        items: [
-          { keys: ['滚轮'], text: '缩放图片' },
-          { keys: ['←'], text: '上一张' },
-          { keys: ['→'], text: '下一张' },
-          { keys: ['i'], text: '显示或隐藏参数面板按钮' },
-        ],
-      },
-    ];
-    groups.forEach((group) => {
-      const block = document.createElement('section');
-      block.className = 'settings-shortcut-group';
-      const title = document.createElement('h3');
-      title.textContent = group.title;
-      block.appendChild(title);
-      group.items.forEach((item) => {
-        const row = document.createElement('div');
-        row.className = 'settings-shortcut-row';
-        const keys = document.createElement('span');
-        keys.className = 'settings-shortcut-keys';
-        item.keys.forEach((key) => {
-          const kbd = document.createElement('kbd');
-          kbd.textContent = key;
-          keys.appendChild(kbd);
-        });
-        const textEl = document.createElement('span');
-        textEl.textContent = item.text;
-        row.appendChild(keys);
-        row.appendChild(textEl);
-        block.appendChild(row);
-      });
-      intro.body.appendChild(block);
-    });
-    wrap.appendChild(intro.panel);
-    els.settingsBody.appendChild(wrap);
-  }
-
-  function renderAboutSettings() {
-    const wrap = settingsStack();
-    const panel = createSettingsPanel('关于', '');
-    panel.body.innerHTML = [
-      '<div class="settings-row-item">' +
-      '<div><strong>PicScanner <span class="about-version">v2.2.0</span></strong><small>Himpq developed with Codex · 语义集锦 · 详情灯箱</small></div>' +
-      '<span>构建 ' + PS.escapeHtml(APP_BUILD || '--') + '</span>' +
-      '</div>',
-      '<div class="settings-row-item">' +
-      '<div><strong>项目主页</strong><small>' + PS.escapeHtml(PROJECT_URL) + '</small></div>' +
-      '<div class="settings-row-controls"><button id="open-project-url" class="ghost-btn" type="button">打开</button></div>' +
-      '</div>',
-    ].join('');
-    panel.body.querySelector('#open-project-url').addEventListener('click', () => {
-      call('open_external_url', PROJECT_URL).catch(console.warn);
-    });
-    wrap.appendChild(panel);
-    els.settingsBody.appendChild(wrap);
-  }
-
-  function exportPresetPayload(overrides) {
-    return normalizeExportPreset(Object.assign({}, state.exportPreset, overrides || {}));
-  }
-
-  function saveExportPreset(overrides, statusEl) {
-    const preset = exportPresetPayload(overrides);
-    state.exportPreset = preset;
-    if (statusEl) statusEl.textContent = '保存中...';
-    return call('set_export_preset', preset).then((res) => {
-      if (!res || !res.success) throw new Error(res && res.message ? res.message : '导出预设保存失败');
-      state.exportPreset = normalizeExportPreset(res.preset);
-      if (statusEl) statusEl.textContent = '已保存';
-      return state.exportPreset;
-    }).catch((err) => {
-      if (statusEl) statusEl.textContent = String(err && err.message ? err.message : err);
-      throw err;
-    });
-  }
-
-  function renderExportSettings() {
-    const preset = currentExportPreset();
-    const wrap = settingsStack();
-    const panel = createSettingsPanel('导出预设');
-    panel.body.innerHTML = [
-      '<label class="settings-switch-row">' +
-      '<span><strong>启用导出预设</strong></span>' +
-      '<input id="export-preset-enabled" type="checkbox"><i aria-hidden="true"></i>' +
-      '</label>',
-      '<div class="settings-row-item">' +
-      '<div><strong>自动导出目录</strong><small id="export-preset-status"></small></div>' +
-      '<div class="settings-row-controls">' +
-      '<span id="export-preset-path" class="settings-path-chip"></span>' +
-      '<button id="export-preset-folder" class="ghost-btn" type="button">选择目录</button>' +
-      '<button id="export-preset-clear" class="ghost-btn" type="button">清空</button>' +
-      '</div>' +
-      '</div>',
-      '<div class="settings-row-item settings-row-stacked">' +
-      '<div><strong>命名模板</strong></div>' +
-      '<input id="export-preset-template" class="settings-text-input" type="text" spellcheck="false">' +
-      '</div>',
-      '<div class="settings-token-row">' +
-      '<code>{origin_name}</code><code>{date}</code><code>{Y}</code><code>{M}</code><code>{D}</code><code>{len_name}</code><code>{aperture}</code><code>{iso}</code><code>{shutter}</code>' +
-      '</div>',
-    ].join('');
-    els.settingsBody.appendChild(wrap);
-
-    const enabled = wrap.querySelector('#export-preset-enabled');
-    const path = wrap.querySelector('#export-preset-path');
-    const choose = wrap.querySelector('#export-preset-folder');
-    const clear = wrap.querySelector('#export-preset-clear');
-    const input = wrap.querySelector('#export-preset-template');
-    const status = wrap.querySelector('#export-preset-status');
-
-    enabled.checked = !!preset.enabled;
-    path.textContent = preset.destination || '未设置';
-    path.classList.toggle('empty', !preset.destination);
-    input.value = preset.template || '{origin_name}';
-    status.textContent = preset.enabled
-      ? (preset.destination ? '点击导出时会直接使用该目录和模板，不再询问目录' : '启用后未设置目录时仍会询问导出目录')
-      : '导出时会询问目录，并保留原目录层级';
-
-    enabled.addEventListener('change', () => {
-      saveExportPreset({ enabled: enabled.checked }, status).catch(console.warn);
-    });
-    input.addEventListener('blur', () => {
-      saveExportPreset({ template: input.value || '{origin_name}' }, status).then((next) => {
-        input.value = next.template;
-      }).catch(console.warn);
-    });
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        input.blur();
-      }
-    });
-    choose.addEventListener('click', () => {
-      status.textContent = '选择目录...';
-      call('choose_export_folder').then((folder) => {
-        if (!folder || !folder.success) {
-          status.textContent = folder && folder.cancelled ? '已取消' : (folder && folder.message ? folder.message : '选择目录失败');
-          return;
-        }
-        return saveExportPreset({ destination: folder.path, enabled: true, template: input.value || '{origin_name}' }, status).then((next) => {
-          enabled.checked = !!next.enabled;
-          path.textContent = next.destination || '未设置';
-          path.classList.toggle('empty', !next.destination);
-        });
-      }).catch((err) => {
-        status.textContent = String(err && err.message ? err.message : err);
-      });
-    });
-    clear.addEventListener('click', () => {
-      saveExportPreset({ destination: '' }, status).then((next) => {
-        path.textContent = next.destination || '未设置';
-        path.classList.toggle('empty', !next.destination);
-      }).catch(console.warn);
-    });
-  }
-
-  function renderStorageSettings() {
-    const list = document.createElement('div');
-    list.className = 'storage-list';
-    list.textContent = '读取中...';
-    els.settingsBody.appendChild(list);
-    call('list_storage_sources').then((res) => {
-      if (!res || !res.success) throw new Error(res && res.message ? res.message : '读取存储列表失败');
-      renderStorageRows(list, res.sources || []);
-    }).catch((err) => {
-      list.className = 'settings-empty';
-      list.textContent = String(err);
-    });
-  }
-
-  function renderStorageRows(list, sources, options) {
-    const compact = !!(options && options.compact);
-    const hideSourceId = !!(options && options.hideSourceId);
-    const currentRootPath = String((options && options.currentRootPath) || '').toLowerCase();
-    list.textContent = '';
-    if (!sources.length) {
-      list.className = 'settings-empty';
-      list.textContent = '暂无已扫描来源';
-      return;
-    }
-    list.className = compact ? 'storage-list compact' : 'storage-list';
-    sources.forEach((source) => {
-      const row = document.createElement('article');
-      row.className = 'storage-row';
-      if (currentRootPath && String(source.root_path || '').toLowerCase() === currentRootPath) {
-        row.classList.add('active');
-      }
-
-      const cover = document.createElement('div');
-      cover.className = 'storage-cover';
-      const id = document.createElement('div');
-      id.className = 'storage-id';
-      id.textContent = 'ID ' + text(source.id, '--');
-      cover.appendChild(id);
-      if (source.cover_url) {
-        const img = document.createElement('img');
-        img.src = source.cover_url;
-        img.alt = '';
-        cover.appendChild(img);
-      }
-
-      const info = document.createElement('div');
-      info.className = 'storage-info';
-      const sourceId = document.createElement('div');
-      sourceId.className = 'storage-source-id';
-      sourceId.textContent = source.source_id || '';
-      const path = document.createElement('div');
-      path.className = 'storage-path';
-      path.textContent = source.root_path || '';
-      const counts = document.createElement('div');
-      counts.className = 'storage-counts';
-      counts.textContent = '已扫描 ' + Number(source.scanned_count || 0) + ' · 登记 ' + Number(source.registered_count || 0);
-      if (!hideSourceId) info.appendChild(sourceId);
-      info.appendChild(path);
-      info.appendChild(counts);
-
-      row.appendChild(cover);
-      row.appendChild(info);
-      list.appendChild(row);
-    });
-  }
-
-  function renderPluginsSettings() {
-    const wrap = settingsStack();
-    const panel = createSettingsPanel('已装载插件', '来自 app/modules/*/module.json，经 loader 隔离加载');
-    const list = document.createElement('div');
-    list.className = 'settings-panel-body';
-    list.textContent = '读取中...';
-    panel.body.appendChild(list);
-    const note = document.createElement('div');
-    note.className = 'settings-panel-body';
-    note.innerHTML = '<div class="settings-row-item" style="display:block;white-space:normal;line-height:1.6;"><small style="white-space:normal;">状态经 <code style="background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;">get_modules</code> 查询，失败仅打日志跳过。</small></div>';
-    wrap.appendChild(panel);
-    wrap.appendChild(note);
-    els.settingsBody.appendChild(wrap);
-    call('get_modules').then((res)=>{
-      if(!res || !res.success) throw new Error(res && res.message || '获取失败');
-      const mods = res.modules || [];
-      list.textContent='';
-      if(!mods.length){
-        list.textContent='暂无插件';
-        list.className='settings-empty';
-        return;
-      }
-      mods.forEach((m)=>{
-        const row = document.createElement('div');
-        row.className='settings-row-item';
-        row.style.minHeight='64px';
-        row.style.gridTemplateColumns='minmax(0,1fr) auto';
-        const left=document.createElement('div');
-        left.style.display='grid'; left.style.gap='2px'; left.style.minWidth='0';
-        const title=document.createElement('strong');
-        title.style.display='flex'; title.style.alignItems='center'; title.style.gap='8px'; title.style.flexWrap='wrap';
-        title.innerHTML = PS.escapeHtml(m.name||m.key) + ' <span style="font-weight:400;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 6px;height:18px;display:inline-flex;align-items:center;">'+PS.escapeHtml(m.key)+'</span> <span style="font-weight:400;font-size:11px;color:rgba(255,255,255,.6);">v'+PS.escapeHtml(m.version||'')+'</span> <span style="font-size:11px;padding:0 6px;height:18px;border-radius:999px;display:inline-flex;align-items:center;background:rgba(255,255,255,.08);color:var(--muted);border:1px solid var(--line);">已加载</span>';
-        const desc=document.createElement('small');
-        desc.textContent=m.description||'—';
-        desc.style.whiteSpace='normal'; desc.style.lineHeight='1.4';
-        left.appendChild(title); left.appendChild(desc);
-        if(m.frontend_url){
-          const hint=document.createElement('small');
-          hint.textContent='有前端';
-          hint.style.color='#e0a45a';
-          left.appendChild(hint);
-        }
-        const right=document.createElement('span');
-        right.style.display='grid'; right.style.gap='4px'; right.style.justifyItems='end';
-        const badge=document.createElement('span');
-        badge.textContent=m.frontend_url?'有前端':'纯后端';
-        badge.style.fontSize='11px'; badge.style.color='var(--muted)'; badge.style.border='1px solid var(--line)'; badge.style.borderRadius='6px'; badge.style.padding='2px 6px';
-        right.appendChild(badge);
-        row.appendChild(left); row.appendChild(right);
-        list.appendChild(row);
-      });
-      // 异步补充状态（不阻塞主列表）
-      mods.forEach((m)=>{
-        const probe = (m.key==='collections'||m.key==='semantic_search'||m.key==='face_cluster');
-        if(!probe) return;
-        const method = m.key==='collections' ? 'status' : 'index_status';
-        call('module_api', m.key, method, '').then((r)=>{
-          if(!r || !r.success) return;
-          let detail='';
-          if(typeof r.collections==='number') detail = r.collections+' 集锦';
-          if(typeof r.total==='number') detail = (detail?detail+' · ':'') + r.total+' 向量' + (r.running?' · 索引中':'');
-          if(!detail) return;
-          // 找到对应行追加
-          const rows=list.querySelectorAll('.settings-row-item');
-          rows.forEach((row)=>{
-            if(row.textContent.includes(m.key)){
-              const s=row.querySelector('small:last-child');
-              if(s && s.textContent==='有前端'){
-                const d=document.createElement('small');
-                d.textContent=detail; d.style.color='#e0a45a';
-                s.parentNode.insertBefore(d, s);
-              }
-            }
-          });
-        }).catch(()=>{});
-      });
-    }).catch((err)=>{
-      list.className='settings-empty';
-      list.textContent=String(err && err.message || err);
-      list.style.color='var(--danger)';
-    });
-  }
 
   function openStatsPage() {
     if (state.quickEdit.saveSaving) {
@@ -1472,7 +902,6 @@
     setSortOpen(false);
     hideContextMenu();
     hideNoteTooltip();
-    els.statsSource.textContent = state.currentRootPath || '';
     els.statsScreen.classList.remove('leaving');
     show(els.statsScreen);
     els.statsScreen.classList.add('entering');
@@ -1481,327 +910,33 @@
     els.statsScreen._enterTimer = setTimeout(() => {
       els.statsScreen.classList.remove('entering');
     }, 420);
-    setStatsTab(state.statsTab || 'overview');
-    renderStatsWindow();
+    // P3：内容由 Vue 渲染，这里只负责显隐动画与触发取数
+    const bridge = window.PicScannerVue && window.PicScannerVue.stats;
+    if (bridge && typeof bridge.open === 'function') bridge.open();
   }
 
   function closeStatsPage(options) {
     state.statsOpen = false;
-    hideChartTooltip();
+    // P3：不再需要收起图表 tooltip（图表已随统计屏内容移入 Vue）
+    const bridge = window.PicScannerVue && window.PicScannerVue.stats;
+    if (bridge && typeof bridge.close === 'function') bridge.close();
     closePanelScreen(els.statsScreen, options);
   }
 
-  function setStatsTab(key) {
-    state.statsTab = key;
-    if (!els.statsTabs) return;
-    els.statsTabs.querySelectorAll('.stats-tab').forEach((btn) => {
-      btn.classList.toggle('active', String(btn.dataset.statsTab || '') === key);
-    });
-    els.statsScreen.querySelectorAll('.stats-pane').forEach((pane) => {
-      pane.classList.toggle('active', String(pane.dataset.statsPane || '') === key);
-    });
-  }
-
-  function renderStatsWindow() {
-    els.statsStorageList.className = 'storage-list compact';
-    els.statsStorageList.textContent = '读取中...';
-    els.statsSummary.innerHTML = '';
-    [
-      els.hourChart,
-      els.monthChart,
-      els.lensChart,
-      els.focalChart,
-      els.cameraChart,
-      els.apertureChart,
-      els.isoChart,
-      els.shutterChart,
-    ].forEach(renderEmptyChart);
-    call('get_statistics_detail', state.currentRootPath || null, state.currentSourceId || null).then((res) => {
-      if (!res || !res.success) throw new Error(res && res.message ? res.message : '读取统计信息失败');
-      renderStorageRows(els.statsStorageList, res.sources || [], {
-        compact: true,
-        hideSourceId: true,
-        currentRootPath: state.currentRootPath || '',
-      });
-      const stats = res.statistics || {};
-      renderStatsSummary(stats);
-      renderRankChart(els.focalChart, sortFocalBuckets(stats.by_focal_bucket || []), { limit: 8, ordered: true });
-      renderRankChart(els.lensChart, stats.by_lens || [], { limit: 8 });
-      renderHourChart(els.hourChart, stats.by_hour || []);
-      renderMonthChart(els.monthChart, stats.by_month || []);
-      renderRankChart(els.cameraChart, stats.by_model || [], { limit: 5 });
-      renderDistributionChart(els.apertureChart, sortApertureBuckets(stats.by_aperture || []), { limit: 7 });
-      renderDistributionChart(els.isoChart, sortIsoBuckets(stats.by_iso_bucket || []), { limit: 7 });
-      renderDistributionChart(els.shutterChart, sortShutterBuckets(stats.by_shutter || []), { limit: 7 });
-    }).catch((err) => {
-      els.statsStorageList.className = 'settings-empty';
-      els.statsStorageList.textContent = String(err);
-      els.statsSummary.innerHTML = '';
-      [
-        els.hourChart,
-        els.monthChart,
-        els.lensChart,
-        els.focalChart,
-        els.cameraChart,
-        els.apertureChart,
-        els.isoChart,
-        els.shutterChart,
-      ].forEach(renderEmptyChart);
-    });
-  }
-
-  function compactNumber(value) {
-    const n = Number(value || 0);
-    if (n >= 10000) return (n / 10000).toFixed(n >= 100000 ? 0 : 1) + '万';
-    return String(n);
-  }
-
-  function topChartRow(rows) {
-    const data = chartRows(rows || [], 1);
-    return data.length ? data[0] : null;
-  }
-
-  function rowPercent(row, total) {
-    return rowPercentValue(row, total) + '%';
-  }
-
-  function rowPercentValue(row, total) {
-    const base = Number(total || 0);
-    if (!row || base <= 0) return 0;
-    return Math.round(Number(row.count || 0) / base * 100);
-  }
-
-  function statsColor(index) {
-    const alphas = [0.92, 0.78, 0.64, 0.52, 0.42, 0.34, 0.28, 0.22];
-    const a = alphas[Math.abs(Number(index || 0)) % alphas.length];
-    return 'rgba(224,164,90,' + a + ')';
-  }
-
-  function renderStatsSummary(stats) {
-    const total = Number(stats.total_files || 0);
-    const complete = Number(stats.exif_complete || 0);
-    const pending = Number(stats.exif_pending || 0);
-    const completePct = total > 0 ? Math.round(complete / total * 100) : 0;
-    const focal = topChartRow(stats.by_focal_bucket);
-    const lens = topChartRow(stats.by_lens);
-    const aperture = topChartRow(stats.by_aperture);
-    const iso = topChartRow(stats.by_iso_bucket);
-    const cells = [
-      { label: '照片总数', value: compactNumber(total), meta: '当前图库' },
-      { label: 'EXIF 完成', value: completePct + '%', meta: compactNumber(complete) + ' 已读 / ' + compactNumber(pending) + ' 待读' },
-      { label: '常用焦段', value: focal ? focal.name : '未知', meta: focal ? rowPercent(focal, complete) : '暂无数据' },
-      { label: '常用镜头', value: lens ? lens.name : '未知', meta: lens ? rowPercent(lens, complete) : '暂无数据' },
-      { label: '常用光圈', value: aperture ? aperture.name : '未知', meta: aperture ? rowPercent(aperture, complete) : '暂无数据' },
-      { label: '常用 ISO', value: iso ? iso.name : '未知', meta: iso ? rowPercent(iso, complete) : '暂无数据' },
-    ];
-    els.statsSummary.innerHTML = cells.map((cell) => (
-      '<div class="stats-summary-item">' +
-      '<span>' + PS.escapeHtml(cell.label) + '</span>' +
-      '<strong>' + PS.escapeHtml(cell.value) + '</strong>' +
-      '<em>' + PS.escapeHtml(cell.meta) + '</em>' +
-      '</div>'
-    )).join('');
-  }
-
-  function renderEmptyChart(target) {
-    target.innerHTML = '';
-    const empty = document.createElement('div');
-    empty.className = 'chart-empty';
-    empty.textContent = '暂无数据';
-    target.appendChild(empty);
-  }
-
-  function cleanChartName(name) {
-    const value = String(name || '').trim();
-    if (!value || value === '?' || value === '----') return '未知';
-    return value;
-  }
-
-  function chartRows(rows, limit) {
-    return (rows || [])
-      .map((row) => ({ name: cleanChartName(row.name), count: Number(row.count || 0) }))
-      .filter((row) => row.count > 0)
-      .slice(0, limit || rows.length);
-  }
-
-  function renderRankChart(target, rows, options) {
-    const data = chartRows(rows, (options && options.limit) || 8);
-    if (!data.length) {
-      renderEmptyChart(target);
-      return;
-    }
-    const total = chartRows(rows || []).reduce((sum, row) => sum + row.count, 0);
-    const max = data.reduce((best, row) => Math.max(best, row.count), 1);
-    target.innerHTML = '<div class="rank-chart">' + data.map((row, index) => {
-      const percent = total > 0 ? Math.round(row.count / total * 100) : 0;
-      const width = Math.max(4, row.count / max * 100);
-      const color = statsColor(index);
-      const tip = PS.escapeHtml(row.name + ' · ' + row.count + ' 张');
-      return '<div class="rank-row" data-chart-tip="' + tip + '">' +
-        '<div class="rank-index">' + String(index + 1).padStart(2, '0') + '</div>' +
-        '<div class="rank-main"><div class="rank-head"><b>' + PS.escapeHtml(row.name) + '</b><span>' + row.count + ' 张 · ' + percent + '%</span></div>' +
-        '<div class="rank-track"><div style="width:' + width.toFixed(1) + '%;background:' + color + '"></div></div></div>' +
-        '</div>';
-    }).join('') + '</div>';
-  }
-
-  function renderDistributionChart(target, rows, options) {
-    const data = chartRows(rows, (options && options.limit) || 7);
-    if (!data.length) {
-      renderEmptyChart(target);
-      return;
-    }
-    const max = data.reduce((best, row) => Math.max(best, row.count), 1);
-    target.innerHTML = '<div class="distribution-chart">' + data.map((row, index) => {
-      const width = Math.max(4, row.count / max * 100);
-      const color = statsColor(index);
-      const tip = PS.escapeHtml(row.name + ' · ' + row.count + ' 张');
-      return '<div class="distribution-row" data-chart-tip="' + tip + '">' +
-        '<span>' + PS.escapeHtml(row.name) + '</span>' +
-        '<div class="distribution-track"><div style="width:' + width.toFixed(1) + '%;background:' + color + '"></div></div>' +
-        '<em>' + row.count + '</em>' +
-        '</div>';
-    }).join('') + '</div>';
-  }
-
-  function renderHourChart(target, rows) {
-    const lookup = new Map((rows || []).map((row) => [String(row.name || '').slice(0, 2), Number(row.count || 0)]));
-    const data = Array.from({ length: 24 }, (_, hour) => {
-      const key = String(hour).padStart(2, '0');
-      return { name: key + ':00', count: lookup.get(key) || 0 };
-    });
-    if (!data.some((row) => row.count > 0)) {
-      renderEmptyChart(target);
-      return;
-    }
-    const max = data.reduce((best, row) => Math.max(best, row.count), 1);
-    target.innerHTML = '<div class="hour-rhythm">' + data.map((row) => {
-      const height = Math.max(6, row.count / max * 100);
-      const hour = row.name.slice(0, 2);
-      const color = statsColor(row.count === max ? 0 : 1);
-      const showLabel = ['00', '06', '12', '18', '23'].includes(hour);
-      return '<div class="hour-cell" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '">' +
-        '<div class="hour-bar"><div style="height:' + height.toFixed(1) + '%;background:' + color + '"></div></div>' +
-        '<span>' + (showLabel ? hour : '') + '</span>' +
-        '</div>';
-    }).join('') + '</div>';
-  }
-
-  function renderMonthChart(target, rows) {
-    const data = chartRows(rows, 36);
-    if (!data.length) {
-      renderEmptyChart(target);
-      return;
-    }
-    target.innerHTML = '<div class="month-chart">' + data.map((row) => {
-      const label = row.name.slice(2).replace('-', '/');
-      return '<div class="month-cell" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '">' +
-        '<span>' + PS.escapeHtml(label) + '</span><b>' + row.count + '</b>' +
-        '</div>';
-    }).join('') + '</div>';
-  }
-
-  function focalBucketOrder(name) {
-    const value = String(name || '');
-    if (value.includes('?')) return 9999;
-    if (value.startsWith('>')) return 9000 + Number(value.match(/\d+/)?.[0] || 0);
-    if (value.startsWith('<')) return -Number(value.match(/\d+/)?.[0] || 0);
-    return Number(value.match(/\d+/)?.[0] || 999);
-  }
-
-  function sortFocalBuckets(rows) {
-    return (rows || []).slice().sort((a, b) => focalBucketOrder(a.name) - focalBucketOrder(b.name));
-  }
-
-  function sortNamedBuckets(rows) {
-    return (rows || []).slice().sort((a, b) => cleanChartName(a.name).localeCompare(cleanChartName(b.name), 'zh-Hans-CN'));
-  }
-
-  function sortApertureBuckets(rows) {
-    return (rows || []).slice().sort((a, b) => {
-      const left = Number(String(a.name || '').match(/[\d.]+/)?.[0] || 999);
-      const right = Number(String(b.name || '').match(/[\d.]+/)?.[0] || 999);
-      return left - right;
-    });
-  }
-
-  function sortIsoBuckets(rows) {
-    return (rows || []).slice().sort((a, b) => {
-      const left = Number(String(a.name || '').match(/\d+/)?.[0] || 999999);
-      const right = Number(String(b.name || '').match(/\d+/)?.[0] || 999999);
-      return left - right;
-    });
-  }
-
-  function sortShutterBuckets(rows) {
-    const order = ['<1/1000s', '1/1000-1/250s', '1/250-1/60s', '1/60-1/15s', '1/15-1/4s', '1/4-1s', '1s+', '?'];
-    return (rows || []).slice().sort((a, b) => {
-      const left = order.indexOf(String(a.name || ''));
-      const right = order.indexOf(String(b.name || ''));
-      return (left < 0 ? 999 : left) - (right < 0 ? 999 : right);
-    });
-  }
-
-  function renderColumnChart(target, rows, limit) {
-    const data = chartRows(rows, limit || 6);
-    if (!data.length) {
-      renderEmptyChart(target);
-      return;
-    }
-    const max = data.reduce((best, row) => Math.max(best, row.count), 1);
-    const bars = data.map((row) => {
-      const height = Math.max(4, row.count / max * 100);
-      const label = PS.escapeHtml(row.name.replace(/\\s*\\(.+\\)/, ''));
-      return '<div class="bucket-column" data-chart-tip="' + PS.escapeHtml(row.name + ' · ' + row.count + ' 张') + '"><div class="bucket-value">' + row.count + '</div><div class="bucket-track"><div style="height:' + height.toFixed(1) + '%"></div></div><div class="bucket-label">' + label + '</div></div>';
-    }).join('');
-    target.innerHTML = '<div class="bucket-chart">' + bars + '</div>';
-  }
-
-  let chartTooltip = null;
-
-  function ensureChartTooltip() {
-    if (chartTooltip) return chartTooltip;
-    chartTooltip = document.createElement('div');
-    chartTooltip.className = 'chart-tooltip hidden';
-    document.body.appendChild(chartTooltip);
-    return chartTooltip;
-  }
-
-  function positionChartTooltip(ev) {
-    if (!chartTooltip || chartTooltip.classList.contains('hidden')) return;
-    const pad = 12;
-    const rect = chartTooltip.getBoundingClientRect();
-    let x = ev.clientX + 14;
-    let y = ev.clientY + 14;
-    if (x + rect.width > window.innerWidth - pad) x = ev.clientX - rect.width - 14;
-    if (y + rect.height > window.innerHeight - pad) y = ev.clientY - rect.height - 14;
-    chartTooltip.style.left = Math.max(pad, x) + 'px';
-    chartTooltip.style.top = Math.max(pad + 36, y) + 'px';
-  }
-
-  function bindChartTooltip() {
-    els.statsScreen.addEventListener('mousemove', (ev) => {
-      const node = ev.target && ev.target.closest ? ev.target.closest('[data-chart-tip]') : null;
-      if (!node || !els.statsScreen.contains(node)) {
-        hideChartTooltip();
-        return;
-      }
-      const tip = ensureChartTooltip();
-      tip.textContent = node.dataset.chartTip || '';
-      tip.classList.remove('hidden');
-      positionChartTooltip(ev);
-    });
-    els.statsScreen.addEventListener('mouseleave', hideChartTooltip);
-    els.statsTabs.addEventListener('click', (ev) => {
-      const btn = ev.target && ev.target.closest ? ev.target.closest('.stats-tab') : null;
-      if (!btn || !btn.dataset.statsTab) return;
-      setStatsTab(btn.dataset.statsTab);
-    });
-  }
-
-  function hideChartTooltip() {
-    if (chartTooltip) chartTooltip.classList.add('hidden');
-  }
+  // P3 · 统计屏渲染代码已删除
+  //
+  // 原先这里有 27 个函数、约 310 行：renderStatsWindow / renderStatsSummary /
+  // renderRankChart / renderDistributionChart / renderHourChart / renderMonthChart /
+  // renderColumnChart / renderEmptyChart / chartRows / compactNumber / statsColor /
+  // rowPercent / topChartRow / cleanChartName / bindChartTooltip / hideChartTooltip /
+  // positionChartTooltip / ensureChartTooltip / setStatsTab / sortFocalBuckets ...
+  //
+  // 内容改由 frontend/src/islands/StatsScreen.vue 与 components/stats/*.vue 渲染，
+  // 数据来自 stores/stats.js 的 get_statistics_detail。
+  // legacy 侧只保留外层 #stats-screen 的显隐动画（openStatsPage / closeStatsPage）。
+  //
+  // 注意：statsSignature 保留在下方 —— 它被 refreshState() 复用来判断侧边栏
+  // 扫描统计是否变化（与统计屏无关，不能一起删）。
 
   function statsSignature(stats) {
     const tr = stats.time_range || {};
@@ -2489,30 +1624,59 @@
     return Math.max(1, rawWidth - left - right);
   }
 
+  // P2 · 纯函数高度模型
+  //
+  // 布局常量，与 frontend/src/gallery/layout.js 及 style.css 三者必须一致：
+  //   .photo-grid  gap: 10px
+  //   .date-header height: 36px
+  //   .date-more   margin-top: 12px + height: 34px = 46px
+  // 命名带 _FALLBACK 是因为正常路径下应优先取 layout 模块导出的同名常量，
+  // 只有 Vue 包加载失败时才用这里的字面量兜底。
+  const PHOTO_GRID_GAP_FALLBACK = 10;
+  const DATE_HEADER_HEIGHT_FALLBACK = 36;
+  const DATE_MORE_HEIGHT_FALLBACK = 46;
+
+  // 旧实现是「测量 DOM 反推高度」：读 getComputedStyle 的 columnGap/rowGap、
+  // 读 header.offsetHeight、读 more.offsetHeight + marginTop。这有三个问题：
+  //   1) 每次调用都会触发样式重算，滚动时是热点
+  //   2) 高度依赖"已经渲染出来的 DOM"，与 Vue 的数据→DOM 方向相反
+  //   3) 与未来的 Vue PhotoGrid 无法共用公式，必然漂移
+  //
+  // 新实现改为纯计算：高度 = f(照片总数, 条目尺寸, 容器宽度, 常量)。
+  // 公式来自 frontend/src/gallery/layout.js，legacy 与 Vue 共用同一份。
+  function sharedLayout() {
+    return (window.PicScannerVue && window.PicScannerVue.layout) || null;
+  }
+
   function dateSectionIntrinsicHeight(section, dateKey) {
     const grid = section ? section.querySelector('.photo-grid') : null;
-    const header = section ? section.querySelector('.date-header') : null;
     const more = section ? section.querySelector('.date-more') : null;
+    // dateCounts 是权威值；grid.children.length 仅为占位符渲染期的下限保护
+    // （读 children.length 只是查 DOM 结构，不触发布局，开销可忽略）
     const total = Math.max(
       0,
       Number(state.dateCounts.get(dateKey) || 0),
       grid ? grid.children.length : 0,
     );
     const itemSize = Math.max(1, Number(state.galleryItemSizeRaw || state.galleryItemSize || 168));
-    const gridStyle = grid ? window.getComputedStyle(grid) : null;
-    const columnGap = numericCssPx(gridStyle && gridStyle.columnGap, 10);
-    const rowGap = numericCssPx(gridStyle && gridStyle.rowGap, columnGap);
     const gridWidth = Math.max(1, Number(grid && grid.clientWidth || section && section.clientWidth || galleryContentWidth()));
-    const columns = Math.max(1, Math.floor((gridWidth + columnGap) / (itemSize + columnGap)));
+    const moreHeight = more ? DATE_MORE_HEIGHT_FALLBACK : 0;
+
+    const L = sharedLayout();
+    if (L && typeof L.dateSectionHeight === 'function') {
+      return L.dateSectionHeight({
+        count: total,
+        itemSize,
+        gridWidth,
+        moreHeight,
+        headerHeight: DATE_HEADER_HEIGHT_FALLBACK,
+      }).height;
+    }
+    // 兜底：Vue 包未加载时退化为等价的内联公式（不再读 DOM 几何）
+    const columns = Math.max(1, Math.floor((gridWidth + PHOTO_GRID_GAP_FALLBACK) / (itemSize + PHOTO_GRID_GAP_FALLBACK)));
     const rows = total > 0 ? Math.ceil(total / columns) : 0;
-    const gridHeight = rows > 0 ? rows * itemSize + Math.max(0, rows - 1) * rowGap : 0;
-    const headerStyle = header ? window.getComputedStyle(header) : null;
-    const headerHeight = numericCssPx(headerStyle && headerStyle.height, header ? header.offsetHeight : 36);
-    const moreStyle = more ? window.getComputedStyle(more) : null;
-    const moreHeight = numericCssPx(moreStyle && moreStyle.height, more ? more.offsetHeight : 34)
-      + numericCssPx(moreStyle && moreStyle.marginTop, 12)
-      + numericCssPx(moreStyle && moreStyle.marginBottom, 0);
-    return Math.max(80, Math.ceil(headerHeight + gridHeight + moreHeight));
+    const gridHeight = rows > 0 ? rows * itemSize + Math.max(0, rows - 1) * PHOTO_GRID_GAP_FALLBACK : 0;
+    return Math.max(80, Math.ceil(DATE_HEADER_HEIGHT_FALLBACK + gridHeight + moreHeight));
   }
 
   function updateDateReserve(dateKey) {
@@ -4234,7 +3398,6 @@
   PS.closeSettingsPage = closeSettingsPage;
   PS.openStatsPage = openStatsPage;
   PS.closeStatsPage = closeStatsPage;
-  PS.renderStatsWindow = renderStatsWindow;
   PS.ensureDateSection = ensureDateSection;
   PS.jumpToDate = jumpToDate;
   PS.ensureComparePanel = ensureComparePanel;
@@ -4261,15 +3424,8 @@
   PS.scheduleRenderBufferCheck = scheduleRenderBufferCheck;
   PS.scheduleGalleryZoomFrame = scheduleGalleryZoomFrame;
   PS.finishGalleryZoom = finishGalleryZoom;
-  PS.renderSettingsBody = renderSettingsBody;
-  PS.setSettingsTab = setSettingsTab;
   PS.closePanelScreen = closePanelScreen;
-  PS.loadedPhotoTotal = loadedPhotoTotal;
-  PS.activeScopeLabel = activeScopeLabel;
-  PS.compactNumber = compactNumber;
   PS.currentExportPreset = currentExportPreset;
-  PS.exportPresetPayload = exportPresetPayload;
-  PS.saveExportPreset = saveExportPreset;
   PS.showCategoryExportMenu = showCategoryExportMenu;
   PS.beginCategoryExport = beginCategoryExport;
   PS.openExportConfirm = openExportConfirm;
@@ -4278,7 +3434,6 @@
   PS.normalizeLightboxInfoSize = normalizeLightboxInfoSize;
   PS.viewedCategoryKey = viewedCategoryKey;
   PS.closeFilterCombos = closeFilterCombos;
-  PS.bindChartTooltip = bindChartTooltip;
   PS.zoomGalleryItemsFromWheel = zoomGalleryItemsFromWheel;
   PS.updateAllDateReserves = updateAllDateReserves;
   PS.imageHasSource = imageHasSource;

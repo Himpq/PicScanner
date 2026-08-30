@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, onBeforeUnmount, computed, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useQuickEditStore } from '../stores/quickEdit.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 import QuickEditSliders from '../quickedit/QuickEditSliders.vue';
 import QuickEditHeader from '../components/quickedit/QuickEditHeader.vue';
 import QuickEditHistogram from '../components/quickedit/QuickEditHistogram.vue';
@@ -14,14 +15,9 @@ const activeTab = ref('adjust');
 
 function setTab(key) { activeTab.value = key; }
 
-onMounted(() => {
-  store.hydrateFromLegacy();
-  const timer = setInterval(() => store.hydrateFromLegacy(), 900);
-  window.__quickEditShellSyncTimer = timer;
-});
-onBeforeUnmount(() => {
-  if (window.__quickEditShellSyncTimer) { clearInterval(window.__quickEditShellSyncTimer); delete window.__quickEditShellSyncTimer; }
-});
+// P1：快速调整开关走 app.js 的 PS.notifyVue()，由 rAF 合并驱动；
+// 代理未安装时才回退 900ms 轮询
+useLegacySync(() => store.hydrateFromLegacy(), 900);
 
 const slidersRef = ref(null);
 function syncSliders() {

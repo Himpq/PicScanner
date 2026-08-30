@@ -124,119 +124,41 @@
     els.sourceScreen.classList.add('entering');
   }
 
-  function sourceEmpty(textValue) {
-    const item = document.createElement('div');
-    item.className = 'source-empty';
-    item.textContent = textValue;
-    return item;
-  }
+  // P3 · 来源首页渲染代码已删除
+  //
+  // 原先这里有 6 个函数：sourceEmpty / updateSourcePageCounts / sourceSummaryText /
+  // selectSource / sourceCard / renderSources。
+  // 来源网格改由 frontend/src/islands/SourceScreen.vue 渲染，
+  // 数据来自 stores/source.js 的 get_sources / choose_folder。
+  //
+  // 保留在下方：showSourceStartupError / loadSources / chooseFolder ——
+  // 它们是启动与切换来源的编排入口，只是把渲染委托给了 Vue。
 
-  function updateSourcePageCounts(connectedCount) {
-    if (els.sourceConnectedCount) els.sourceConnectedCount.textContent = String(Math.max(0, Number(connectedCount || 0)));
-  }
-
-  function sourceSummaryText(item) {
-    if (item.unavailable) return item.unavailable_message || '来源未插入或已更换';
-    const summary = item.summary || {};
-    if (summary.has_cache) {
-      return '已扫描 ' + (summary.visible_files || summary.total_files || 0) + ' 张';
-    }
-    if (item.exists === false) return '目录不可用';
-    return item.subtitle || item.path;
-  }
-
-  function selectSource(item) {
-    state.selectedSource = item;
-    PS.enterSourceWorkspace(item);
-  }
-
-  function sourceCard(item, extraClass) {
-    const btn = document.createElement('button');
-    btn.className = 'source-item' + (extraClass ? ' ' + extraClass : '');
-    if (item.kind === 'add') {
-      btn.innerHTML = '<div><div class="plus">+</div><div class="source-title">添加文件夹</div><div class="source-sub">选择后会记忆到本机</div></div>';
-      btn.addEventListener('click', chooseFolder);
-      return btn;
-    }
-    const summary = item.summary || {};
-    const coverUrl = summary.cover_url || '';
-    if (coverUrl) btn.classList.add('has-cover');
-    if (item.unavailable) {
-      btn.classList.add('unavailable');
-      btn.disabled = true;
-      btn.title = item.unavailable_message || '来源未插入或已更换';
-    }
-    btn.innerHTML = [
-      '<div class="source-cover"></div>',
-      '<div class="source-content">',
-      '<div class="source-kicker"></div>',
-      '<div class="source-title"></div>',
-      '<div class="source-sub"></div>',
-      '</div>',
-    ].join('');
-    if (coverUrl) btn.querySelector('.source-cover').style.backgroundImage = 'url("' + coverUrl + '")';
-    btn.querySelector('.source-kicker').textContent = item.kind === 'source' ? '来源' : '目录';
-    btn.querySelector('.source-title').textContent = item.title || item.path;
-    btn.querySelector('.source-sub').textContent = sourceSummaryText(item);
-    if (!item.unavailable) btn.addEventListener('click', () => selectSource(item));
-    return btn;
-  }
-
-  function renderSources(data) {
-    if (!data || !Array.isArray(data.sources)) throw new Error('来源响应缺少 sources 列表');
-    const sources = data.sources;
-    updateSourcePageCounts(sources.length);
-
-    els.driveList.innerHTML = '';
-    if (!sources.length) els.driveList.appendChild(sourceEmpty('没有发现可用来源'));
-    sources.forEach((item) => els.driveList.appendChild(sourceCard(item)));
-    els.driveList.appendChild(sourceCard({ kind: 'add' }, 'add'));
-    if (window.PicScannerSourceConflicts) {
-      window.PicScannerSourceConflicts.show(
-        (data && data.source_conflicts) || [],
-        (data && data.source_discovery_errors) || []
-      );
-    }
-  }
 
   function showSourceStartupError(error, context) {
     const prefix = String(context || '来源加载失败');
-    const message = error instanceof Error ? error.message : String(error || '未知错误');
     console.error('[PicScannerStartup] ' + prefix, error);
-    updateSourcePageCounts(0);
-    els.driveList.innerHTML = '';
-    const item = document.createElement('div');
-    item.className = 'source-item unavailable';
-    item.textContent = prefix + ': ' + message;
-    els.driveList.appendChild(item);
+    // P3：#drive-list 已随来源首页移入 Vue，错误改由 store 显示在来源网格里
+    const bridge = window.PicScannerVue && window.PicScannerVue.source;
+    if (bridge && typeof bridge.showError === 'function') {
+      bridge.showError(prefix, error);
+    }
     if (window.PicScannerSourceConflicts) window.PicScannerSourceConflicts.close();
     show(els.sourceScreen);
   }
 
   function loadSources() {
+    // P3：渲染交给 Vue，这里只负责在 Vue 不可用时兜底显示错误
+    const bridge = window.PicScannerVue && window.PicScannerVue.source;
+    if (bridge && typeof bridge.refresh === 'function') {
+      bridge.refresh().catch((err) => showSourceStartupError(err, '来源加载失败'));
+      return;
+    }
     call('get_sources').then((data) => {
       PS.applyAppConfig(data && data.config);
-      renderSources(data);
     }).catch((err) => {
       showSourceStartupError(err, '来源加载失败');
     });
-  }
-
-  function chooseFolder() {
-    call('choose_folder').then((res) => {
-      if (!res || !res.success) {
-        if (!res || !res.cancelled) console.warn(res && res.message);
-        return loadSources();
-      }
-      loadSources();
-      selectSource({
-        kind: 'folder',
-        path: res.path,
-        title: res.title || res.path,
-        subtitle: res.path,
-        summary: res.summary || {},
-      });
-    }).catch(console.error);
   }
 
   function resetGallery() {
@@ -10927,6 +10849,8 @@
     endQuickEditFrameImageDrag();
     hideQuickEditCurvePanel();
     state.quickEdit.open = false;
+    // P1：通知 Vue 同步（rAF 合并，同一同步块内的后续赋值一并生效）
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
     state.quickEdit.batchMode = false;
     state.quickEdit.batchPhotos = [];
     state.quickEdit.batchIndex = 0;
@@ -11056,6 +10980,8 @@
     PS.hideNoteTooltip();
     const el = ensureQuickEdit();
     state.quickEdit.open = true;
+    // P1：通知 Vue 同步（rAF 合并，同一同步块内的后续赋值一并生效）
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
     state.quickEdit.photo = current;
     state.quickEdit.params = quickEditDefaultParams();
     state.quickEdit.committedParams = null;
@@ -11236,12 +11162,16 @@
         showToast('对比模式暂不支持快速调整');
         return true;
       }
-      // 集锦上下文：优先用集锦列表中的完整照片，避免 state.lightbox.photo 为精简版
-      if (PS.__collectionsContext && PS.__collectionsContext.list && PS.__collectionsContext.list.length) {
-        const ctx = PS.__collectionsContext;
-        const cur = ctx.list[ctx.index] || state.lightbox.photo;
-        if (cur) return openQuickEdit(cur);
-      }
+      // 集锦上下文：优先用集锦列表中的完整照片，避免 state.lightbox.photo 为精简版。
+      // P3：PS.__collectionsContext 已废除，集锦翻页列表搬到 lightbox store 的 navList，
+      // 当前这张由 store.photo 持有（本身就是集锦里那份完整对象）。
+      try {
+        const ls = window.__lightboxStore;
+        if (ls && Array.isArray(ls.navList) && ls.navList.length) {
+          const cur = ls.photo || state.lightbox.photo;
+          if (cur) return openQuickEdit(cur);
+        }
+      } catch {}
       if (!state.lightbox.photo) {
         // 尝试从 Vue store 取
         try {
@@ -11701,7 +11631,6 @@
 
   PS.renderSortMenu();
 
-  els.refreshSources.addEventListener('click', loadSources);
   els.cancelScan.addEventListener('click', () => hide(els.confirmModal));
   els.confirmScan.addEventListener('click', PS.beginScan);
   els.cancelExport.addEventListener('click', PS.closeExportConfirm);
@@ -11725,11 +11654,10 @@
     }
   });
   els.changeSource.addEventListener('click', showSourceChooser);
-  els.sourceOpenSettings.addEventListener('click', () => PS.openSettingsPage({ fromSource: true }));
   els.openSettings.addEventListener('click', () => PS.openSettingsPage());
-  els.closeSettings.addEventListener('click', () => PS.closeSettingsPage());
+  // P3：#close-settings 按钮已随设置屏内容移入 Vue 组件（SettingsScreen.vue 内直接调 PS.closeSettingsPage）
   els.openStats.addEventListener('click', PS.openStatsPage);
-  els.closeStats.addEventListener('click', PS.closeStatsPage);
+  // P3：#close-stats 按钮已随统计屏内容移入 Vue 组件（StatsScreen.vue 内直接调 PS.closeStatsPage）
   els.addCategory.addEventListener('click', PS.addCategoryFromSidebar);
   els.scanAll.addEventListener('click', PS.toggleScanAll);
   els.readExif.addEventListener('click', PS.toggleExifRead);
@@ -12325,7 +12253,7 @@
   initializeBatchControllers();
   PS.bindGalleryHover();
   PS.bindNoteTooltip();
-  PS.bindChartTooltip();
+  // P3：图表 tooltip 绑定随统计屏渲染代码一起删除
 
   function nextRefreshDelay() {
     if (state.scanRunning || state.exifRunning) return 850;
@@ -12354,7 +12282,9 @@
     call('get_startup_state').then((data) => {
       const sources = (data && data.sources) || {};
       PS.applyAppConfig(sources.config);
-      renderSources(sources);
+      // P3：来源列表改由 Vue 渲染。这里复用 loadSources() 走同一条 get_sources 链路，
+      // 避免启动态与后续刷新分叉出两套渲染逻辑。
+      loadSources();
       const scan = (data && data.scan) || {};
       if (!PS.enterCachedWorkspace(scan)) {
         show(els.sourceScreen);

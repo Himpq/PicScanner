@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { LIGHTBOX_MIN_ZOOM, LIGHTBOX_MAX_ZOOM, LIGHTBOX_ZOOM_STEP } from '../constants.js';
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function isVueLightboxEnabled() {
@@ -36,6 +36,26 @@ export const useLightboxStore = defineStore('lightbox', () => {
   const previewing = ref(false);
 
   const navHoverSide = ref('');
+
+  // P3 · 翻页列表（集锦上下文）
+  //
+  // 为空时按图库顺序翻页（orderedPhotos），不循环；
+  // 非空时（进入集锦灯箱）按这个列表翻页并首尾循环。
+  //
+  // 这段取代了 legacy collections.js 里的 patchLightboxNav()：
+  // 那一版用 document 捕获监听 + 包装 __lightboxStore.prev/next + 轮询重试，
+  // 靠 DOM 事件顺序去「抢」翻页控制权，既脆又难排查。
+  // 现在翻页列表是 store 的一等状态，stepPhoto 直接读。
+  const navList = ref(null);
+
+  function setNavList(list) {
+    navList.value = Array.isArray(list) && list.length ? list : null;
+  }
+  function clearNavList() {
+    navList.value = null;
+  }
+  // 灯箱一关就丢掉集锦上下文（等价于 legacy 在灯箱关闭后清 __collectionsContext）
+  watch(open, (isOpen) => { if (!isOpen) navList.value = null; });
 
   function hydrateFromLegacy() {
     const PS = window.PS;
@@ -253,22 +273,53 @@ export const useLightboxStore = defineStore('lightbox', () => {
     return [];
   }
 
+  // legacy 模式下 LightboxShell 会把 PS.lightboxNext/Prev 劫持成 store.nextPhoto/prevPhoto，
+  // 而这一支又反过来调 PS.lightboxNext —— 没有守卫就是无限递归。
+  let stepping = false;
+
   function stepPhoto(dir) {
+    if (stepping) return;
+    stepping = true;
+    try {
+      stepPhotoInner(dir);
+    } finally {
+      stepping = false;
+    }
+  }
+
+  function stepPhotoInner(dir) {
+    const nav = navList.value;
+    const inCollection = Array.isArray(nav) && nav.length > 0;
+    const list = inCollection ? nav : orderedPhotos();
+    if (!list.length || !photo.value) return;
+
+    const curId = String(photo.value.id || photo.value.photo_id || '');
+    let idx = list.findIndex((p) => String(p.id || p.photo_id) === curId);
+    if (idx < 0) idx = 0;
+
+    // 集锦内首尾循环（复刻 patchLightboxNav 的取模行为）；图库顺序则不循环，走到头就停
+    const nextIdx = inCollection ? (idx + dir + list.length) % list.length : idx + dir;
+    const next = list[nextIdx];
+    if (!next) return;
+
     if (isVueLightboxEnabled()) {
-      const list = orderedPhotos();
-      if (!list.length || !photo.value) return;
-      const curId = String(photo.value.id || photo.value.photo_id || '');
-      let idx = list.findIndex(p=> String(p.id||p.photo_id)===curId);
-      if (idx < 0) idx = 0;
-      const next = list[idx + dir];
-      if (next) {
-        photo.value = next;
-        zoom.value = 1; panX.value = 0; panY.value = 0;
-        syncToLegacy();
-        if (window.PS && window.PS.state && window.PS.state.lightbox) { window.PS.state.lightbox.photo = next; }
-      }
+      photo.value = next;
+      zoom.value = 1; panX.value = 0; panY.value = 0;
+      syncToLegacy();
+      if (window.PS && window.PS.state && window.PS.state.lightbox) { window.PS.state.lightbox.photo = next; }
       return;
     }
+
+    // legacy 灯箱模式：有集锦列表时仍要按集锦翻页（PS.openLightbox 此时未被劫持，指向原生实现）
+    if (inCollection) {
+      photo.value = next;
+      zoom.value = 1; panX.value = 0; panY.value = 0;
+      syncToLegacy();
+      const PS = window.PS;
+      if (PS && typeof PS.openLightbox === 'function') PS.openLightbox(next);
+      return;
+    }
+
     const PS = window.PS;
     if (dir > 0 && PS && typeof PS.lightboxNext === 'function') PS.lightboxNext();
     if (dir < 0 && PS && typeof PS.lightboxPrev === 'function') PS.lightboxPrev();
@@ -302,6 +353,7 @@ export const useLightboxStore = defineStore('lightbox', () => {
     infoVisible, infoX, infoY, infoW, infoH, infoDetailsCollapsed,
     open, compareOpen, compareSelected, compareLocked, navHoverSide,
     loading, previewing,
+    navList, setNavList, clearNavList,
     focalText, apscText,
     hydrateFromLegacy, syncToLegacy,
     formatZoom, parseZoomInput, setZoom, zoomIn, zoomOut, applyZoomInput,

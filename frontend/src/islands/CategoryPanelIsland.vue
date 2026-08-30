@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, onBeforeUnmount } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useGalleryStore } from '../stores/gallery.js';
+import { useLegacySync } from '../composables/useLegacySync.js';
 
 const store = useGalleryStore();
 const categories = computed(() => store.categories);
@@ -29,13 +30,11 @@ function addCategory() {
 
 function label(cat) { return String(cat?.label || cat?.name || '未分类'); }
 
-let timer = null;
 onMounted(() => {
-  store.hydrateFromLegacy();
   if (!store.categories.length) store.fetchCategories().catch(()=>{});
-  timer = setInterval(() => store.hydrateFromLegacy(), 400);
 });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+// P1：真源代理生效后由 rAF 合并同步驱动；代理未安装时才回退 400ms 轮询
+useLegacySync(() => store.hydrateFromLegacy(), 400);
 </script>
 
 <template>

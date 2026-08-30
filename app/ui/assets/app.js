@@ -11756,25 +11756,9 @@
       els.lightboxZoom.blur();
     }
   });
-  els.searchClose.addEventListener('click', PS.closeSearchPanel);
-  els.searchInput.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      PS.closeSearchPanel();
-    }
-  });
-  els.searchInput.addEventListener('input', PS.scheduleSearch);
-  els.searchPanel.querySelectorAll('[data-search-scope]').forEach((btn) => {
-    btn.addEventListener('click', () => PS.setSearchScope(btn.dataset.searchScope));
-  });
-  els.searchPanel.addEventListener('click', (ev) => {
-    const result = ev.target && ev.target.closest ? ev.target.closest('.search-result') : null;
-    if (!result) return;
-    PS.selectSearchResult(result);
-    const item = state.searchResults.get(String(result.dataset.searchKey || ''));
-    if (item) PS.openSearchResult(item);
-  });
+  // P4：vanilla 搜索面板的事件绑定已删除（#search-panel 属于已删除的
+  // #vanilla-toolbar）。搜索输入、范围切换、结果点击、Esc 关闭全部由
+  // Vue 工具栏（GalleryToolbar.vue）处理；Esc 关闭由组件自身的 onKey 负责。
   window.addEventListener('keydown', PS.handleCategoryPickerKey, true);
   window.addEventListener('beforeunload', (ev) => {
     if (!state.quickEdit.saveSaving && !(PS.batchProcessingController && PS.batchProcessingController.isRunning())) return undefined;

@@ -2783,301 +2783,31 @@
     return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
   }
 
-  function canShowSearchPanel() {
-    return (
-      els.workspace
-      && !els.workspace.classList.contains('hidden')
-      && !state.settingsOpen
-      && !state.statsOpen
-      && els.lightbox.classList.contains('hidden')
-    );
-  }
-
-  function openSearchPanel() {
-    if (!canShowSearchPanel()) return false;
-    state.searchOpen = true;
-    hideContextMenu();
-    closeCategoryPicker();
-    setSortOpen(false);
-    closeFilterMenu();
-    closeFilterPop();
-    show(els.searchPanel);
-    requestAnimationFrame(() => {
-      els.searchInput.focus();
-      els.searchInput.select();
-    });
-    scheduleSearch();
-    return true;
-  }
+  // P4 · vanilla 搜索面板整套已删除（296 行 / 19 个函数）
+  //
+  // 原先这里是一整个搜索子系统：canShowSearchPanel / openSearchPanel /
+  // selectSearchResult / setSearchScope / renderSearchMessage / searchSubtitle /
+  // searchMeta / searchResultKey / searchResultTitle / appendHighlightedSearchText /
+  // renderSearchResults / runSearch / scheduleSearch / ensureDateSection /
+  // ensurePhotoLoadedAt / markSearchTargetCard / jumpToSearchPhoto / openSearchResult。
+  //
+  // 它们服务的 #search-panel 属于已删除的 #vanilla-toolbar，事件永远不会触发。
+  // Vue 工具栏（GalleryToolbar.vue）有完整实现：输入走 store.doSearch、
+  // 结果渲染走 store.searchResults、点击跳转走组件自己的 openSearchResult
+  // （滚动到目标并写 PS.state.activeDate，不经过 legacy）。
+  //
+  // 唯一保留的是下面的 closeSearchPanel：它有 12 处外部调用
+  // （打开设置 / 统计 / 灯箱 / 集锦时顺手关掉搜索面板），
+  // 而 state.searchOpen 经真源代理会关掉 Vue 的搜索面板 —— 这是真集成点，不能删。
 
   function closeSearchPanel() {
     if (!state.searchOpen) return;
     state.searchOpen = false;
     clearTimeout(state.searchTimer);
-    hide(els.searchPanel);
-    els.searchInput.blur();
+    // 原先还做 hide(els.searchPanel) 与 els.searchInput.blur()，
+    // 那个面板已随 vanilla 工具栏删除；显隐由 Vue 侧 state.searchOpen 驱动。
   }
 
-  function toggleSearchPanel() {
-    if (state.searchOpen) {
-      closeSearchPanel();
-      return true;
-    }
-    return openSearchPanel();
-  }
-
-  function selectSearchResult(result) {
-    if (!result) return;
-    els.searchPanel.querySelectorAll('.search-result.active').forEach((item) => {
-      item.classList.remove('active');
-    });
-    result.classList.add('active');
-  }
-
-  function setSearchScope(scope) {
-    const clean = String(scope || 'all').trim() || 'all';
-    state.searchScope = clean;
-    els.searchPanel.querySelectorAll('[data-search-scope]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.searchScope === clean);
-    });
-    scheduleSearch({ immediate: true });
-  }
-
-  function renderSearchMessage(message) {
-    state.searchResults.clear();
-    els.searchResults.innerHTML = '<div class="search-empty">' + PS.escapeHtml(message) + '</div>';
-  }
-
-  function searchSubtitle(item) {
-    if (item.type === 'date') {
-      const countText = Number(item.count || 0) + ' 张照片 · EXIF ' + Number(item.exif_count || 0);
-      if (item.search_field === 'date_note') {
-        return PS.joinClean([item.date_key, countText], ' · ');
-      }
-      return countText;
-    }
-    const title = searchResultTitle(item);
-    const filename = String(item.filename || item.relative_path || '').trim();
-    const filenameContext = title && filename && title !== filename ? filename : '';
-    return PS.joinClean([
-      filenameContext,
-      item.date_key,
-      item.model,
-      item.lens_model,
-      item.exposure_time,
-      item.f_number ? 'f/' + item.f_number : '',
-      item.iso ? 'ISO ' + item.iso : '',
-    ], ' · ');
-  }
-
-  function searchMeta(item) {
-    if (item.search_label) return String(item.search_label);
-    if (item.type === 'date') return '日期';
-    if (item.favorite) return '收藏';
-    return item.format_label || item.format || (item.is_raw ? 'RAW' : '');
-  }
-
-  function searchResultKey(item) {
-    if (item.type === 'date') return 'date:' + String(item.date_key || '');
-    return 'photo:' + String(item.id || '');
-  }
-
-  function searchResultTitle(item) {
-    const hit = String(item && item.search_title || '').trim();
-    if (hit) return hit;
-    if (item && item.type === 'date') return item.date_key || '未命名日期';
-    return (item && (item.filename || item.relative_path)) || '未命名照片';
-  }
-
-  function appendHighlightedSearchText(target, text, query) {
-    const value = String(text || '');
-    const terms = String(query || '').trim().split(/\s+/)
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length);
-    if (!value || !terms.length) {
-      target.textContent = value;
-      return;
-    }
-    const lower = value.toLowerCase();
-    const loweredTerms = terms.map((term) => term.toLowerCase());
-    let cursor = 0;
-    while (cursor < value.length) {
-      let matchIndex = -1;
-      let matchLength = 0;
-      loweredTerms.forEach((term) => {
-        const index = lower.indexOf(term, cursor);
-        if (index < 0) return;
-        if (matchIndex < 0 || index < matchIndex || (index === matchIndex && term.length > matchLength)) {
-          matchIndex = index;
-          matchLength = term.length;
-        }
-      });
-      if (matchIndex < 0) {
-        target.appendChild(document.createTextNode(value.slice(cursor)));
-        break;
-      }
-      if (matchIndex > cursor) {
-        target.appendChild(document.createTextNode(value.slice(cursor, matchIndex)));
-      }
-      const mark = document.createElement('mark');
-      mark.textContent = value.slice(matchIndex, matchIndex + matchLength);
-      target.appendChild(mark);
-      cursor = matchIndex + matchLength;
-    }
-  }
-
-  function renderSearchResults(items, query) {
-    state.searchResults.clear();
-    els.searchResults.textContent = '';
-    const count = items.length;
-    els.searchStatus.textContent = count ? '找到 ' + count + ' 个结果' : '没有找到 "' + query + '"';
-    if (!count) {
-      renderSearchMessage('换个关键词或搜索范围试试');
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    items.forEach((item, index) => {
-      const key = searchResultKey(item);
-      state.searchResults.set(key, item);
-      const btn = document.createElement('button');
-      btn.className = 'search-result' + (index === 0 ? ' active' : '');
-      btn.type = 'button';
-      btn.dataset.searchKey = key;
-
-      const thumb = document.createElement('span');
-      thumb.className = 'search-thumb' + (item.type === 'date' ? ' date' : '');
-      const imageUrl = item.type === 'date' ? item.cover_url : item.preview_url;
-      if (imageUrl) {
-        const img = document.createElement('img');
-        img.src = imageUrl;
-        img.alt = '';
-        thumb.appendChild(img);
-      }
-
-      const main = document.createElement('span');
-      main.className = 'search-result-main';
-      const title = document.createElement('strong');
-      if (item.search_title) title.className = 'search-hit-title';
-      appendHighlightedSearchText(title, searchResultTitle(item), query);
-      const subtitle = document.createElement('span');
-      subtitle.textContent = searchSubtitle(item) || item.relative_path || item.path || '';
-      main.appendChild(title);
-      if (subtitle.textContent) main.appendChild(subtitle);
-
-      const meta = document.createElement('span');
-      meta.className = 'search-result-meta';
-      meta.textContent = searchMeta(item);
-
-      btn.appendChild(thumb);
-      btn.appendChild(main);
-      btn.appendChild(meta);
-      fragment.appendChild(btn);
-    });
-    els.searchResults.appendChild(fragment);
-  }
-
-  function runSearch() {
-    if (!state.searchOpen) return;
-    const query = String(els.searchInput.value || '').trim();
-    const seq = ++state.searchSeq;
-    if (!query) {
-      els.searchStatus.textContent = '输入关键词搜索当前来源';
-      renderSearchMessage('可以搜索文件名、日期、相机、镜头、参数、备注或分类');
-      return;
-    }
-    els.searchStatus.textContent = '搜索中...';
-    state.searchResults.clear();
-    call(
-      'search_photos',
-      query,
-      state.currentRootPath || null,
-      state.currentSourceId || null,
-      state.searchScope,
-      40,
-      filterPayload(),
-      state.sortKey
-    ).then((res) => {
-      if (seq !== state.searchSeq) return;
-      if (!res || !res.success) throw new Error(res && res.message ? res.message : '搜索失败');
-      renderSearchResults(res.items || res.photos || [], query);
-    }).catch((err) => {
-      if (seq !== state.searchSeq) return;
-      els.searchStatus.textContent = '搜索失败';
-      renderSearchMessage(String(err));
-      console.warn('[PicScanner] 搜索失败', err);
-    });
-  }
-
-  function scheduleSearch(options) {
-    clearTimeout(state.searchTimer);
-    if (options && options.immediate) {
-      runSearch();
-      return;
-    }
-    state.searchTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
-  }
-
-  function ensureDateSection(dateKey) {
-    const section = document.getElementById('date-' + dateKey);
-    if (section) return Promise.resolve(section);
-    return loadOlderDates({ allowScanRequest: false }).then((loaded) => {
-      const next = document.getElementById('date-' + dateKey);
-      if (next) return next;
-      if (!loaded || state.noMoreDates) return null;
-      return ensureDateSection(dateKey);
-    });
-  }
-
-  function ensurePhotoLoadedAt(dateKey, targetIndex) {
-    const index = Number(targetIndex);
-    if (!Number.isFinite(index) || index < 0) return loadPhotosForDate(dateKey);
-    const loaded = state.photoOffsets.get(dateKey) || 0;
-    if (loaded > index) return Promise.resolve(true);
-    return loadPhotosForDate(dateKey, { limit: index + 1 - loaded }).then(() => {
-      return (state.photoOffsets.get(dateKey) || 0) > index;
-    });
-  }
-
-  function markSearchTargetCard(card) {
-    if (!card) return;
-    card.classList.add('search-target');
-    clearTimeout(card._searchTargetTimer);
-    card._searchTargetTimer = setTimeout(() => {
-      card.classList.remove('search-target');
-    }, 1500);
-  }
-
-  function jumpToSearchPhoto(photo) {
-    if (!photo || !photo.date_key) return;
-    state.photoCache.set(Number(photo.id), photo);
-    ensureDateSection(photo.date_key).then((section) => {
-      if (!section) return;
-      PS.setActiveDate(photo.date_key);
-      return ensurePhotoLoadedAt(photo.date_key, photo.search_offset).then(() => {
-        requestAnimationFrame(() => {
-          const card = els.gallery.querySelector('[data-photo-id="' + Number(photo.id || 0) + '"]');
-          if (!card) {
-            jumpToDate(photo.date_key);
-            return;
-          }
-          card.scrollIntoView({ block: 'center', inline: 'nearest' });
-          markSearchTargetCard(card);
-          PS.scheduleDateHighlight();
-          scheduleVisiblePreviewCheck();
-        });
-      });
-    });
-  }
-
-  function openSearchResult(item) {
-    if (!item) return;
-    closeSearchPanel();
-    if (item.type === 'date') {
-      if (item.date_key) jumpToDate(item.date_key);
-      return;
-    }
-    jumpToSearchPhoto(item);
-  }
 
   function favoriteHoveredPhoto() {
     if (state.quickEdit.picking) return false;
@@ -3367,11 +3097,7 @@
   PS.editHoveredPhotoNote = editHoveredPhotoNote;
   PS.editActiveDateNote = editActiveDateNote;
   PS.editDateNote = editDateNote;
-  PS.openSearchPanel = openSearchPanel;
   PS.closeSearchPanel = closeSearchPanel;
-  PS.toggleSearchPanel = toggleSearchPanel;
-  PS.runSearch = runSearch;
-  PS.setSearchScope = setSearchScope;
   PS.openCategoryPickerForHover = openCategoryPickerForHover;
   PS.closeCategoryPicker = closeCategoryPicker;
   PS.handleCategoryPickerKey = handleCategoryPickerKey;
@@ -3404,7 +3130,6 @@
   PS.closeSettingsPage = closeSettingsPage;
   PS.openStatsPage = openStatsPage;
   PS.closeStatsPage = closeStatsPage;
-  PS.ensureDateSection = ensureDateSection;
   PS.jumpToDate = jumpToDate;
   PS.ensureComparePanel = ensureComparePanel;
   PS.toggleComparePanel = toggleComparePanel;
@@ -3418,7 +3143,6 @@
   PS.cardFromLastPointer = cardFromLastPointer;
   PS.activePointerCard = activePointerCard;
   PS.isTypingTarget = isTypingTarget;
-  PS.canShowSearchPanel = canShowSearchPanel;
   PS.updateDateCounts = updateDateCounts;
   PS.invalidateDatePhotoOrder = invalidateDatePhotoOrder;
   PS.setDateCover = setDateCover;
@@ -3452,7 +3176,4 @@
   PS.closeComparePanel = closeComparePanel;
   PS.updateCompareCardHighlights = updateCompareCardHighlights;
   PS.hideNoteTooltip = hideNoteTooltip;
-  PS.selectSearchResult = selectSearchResult;
-  PS.scheduleSearch = scheduleSearch;
-  PS.openSearchResult = openSearchResult;
 })(window.PS);

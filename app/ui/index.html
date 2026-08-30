@@ -59,43 +59,11 @@
       </aside>
 
       <section class="gallery-wrap">
-        <!-- PR5 双轨：Vue Toolbar 原位岛，vanilla 保留可回退 -->
-        <div id="vanilla-toolbar">
-          <div class="toolbar">
-            <button id="change-source" class="ghost-btn back-btn" title="返回选择来源"><span aria-hidden="true">←</span><span>返回上一级</span></button>
-            <button id="open-settings" class="icon-btn" title="设置">⚙</button>
-            <button id="open-collections" class="ghost-btn" title="集锦">集锦</button>
-            <button id="open-stats" class="ghost-btn">统计信息</button>
-            <button id="filter-trigger" class="ghost-btn filter-trigger" type="button">筛选</button>
-            <div id="sort-dropdown" class="sort-dropdown">
-              <button id="sort-trigger" class="sort-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
-                <span id="sort-label">拍摄时间 新到旧</span>
-                <svg class="sort-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-              <div id="sort-menu" class="sort-menu hidden" role="listbox"></div>
-            </div>
-            <div class="toolbar-spacer"></div>
-            <span id="time-range" class="time-range"></span>
-          </div>
-          <section id="search-panel" class="search-panel hidden" aria-label="搜索">
-            <div class="search-box">
-              <div class="search-input-row">
-                <span class="search-icon" aria-hidden="true">⌕</span>
-                <input id="search-input" class="search-input" type="search" placeholder="搜索文件名、镜头、日期或备注" autocomplete="off" />
-                <button id="search-close" class="icon-btn search-close" title="关闭搜索" type="button">×</button>
-              </div>
-              <div class="search-scope-row">
-                <button class="search-scope active" type="button" data-search-scope="all">全部</button>
-                <button class="search-scope" type="button" data-search-scope="filename">文件名</button>
-                <button class="search-scope" type="button" data-search-scope="metadata">参数</button>
-                <button class="search-scope" type="button" data-search-scope="note">备注</button>
-              </div>
-              <div id="search-status" class="search-status">输入关键词搜索当前来源</div>
-              <div id="search-results" class="search-results"></div>
-            </div>
-          </section>
-        </div>
-        <div id="vue-toolbar" class="hidden" aria-label="工具栏（Vue）"></div>
+        <!-- P4：vanilla 工具栏已删除（vue_toolbar 常开，它本来就不可达）。
+             留着它才是 #sort-dropdown 重复 id 的根源 —— getElementById
+             只会命中文档里第一个，于是"点在下拉外"的判定指向了错误节点。
+             Vue 工具栏（#vue-toolbar）是唯一实现。 -->
+        <div id="vue-toolbar" aria-label="工具栏（Vue）"></div>
         <div id="gallery-scroll" class="gallery-scroll">
           <div id="gallery" class="gallery"></div>
           <div id="older-sentinel" class="older-sentinel">检查更早日期...</div>
@@ -264,7 +232,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=1788097385478"></script>
+  <script src="assets/vue/picscanner-vue.js?v=1788099094362"></script>
   <script src="assets/app_core.js?v=plugins-20260901-1"></script>
   <script src="assets/app_gallery.js?v=fix6-20260901"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>

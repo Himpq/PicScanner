@@ -11872,13 +11872,10 @@
       ev.stopPropagation();
       return;
     }
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'f') {
-      if (PS.toggleSearchPanel()) {
-        ev.preventDefault();
-        ev.stopPropagation();
-      }
-      return;
-    }
+    // Ctrl+F 已移除：搜索面板归 Vue 工具栏（GalleryToolbar.vue 在捕获阶段处理）。
+    // 以前这里在**冒泡**阶段再切一次，而 Vue 在捕获阶段已经打开过，
+    // 两边读写同一个被代理的 state.searchOpen —— 结果开了就关。
+    // PS.toggleSearchPanel 仍保留导出，但没有调用方了。
     if (state.quickEdit.open && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
       showQuickEditSaveConfirm();
       ev.preventDefault();
@@ -12193,10 +12190,9 @@
     ev.stopPropagation();
   });
   document.addEventListener('click', (ev) => {
-    // 不能用 els.sortDropdown.contains()：页面上有两个 .sort-dropdown
-    // （#vanilla-toolbar 里一个、Vue 工具栏里一个），getElementById 只会拿到前一个。
-    // 于是点 Vue 的排序按钮时 contains() 判定为"不在下拉内"，菜单开了就被立刻关掉。
-    // 改成按 class 向上找，两份下拉都能正确识别。
+    // 不能用某个 .sort-dropdown 元素去 contains()：getElementById 只认文档里第一个
+    // 匹配项，第二份下拉会被误判为"点击在外部"而刚打开就被关掉。
+    // 改成按 class 向上找，与具体是哪一个节点无关。
     const clickedSortDropdown = ev.target && ev.target.closest ? ev.target.closest('.sort-dropdown') : null;
     if (state.sortOpen && !clickedSortDropdown) PS.setSortOpen(false);
     if (state.quickEdit.histogramMenuOpen && state.quickEdit.el) {

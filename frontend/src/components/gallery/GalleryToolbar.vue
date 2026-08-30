@@ -190,12 +190,22 @@ function openCollections(){ const PS=window.PS; if(PS&&PS.openCollections) PS.op
 // 全局点击收起
 function onDocClick(e){
   const t=e.target; if(!(t instanceof Element)) return;
-  // 用 class 而不是 #sort-dropdown：页面上有两份 .sort-dropdown
-  // （#vanilla-toolbar 里一份、Vue 工具栏一份），id 选择器只会命中前一份。
+  // 用 class 而不是 #sort-dropdown：#id 选择器与 getElementById 都只认文档里
+  // 第一个匹配项，一旦将来再出现第二份 .sort-dropdown 就会指向错误节点。
+  // 按 class 向上找则与 id 无关。
   if (!t.closest('.sort-dropdown') && !t.closest('.sort-trigger')) store.sortOpen=false;
 }
 function onKey(e){
-  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='f'){ e.preventDefault(); toggleSearch(); }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='f'){
+    e.preventDefault();
+    // 必须阻止冒泡：legacy 在 document 的**冒泡**阶段还有一条 Ctrl+F 处理器
+    // （app.js 的 keydown 监听），它调 PS.toggleSearchPanel()，读的是同一个
+    // 被代理的 state.searchOpen —— 我们刚打开，它就判定"已打开"于是立刻关掉。
+    // 捕获阶段先跑 + 不阻止传播 = 开了就关。
+    e.stopPropagation();
+    toggleSearch();
+    return;
+  }
   if (e.key==='Escape'){
     // 优先关闭画廊对比面板（legacy），避免被 Vue 的 filter/search 抢占导致 Esc 失效
     try {
@@ -237,14 +247,16 @@ onBeforeUnmount(()=>{
   clearTimeout(debounceTimer);
 });
 
+// 时间范围：直接由 store 的日期分组推算。
+// 以前先去读 #time-range 的 textContent（由 app_gallery 的 applyScanData 写入），
+// 那是隐藏的 vanilla 工具栏里的节点 —— 依赖一个看不见的 DOM 来渲染看得见的 UI，
+// 正是重复 id / 双轨那类 bug 的温床。vanilla 工具栏删除后该节点已不存在。
 const timeRange = computed(()=>{
-  const PS=window.PS;
-  const el=document.getElementById('time-range');
-  // 优先读 DOM 的 time-range（由 app_gallery 写入），否则从 dates 推断
-  if (el && el.textContent.trim()) return el.textContent.trim();
   const ds = store.dates;
-  if (ds.length) return ds[0].date_key + ' → ' + ds[ds.length-1].date_key;
-  return '';
+  if (!ds.length) return '';
+  const first = ds[0].date_key;
+  const last = ds[ds.length - 1].date_key;
+  return first === last ? first : first + ' → ' + last;
 });
 </script>
 
@@ -292,8 +304,9 @@ const timeRange = computed(()=>{
     </div>
       </div>
 
-      <!-- 不要加 id="sort-dropdown"：#vanilla-toolbar 里已经有一个同 id 的节点，
-           重复 id 会让 getElementById / #id 选择器只命中前者。 -->
+      <!-- 不要在这里加 id="sort-dropdown"。历史上页面上有两份同 id 节点，
+           getElementById 只命中文档里第一个，导致“点了下拉却判定在外部”的怪 bug。
+           排序状态完全由 store.sortOpen 驱动，不需要 id 寻址。 -->
       <div class="sort-dropdown">
         <button class="sort-trigger" type="button" aria-haspopup="listbox" :aria-expanded="sortOpen?'true':'false'" @click="toggleSort">
           <span>{{ sortLabel }}</span>

@@ -380,14 +380,9 @@ const ISLANDS = [
     defaultOn: false,
     mount: (el) => window.PicScannerVue.mountCategoryPanelIsland(el),
   },
-  {
-    name: 'toolbar',
-    vueId: 'vue-toolbar',
-    vanillaId: 'vanilla-toolbar',
-    flag: 'vue_toolbar',
-    defaultOn: true,
-    mount: (el) => window.PicScannerVue.mountToolbarIsland(el),
-  },
+  // toolbar 不在这里：#vanilla-toolbar 已删除，Vue 工具栏是唯一实现，
+  // 必须无条件挂载。若仍走开关，用户 localStorage 里残留的 vue_toolbar=0
+  // 会让整个工具栏消失。见下方 autoMountToolbar()。
   {
     name: 'lightbox',
     vueId: 'vue-lightbox',
@@ -442,6 +437,22 @@ function autoMountIsland(cfg) {
 }
 
 ISLANDS.forEach(autoMountIsland);
+
+// 工具栏常驻：vanilla 版已删除，没有回退分支，不做开关判定。
+(function autoMountToolbar() {
+  const el = document.getElementById('vue-toolbar');
+  if (!el) return;
+  el.classList.remove('hidden');
+  const tryMount = () => {
+    if (window.PicScannerVue && typeof window.PicScannerVue.mountToolbarIsland === 'function') {
+      window.PicScannerVue.mountToolbarIsland(el);
+    } else {
+      setTimeout(tryMount, 100);
+    }
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryMount);
+  else tryMount();
+}());
 
 // P3：统计屏 / 设置屏常驻挂载。
 //

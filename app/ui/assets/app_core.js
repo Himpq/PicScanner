@@ -512,6 +512,34 @@
     return EXIF_STATUS_LABELS[status] || status || '等待 EXIF';
   }
 
+  // vanilla 工具栏（#vanilla-toolbar）已随 vue_toolbar 常开而移除。
+  //
+  // 但它里面的节点 id 仍被一批 legacy 函数引用，而那些函数又还挂在
+  // 快捷键、applySort、applyFilter 等**活的**路径上（例如 applySort 会调
+  // setSortOpen / renderSortMenu）。直接 getElementById 拿到 null 会让它们在
+  // null 上崩掉。
+  //
+  // 这里对已移除的 id 返回一个游离（未插入文档）的空节点：
+  // classList / innerHTML / textContent / focus / appendChild 全部安全退化为空操作，
+  // 不必逐个函数加 null 判断。这些节点本来就在隐藏的工具栏里、永远不会被看到。
+  //
+  // 注意这是**过渡垫片**：等下方那些 legacy 函数（renderSortMenu / runSearch /
+  // renderSearchResults 等约 800 行）被删除后，本函数连同这些 els 条目一并移除。
+  const REMOVED_WITH_VANILLA_TOOLBAR = new Set([
+    'change-source', 'open-settings', 'open-stats', 'filter-trigger',
+    'sort-trigger', 'sort-label', 'sort-menu', 'time-range',
+    'search-panel', 'search-input', 'search-close', 'search-status', 'search-results',
+  ]);
+  function elById(id) {
+    const found = document.getElementById(id);
+    if (found) return found;
+    if (!REMOVED_WITH_VANILLA_TOOLBAR.has(id)) return null;
+    const stub = document.createElement('div');
+    stub.id = id;
+    stub.classList.add('hidden');
+    return stub;
+  }
+
   const els = {
     sourceScreen: document.getElementById('source-screen'),
     workspace: document.getElementById('workspace'),
@@ -546,24 +574,24 @@
     exifMessage: document.getElementById('exif-message'),
     addCategory: document.getElementById('add-category'),
     categoryList: document.getElementById('category-list'),
-    timeRange: document.getElementById('time-range'),
-    changeSource: document.getElementById('change-source'),
-    openSettings: document.getElementById('open-settings'),
-    openStats: document.getElementById('open-stats'),
-    filterTrigger: document.getElementById('filter-trigger'),
+    timeRange: elById('time-range'),
+    changeSource: elById('change-source'),
+    openSettings: elById('open-settings'),
+    openStats: elById('open-stats'),
+    filterTrigger: elById('filter-trigger'),
     scanAll: document.getElementById('scan-all'),
     readExif: document.getElementById('read-exif'),
     // sortDropdown 已移除：页面上有两份 .sort-dropdown（vanilla 一份、Vue 一份），
     // getElementById 只会拿到前者，用它做 contains() 判定会误关 Vue 的下拉。
     // 全局点击关闭器改为按 class 向上找（app.js 的 document click 监听）。
-    sortTrigger: document.getElementById('sort-trigger'),
-    sortLabel: document.getElementById('sort-label'),
-    sortMenu: document.getElementById('sort-menu'),
-    searchPanel: document.getElementById('search-panel'),
-    searchInput: document.getElementById('search-input'),
-    searchClose: document.getElementById('search-close'),
-    searchStatus: document.getElementById('search-status'),
-    searchResults: document.getElementById('search-results'),
+    sortTrigger: elById('sort-trigger'),
+    sortLabel: elById('sort-label'),
+    sortMenu: elById('sort-menu'),
+    searchPanel: elById('search-panel'),
+    searchInput: elById('search-input'),
+    searchClose: elById('search-close'),
+    searchStatus: elById('search-status'),
+    searchResults: elById('search-results'),
     galleryScroll: document.getElementById('gallery-scroll'),
     gallery: document.getElementById('gallery'),
     olderSentinel: document.getElementById('older-sentinel'),

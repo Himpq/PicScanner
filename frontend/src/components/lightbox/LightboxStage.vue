@@ -37,7 +37,15 @@ function resolveZoomView(oldPan, oldZoom, nextZoom, anchor) {
   };
 }
 
-function applyDisplaySize(photoObj, naturalW, naturalH) {
+// 与 legacy app_lightbox.js 的 applyLightboxImageDisplaySize 对齐。
+//
+// allowUpscale 是原版就有的参数（本组件第一版复刻时漏了，写死成"永不放大"）：
+//   - 显示缩略图阶段必须传 true —— 缩略图只有几百像素，不放大就会以原始小尺寸
+//     显示在舞台中央，然后等高清解码完才"跳"一下变大。
+//     这正是"灯箱先显示缩略图、没放大到原图尺寸"的症状。
+//   - EXIF 宽高缺失时也要放大（此时只能靠缩略图的 natural 尺寸反推）
+//   - 高清就位后不放太（保持 1:1，避免小图被拉糊）
+function applyDisplaySize(photoObj, naturalW, naturalH, options) {
   const p = photoObj || photo.value;
   if (!p) { displayW.value=''; displayH.value=''; return; }
   let w = Number(p.width) || naturalW || 0;
@@ -50,7 +58,7 @@ function applyDisplaySize(photoObj, naturalW, naturalH) {
   const maxW = Math.max(1, (stageRef.value?.clientWidth || window.innerWidth - 56));
   const maxH = Math.max(1, (stageRef.value?.clientHeight || window.innerHeight - titlebar - 116));
   const fit = Math.min(maxW / w, maxH / h);
-  const scale = Math.min(1, fit); // 不放大
+  const scale = options && options.allowUpscale ? fit : Math.min(1, fit);
   displayW.value = Math.max(1, w * scale).toFixed(2) + 'px';
   displayH.value = Math.max(1, h * scale).toFixed(2) + 'px';
 }
@@ -108,6 +116,12 @@ function loadForPhoto(p) {
   const hd = p.lightbox_url || p.original_url || cached.lightbox_url || cached.original_url || '';
   previewUrl.value = thumb && thumb!==hd ? thumb : '';
   hdUrl.value = hd;
+  // 有 EXIF 宽高就立刻按它定显示尺寸并放大到舞台，不等缩略图解码。
+  // 少了这一步，缩略图会先以它自己的几百像素显示在舞台中央，
+  // 等高清解码完再"跳"一下变大 —— 就是"缩略图没放大到原图尺寸"的观感。
+  if (previewUrl.value && Number(p.width) > 0 && Number(p.height) > 0) {
+    applyDisplaySize(p, 0, 0, { allowUpscale: true });
+  }
   // 初始状态：有缩略则 previewing+loading，无缩略则 loading
   if (previewUrl.value) { store.previewing = true; store.loading = true; }
   else if (hd) { store.loading = true; }
@@ -116,13 +130,13 @@ function loadForPhoto(p) {
   if (previewUrl.value) {
     // 设缩略后异步校正尺寸
     nextTick(()=>{
-      const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(!isCurrent()) return; applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight); }).catch(()=>{}); }; pre.src=previewUrl.value;
+      const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=>{ if(!isCurrent()) return; applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight, { allowUpscale: !Number(p.width) || !Number(p.height) }); }).catch(()=>{}); }; pre.src=previewUrl.value;
     });
   } else {
     // 无缩略时若可预览则后台生成缩略 — 成功后同步置 previewing
     if ((p.previewable || cached.previewable) && Number(p.id)) {
       const call2 = PS && PS.call ? PS.call.bind(PS) : (window.pywebview?.api ? (m,...a)=>window.pywebview.api[m](...a):null);
-      if (call2) call2('get_photo_preview', Number(p.id)).then(res=>{ if(!isCurrent()) return; const t=res && res.success && res.photo && res.photo.preview_url; if(t){ previewUrl.value=t; store.previewing=true; nextTick(()=>{ const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=> applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight)).catch(()=>{}); }; pre.src=t; }); }}).catch(()=>{ if(isCurrent() && !hdUrl.value) store.loading=false; });
+      if (call2) call2('get_photo_preview', Number(p.id)).then(res=>{ if(!isCurrent()) return; const t=res && res.success && res.photo && res.photo.preview_url; if(t){ previewUrl.value=t; store.previewing=true; nextTick(()=>{ const pre=new Image(); pre.decoding='async'; pre.onload=()=>{ if(!isCurrent()) return; const v=pre.decode?pre.decode():Promise.resolve(); v.then(()=> applyDisplaySize(p, pre.naturalWidth, pre.naturalHeight, { allowUpscale: !Number(p.width) || !Number(p.height) })).catch(()=>{}); }; pre.src=t; }); }}).catch(()=>{ if(isCurrent() && !hdUrl.value) store.loading=false; });
     }
   }
   // 高清：若无 hd 但可预览则后台生成

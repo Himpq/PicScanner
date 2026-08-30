@@ -2808,6 +2808,69 @@
     // 那个面板已随 vanilla 工具栏删除；显隐由 Vue 侧 state.searchOpen 驱动。
   }
 
+  // 下面三个是「从搜索结果跳到具体照片」的能力，Vue 工具栏要调用它们。
+  //
+  // 上一轮删 vanilla 搜索面板时误把它们一起删了，导致 Vue 侧的跳转退化成
+  // "只滚到日期分区" —— 因为分区内的照片是 legacy 虚拟化渲染的，
+  // Vue store 的 fetchPhotosForDate 只更新 Pinia、不会创建任何 .photo-card，
+  // 于是 querySelector 永远找不到目标卡片。
+  //
+  // 结论：**凡是操作 #gallery 内部 DOM 的逻辑都归 legacy**，
+  // Vue 只有数据、没有虚拟化信息，不能自己实现跳转。
+
+  // 确保某个日期分区已渲染；未渲染则持续拉更早的日期直到它出现（或没有更多）
+  function ensureDateSection(dateKey) {
+    const section = document.getElementById('date-' + dateKey);
+    if (section) return Promise.resolve(section);
+    return loadOlderDates({ allowScanRequest: false }).then((loaded) => {
+      const next = document.getElementById('date-' + dateKey);
+      if (next) return next;
+      if (!loaded || state.noMoreDates) return null;
+      return ensureDateSection(dateKey);
+    });
+  }
+
+  // 加载到「目标下标」为止：一次请求直接要够，不必分批滚很多次
+  function ensurePhotoLoadedAt(dateKey, targetIndex) {
+    const index = Number(targetIndex);
+    if (!Number.isFinite(index) || index < 0) return loadPhotosForDate(dateKey);
+    const loaded = state.photoOffsets.get(dateKey) || 0;
+    if (loaded > index) return Promise.resolve(true);
+    return loadPhotosForDate(dateKey, { limit: index + 1 - loaded }).then(() => (
+      (state.photoOffsets.get(dateKey) || 0) > index
+    ));
+  }
+
+  // 从一条搜索结果跳到它对应的照片卡片（滚动 + 高亮）。
+  // photo.search_offset 由后端给出（api.py:903），是该照片在日期组内的下标。
+  function jumpToSearchPhoto(photo) {
+    if (!photo || !photo.date_key) return Promise.resolve(false);
+    state.photoCache.set(Number(photo.id), photo);
+    return ensureDateSection(photo.date_key).then((section) => {
+      if (!section) return false;
+      PS.setActiveDate(photo.date_key);
+      return ensurePhotoLoadedAt(photo.date_key, photo.search_offset).then(() => (
+        new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            const card = els.gallery.querySelector('[data-photo-id="' + Number(photo.id || 0) + '"]');
+            if (!card) {
+              jumpToDate(photo.date_key);
+              resolve(false);
+              return;
+            }
+            card.scrollIntoView({ block: 'center', inline: 'nearest' });
+            card.classList.add('search-target');
+            clearTimeout(card._searchTargetTimer);
+            card._searchTargetTimer = setTimeout(() => card.classList.remove('search-target'), 1500);
+            PS.scheduleDateHighlight();
+            scheduleVisiblePreviewCheck();
+            resolve(true);
+          });
+        })
+      ));
+    });
+  }
+
 
   function favoriteHoveredPhoto() {
     if (state.quickEdit.picking) return false;
@@ -3098,6 +3161,8 @@
   PS.editActiveDateNote = editActiveDateNote;
   PS.editDateNote = editDateNote;
   PS.closeSearchPanel = closeSearchPanel;
+  PS.jumpToSearchPhoto = jumpToSearchPhoto;
+  PS.ensureDateSection = ensureDateSection;
   PS.openCategoryPickerForHover = openCategoryPickerForHover;
   PS.closeCategoryPicker = closeCategoryPicker;
   PS.handleCategoryPickerKey = handleCategoryPickerKey;

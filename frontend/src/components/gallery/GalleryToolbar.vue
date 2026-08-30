@@ -114,60 +114,47 @@ function onSearchInput() {
 function onScope(s) { searchScope.value=s; store.doSearch(searchQuery.value, s); }
 function openSearchResult(item) {
   if (!item) return;
-  // 跳转模式：只滚动高亮，不污染 photoCache（搜索结果的缩略项不含 original_url，会导致灯箱加载不出）
   store.setSearchOpen(false);
   const PS = window.PS;
-  if (item.type==='date' && item.date_key) {
-    const el = document.getElementById('date-'+item.date_key);
-    if (el) {
-      el.scrollIntoView({behavior:'smooth', block:'start'});
-      if (PS && PS.state) PS.state.activeDate = item.date_key;
+
+  // ---- 日期型结果 ----
+  // 走 legacy 的 jumpToDate：目标分区可能还没被虚拟化渲染出来，
+  // 直接 getElementById 会得到 null，那就什么都不发生。
+  if (item.type === 'date' && item.date_key) {
+    if (PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(item.date_key);
+    else {
+      const el = document.getElementById('date-' + item.date_key);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     return;
   }
-  // photo：跳转到所在日期 + 目标卡片高亮
-  const dk = String(item.date_key||'');
-  const pid = String(item.id||item.photo_id||'');
-  // 若该 id 在 store/photoCache 已有完整记录，则合并而非覆盖；搜索结果可能只有 preview_url
-  if (pid && PS && PS.state && PS.state.photoCache) {
-    const existing = PS.state.photoCache.get(Number(pid));
-    if (!existing && item) {
-      // 仅当不存在时才缓存，且用 store 的完整记录优先
-      const full = (() => {
-        try { const arr = store.photoCache.get(dk) || []; return arr.find(p=>String(p.id)===pid); } catch { return null; }
-      })();
-      try { PS.state.photoCache.set(Number(pid), full || item); } catch {}
-    }
-  }
-  const tryJump = () => {
-    const card = pid ? document.querySelector('.photo-card[data-photo-id="'+CSS.escape(pid)+'"]') : null;
-    if (card) {
-      card.scrollIntoView({behavior:'smooth', block:'center', inline:'nearest'});
-      card.classList.add('search-target');
-      clearTimeout(card._searchTargetTimer);
-      card._searchTargetTimer = setTimeout(()=>card.classList.remove('search-target'), 1500);
-      if (PS && PS.state && dk) PS.state.activeDate = dk;
-      if (PS && typeof PS.scheduleDateHighlight === 'function') PS.scheduleDateHighlight();
-      return true;
-    }
-    // 若卡片尚未渲染（虚拟滚动未加载），先确保该日期的照片已拉取
-    if (dk) {
-      const storeCount = store.dateCounts.get(dk) || 0;
-      const loaded = (store.photoCache.get(dk)||[]).length;
-      if (storeCount===0 || loaded < storeCount) {
-        store.fetchPhotosForDate(dk).then(()=> setTimeout(tryJump, 220)).catch(()=>{});
-        // 同时尝试让虚拟网格滚动到该日期
-        const dateEl = document.getElementById('date-'+dk);
-        if (dateEl) dateEl.scrollIntoView({behavior:'auto', block:'start'});
-        return false;
+
+  // ---- 照片型结果 ----
+  //
+  // 这里**必须**委托给 legacy 的 PS.jumpToSearchPhoto，不能自己实现。
+  // 原因：分区内的 .photo-card 是 legacy 虚拟化渲染的。
+  // store.fetchPhotosForDate() 只更新 Pinia，不会创建任何 DOM 节点，
+  // 于是 querySelector 永远找不到卡片，跳转就退化成"只滚到日期分区"
+  // —— 这正是之前"搜索跳不到具体图片"的根因。
+  //
+  // legacy 那边还掌握着一个 Vue 没有的关键数据：photo.search_offset
+  // （后端 api.py 给出，是该照片在日期组内的下标），
+  // 配合 loadPhotosForDate({limit: offset+1-loaded}) 可以一次请求加载到目标位置。
+  if (PS && typeof PS.jumpToSearchPhoto === 'function') {
+    try {
+      const r = PS.jumpToSearchPhoto(item);
+      if (r && typeof r.catch === 'function') {
+        r.catch(() => { if (item.date_key && PS.jumpToDate) PS.jumpToDate(item.date_key); });
       }
-      const dateEl2 = document.getElementById('date-'+dk);
-      if (dateEl2) { dateEl2.scrollIntoView({behavior:'smooth', block:'start'}); return true; }
+    } catch {
+      if (item.date_key && PS.jumpToDate) PS.jumpToDate(item.date_key);
     }
-    return false;
-  };
-  // 延迟一帧等待 search-panel 关闭后的布局回流
-  requestAnimationFrame(()=> setTimeout(tryJump, 80));
+    return;
+  }
+
+  // 兜底（legacy 接口缺失时）：至少滚到所在日期
+  const dk = String(item.date_key || '');
+  if (dk && PS && typeof PS.jumpToDate === 'function') PS.jumpToDate(dk);
 }
 function highlightParts(text, query) {
   const t = String(text||''); const q = String(query||'').trim();

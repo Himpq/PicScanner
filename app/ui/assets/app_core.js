@@ -553,7 +553,9 @@
     filterTrigger: document.getElementById('filter-trigger'),
     scanAll: document.getElementById('scan-all'),
     readExif: document.getElementById('read-exif'),
-    sortDropdown: document.getElementById('sort-dropdown'),
+    // sortDropdown 已移除：页面上有两份 .sort-dropdown（vanilla 一份、Vue 一份），
+    // getElementById 只会拿到前者，用它做 contains() 判定会误关 Vue 的下拉。
+    // 全局点击关闭器改为按 class 向上找（app.js 的 document click 监听）。
     sortTrigger: document.getElementById('sort-trigger'),
     sortLabel: document.getElementById('sort-label'),
     sortMenu: document.getElementById('sort-menu'),

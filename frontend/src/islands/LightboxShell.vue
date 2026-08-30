@@ -6,6 +6,7 @@ import LightboxStage from '../components/lightbox/LightboxStage.vue';
 import LightboxInfoPanel from '../components/lightbox/LightboxInfoPanel.vue';
 import LightboxToolbar from '../components/lightbox/LightboxToolbar.vue';
 import CompareView from '../components/lightbox/CompareView.vue';
+import { log } from '../utils/log.js';
 
 const store = useLightboxStore();
 const open = computed(() => store.open);
@@ -148,7 +149,7 @@ function hijackLegacy() {
     PS._origLightboxPrev = PS.lightboxPrev.bind(PS);
     PS.lightboxPrev = () => store.prevPhoto();
   }
-  console.log('[lightbox] hijack ready, vue=' + isVueLightboxEnabled());
+  log('[lightbox] hijack ready, vue=' + isVueLightboxEnabled());
 }
 
 // P1：灯箱开关走 app_lightbox.js 的 PS.notifyVue()，由 rAF 合并驱动；

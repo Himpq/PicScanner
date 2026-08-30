@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { call } from '../bridge/index.js';
 import { SORT_OPTIONS } from '../constants.js';
+import { log, logWarn } from '../utils/log.js';
 
 export const useGalleryStore = defineStore('gallery', () => {
   const dates = ref([]);
@@ -206,7 +207,7 @@ export const useGalleryStore = defineStore('gallery', () => {
       if (!activeDate.value && newDates[0]) activeDate.value = newDates[0].date_key;
       return true;
     } catch (err) {
-      console.warn('[gallery] list_dates failed', err);
+      logWarn('[gallery] list_dates failed', err);
       return false;
     } finally {
       loadingDates.value = false;
@@ -237,13 +238,22 @@ export const useGalleryStore = defineStore('gallery', () => {
   function setActiveCategory(name) {
     const next = name === null ? null : String(name || '');
     if (activeCategory.value === next) return;
-    activeCategory.value = next;
     const PS = window.PS;
+    // 同 applySort：先委托，不提前写 activeCategory，
+    // 否则 legacy 的 `if (state.activeCategory === next) return;` 永远命中，
+    // 切换分类不会刷新画廊。
     if (PS && typeof PS.setActiveCategory === 'function') {
-      PS.setActiveCategory(next);
+      try {
+        PS.setActiveCategory(next);
+      } catch (e) {
+        logWarn('[gallery] PS.setActiveCategory delegate failed', e);
+        return;
+      }
+      activeCategory.value = next;
       hydrateFromLegacy();
-    } else if (PS && PS.state) {
-      PS.state.activeCategory = next;
+    } else {
+      activeCategory.value = next;
+      if (PS && PS.state) PS.state.activeCategory = next;
     }
   }
 
@@ -254,13 +264,25 @@ export const useGalleryStore = defineStore('gallery', () => {
     // 委托 legacy：PhotoGrid 已回退，真实渲染在 #gallery，由 legacy 的 loadOlderDates 驱动
     const PS = (typeof window !== 'undefined' && window.PS) ? window.PS : null;
     if (PS && typeof PS.applySort === 'function') {
-      sortKey.value = key;
+      // 注意：不要在这里先写 sortKey.value。
+      // legacy 里凡是「拿入参与 state 比较」的幂等守卫（applySort 的
+      // `if (sortKey === state.sortKey) return;`），经 P1 代理后读的就是 Pinia 的值；
+      // 提前赋值会让守卫永远命中，resetGallery / loadOlderDates 不执行，
+      // 表现为「选了排序但照片墙不动」。
+      // 正确顺序：先委托，由 legacy 自己写 state.sortKey（经代理同步回 Pinia）。
       // 同步过滤上下文，避免排序时丢失已选筛选
       if (PS.state) {
         try { PS.state.activeFilter = normalizeFilter(activeFilter.value); } catch {}
         if (activeCategory.value !== null) PS.state.activeCategory = activeCategory.value;
       }
-      try { PS.applySort(key); } catch (e) { console.warn('[gallery] PS.applySort delegate failed', e); }
+      try {
+        PS.applySort(key);
+      } catch (e) {
+        logWarn('[gallery] PS.applySort delegate failed', e);
+        return;
+      }
+      // 兜底对齐：legacy 内部的赋值应已同步回来，这里确保 Pinia 与之一致
+      sortKey.value = key;
       return;
     }
     sortKey.value = key;
@@ -353,7 +375,13 @@ export const useGalleryStore = defineStore('gallery', () => {
     const s = String(scope || searchScope.value || 'all');
     searchQuery.value = q;
     searchScope.value = s;
-    try { window.__gallerySearchQuery = q; } catch {}
+    // 不要在这里覆写 window.__gallerySearchQuery。
+    // 该契约对 app/modules/semantic_search/semantic_search.js 是「函数」：
+    //   - :146  `window.__galleryDoSearchSeq && window.__gallerySearchQuery` 真值判断
+    //   - :170  `w.__gallerySearchQuery()` 当函数调用
+    // 这里若赋成字符串，首次搜索后 :170 就会 TypeError（被 try/catch 吞掉，
+    // 静默表现为「语义结果再也不合并进 Vue」）。
+    // 真正的赋值在文件末尾，统一是函数，读的就是上面刚写好的 searchQuery.value。
     if (!q) {
       searchResults.value = [];
       searchStatus.value = '输入关键词搜索当前来源';
@@ -371,16 +399,16 @@ export const useGalleryStore = defineStore('gallery', () => {
       }
     }
     const seq = ++searchSeq;
-    try { window.__galleryDoSearchSeq = seq; } catch {}
+    // 同理，__galleryDoSearchSeq 也保持文件末尾那个函数形态，不在这里赋数字。
     searchStatus.value = '搜索中...';
     try {
       const fp = filterPayload();
       const effRoot = currentRootPath.value || null;
       const effSid = currentSourceId.value || null;
-      console.log('[search][vue] req', {q, root: effRoot, sid: effSid, scope:s, filters: fp, sort: sortKey.value});
+      log('[search][vue] req', {q, root: effRoot, sid: effSid, scope:s, filters: fp, sort: sortKey.value});
       // 完全 Vue 签名：search_photos(query, root_path, source_id, scope, limit, filters, sort_key)
       let res = await call('search_photos', q, effRoot, effSid, s, 40, fp, sortKey.value);
-      console.log('[search][vue] res', res);
+      log('[search][vue] res', res);
       if (seq !== searchSeq) return;
       if (!res || !res.success) throw new Error(res?.message || '搜索失败');
       let items = res.items || res.results || res.photos || [];
@@ -430,9 +458,9 @@ export const useGalleryStore = defineStore('gallery', () => {
             if (added) {
               searchResults.value = merged;
               searchStatus.value = '找到 ' + merged.length + ' 个结果 (含' + added + '条语义)';
-              console.log('[semantic] Vue 追加语义', r.results.length, '→', added);
+              log('[semantic] Vue 追加语义', r.results.length, '→', added);
             }
-          } catch (e) { console.warn('[semantic] Vue 语义追加失败', e); }
+          } catch (e) { logWarn('[semantic] Vue 语义追加失败', e); }
         }, 220);
       }
     } catch (err) {
@@ -441,7 +469,15 @@ export const useGalleryStore = defineStore('gallery', () => {
       searchResults.value = [];
     }
   }
-  // 暴露给旧 hijack 复用，避免双写；同时暴露 store 供事件合并
+  // 暴露给 app/modules/semantic_search/semantic_search.js 的旧 hijack 复用，避免双写。
+  //
+  // 契约（唯一定义处，别的地方一律不要再赋值）：
+  //   __gallerySearchQuery  -> 函数，返回当前查询串（:170 按 `w.__gallerySearchQuery()` 调用）
+  //   __galleryDoSearchSeq  -> 函数，返回当前搜索序号（:146 只做真值判断，函数恒真）
+  // 二者都必须是函数：赋成字符串/数字会让 :170 抛 TypeError，
+  // 而它被 try/catch 吞掉，静默表现为「语义结果再也不合并进 Vue」。
+  // 保持为真值还能让 hijack 判定 vueHandles=true 从而不重复追加语义结果
+  // （Vue 侧确实自己做语义追加，见 doSearch 里的 semantic_search 调用）。
   if (typeof window !== 'undefined') {
     window.__galleryDoSearchSeq = () => searchSeq;
     window.__gallerySearchQuery = () => searchQuery.value;
@@ -505,7 +541,7 @@ export const useGalleryStore = defineStore('gallery', () => {
       photoOffsets.value = new Map(photoOffsets.value);
       return deduped.length > 0;
     } catch (err) {
-      console.warn('[gallery] list_photos failed', dateKey, err);
+      logWarn('[gallery] list_photos failed', dateKey, err);
       return false;
     } finally {
       photoLoading.value.delete(dateKey);

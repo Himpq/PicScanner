@@ -12,6 +12,7 @@
  */
 import { ref } from 'vue';
 import { call } from '../bridge/index.js';
+import { log as logTo } from '../utils/log.js';
 import { PREVIEW_CONCURRENCY } from '../constants.js';
 
 export function usePreviewQueue(options = {}) {
@@ -24,14 +25,9 @@ export function usePreviewQueue(options = {}) {
   const pending = new Set(); // photoId string
   const failed = new Set(); // photoId string that got preview_error
 
+  // 走共享日志出口（utils/log.js），与其余前端模块一致
   function log(...args) {
-    try {
-      const PS = (typeof window !== 'undefined' && window.PS) ? window.PS : null;
-      if (PS && typeof PS.call === 'function') {
-        // 复用后端 log 接口，静默失败
-        PS.call('log', '[previewQueue] ' + args.join(' ')).catch(()=>{});
-      }
-    } catch {}
+    logTo('[previewQueue]', ...args);
   }
 
   function bumpSession() {

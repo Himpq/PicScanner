@@ -114,10 +114,20 @@
     els.sortLabel.textContent = currentSortOption().label;
   }
 
+  // P1 真源代理之后，state.sortKey 读的是 Pinia 的值。
+  // 「拿入参跟 state 比」的幂等守卫因此被打破：调用方只要先写了 Pinia
+  // （或经代理写了 state.sortKey），`sortKey === state.sortKey` 就永远成立，
+  // 下面的 resetGallery / loadOlderDates 再也不执行 —— 表现为「点了排序没反应」。
+  //
+  // 改法：守卫改为跟 legacy 自己「上次真正应用过的值」比，不依赖 state 的读写时序。
+  // 这样无论调用方先赋值还是后赋值，行为都正确。
+  let appliedSortKey = null;
+
   function applySort(sortKey) {
     if (!SORT_OPTIONS.some((item) => item.key === sortKey)) throw new Error('未知排序方式: ' + sortKey);
     setSortOpen(false);
-    if (sortKey === state.sortKey) return;
+    if (sortKey === appliedSortKey) return;
+    appliedSortKey = sortKey;
     state.sortKey = sortKey;
     renderSortMenu();
     PS.resetGallery();
@@ -438,9 +448,14 @@
     });
   }
 
+  // 同 applySort：代理之后不能再拿入参跟 state.activeCategory 比，
+  // 否则 Vue 侧先赋值再委托时守卫永远命中，切换分类不会刷新画廊。
+  let appliedCategory = null;
+
   function setActiveCategory(categoryName) {
     const next = categoryName === null ? null : String(categoryName || '');
-    if (state.activeCategory === next) return;
+    if (next === appliedCategory) return;
+    appliedCategory = next;
     PS.saveLastViewedDate(state.activeDate, { category: state.activeCategory, immediate: true });
     state.activeCategory = next;
     refreshGalleryForCategory();

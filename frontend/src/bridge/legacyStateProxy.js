@@ -17,6 +17,7 @@
 //      行为与改动前完全一致。
 
 import { useGalleryStore } from '../stores/gallery.js';
+import { logWarn } from '../utils/log.js';
 
 const MUTATORS = new Set([
   'set', 'add', 'delete', 'clear',
@@ -78,7 +79,7 @@ function flush() {
     try {
       syncers[i]();
     } catch (e) {
-      console.warn('[PicScannerVue] legacy syncer failed', e);
+      logWarn('[PicScannerVue] legacy syncer failed', e);
     }
   }
 }
@@ -182,7 +183,7 @@ export function installLegacyStateProxy(pinia, { galleryStore } = {}) {
     active = true;
     return true;
   } catch (e) {
-    console.warn('[PicScannerVue] 真源代理安装失败，回退轮询模式', e);
+    logWarn('[PicScannerVue] 真源代理安装失败，回退轮询模式', e);
     active = false;
     return false;
   }

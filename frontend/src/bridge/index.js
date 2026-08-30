@@ -9,7 +9,7 @@ const BRIDGE_POLL_MS = 100;
 const MOCK_ENABLED = typeof window !== 'undefined' && !window.pywebview;
 
 function mockCall(name, ...args) {
-  console.warn('[PicScanner][mock] pywebview not ready, mock call:', name, args);
+  logWarn('[PicScanner][mock] pywebview not ready, mock call:', name, args);
   switch (name) {
     case 'get_sources':
       return Promise.resolve({ success: true, sources: [] });

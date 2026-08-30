@@ -2,21 +2,20 @@
 import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { useGalleryStore } from '../../stores/gallery.js';
 import { SORT_OPTIONS } from '../../constants.js';
+import { logWarn } from '../../utils/log.js';
 
 const store = useGalleryStore();
-// 暴露给 semantic_search.js 的 legacy hijack 兜底合并（非阻塞语义追加）
+// 这里只升级 __galleryStore 为真正的 store 实例（store 模块里给的是一个
+// 只有 get/set 的兜底门面）。
+//
+// __gallerySearchQuery / __galleryDoSearchSeq 的契约**不要在这里覆写** ——
+// 唯一定义在 stores/gallery.js 末尾，两个都必须是函数：
+//   __gallerySearchQuery() 被当函数调用（semantic_search.js:170）
+//   __galleryDoSearchSeq   只做真值判断（:146）
+// 以前这里把 __galleryDoSearchSeq 赋成 0（假值），hijack 就判定
+// vueHandles=false，于是自己又追加一份语义结果，与 Vue 侧重复。
 if (typeof window !== 'undefined') {
   window.__galleryStore = store;
-  window.__gallerySearchQuery = () => String(store.searchQuery||'');
-  // 兼容 hijack 的两种检测形态
-  window.__galleryDoSearchSeq = 0;
-  const _origDoSearch = store.doSearch;
-  // 包裹以同步 seq 供 hijack 判断
-  const _wrapped = async (...a) => {
-    try { window.__galleryDoSearchSeq = (window.__galleryDoSearchSeq||0)+1; } catch {}
-    return _origDoSearch(...a);
-  };
-  // 保持原引用，避免 hijack 误判
 }
 
 // sort
@@ -186,14 +185,14 @@ function changeSource(){ const PS=window.PS; if(PS&&PS.showSourceChooser) PS.sho
 function openStats(){ const PS=window.PS; if(PS&&PS.openStatsPage) PS.openStatsPage(); }
 function openSettings(){ const PS=window.PS; if(PS&&PS.openSettingsPage) PS.openSettingsPage('interface'); }
 function openCollections(){ const PS=window.PS; if(PS&&PS.openCollections) PS.openCollections(); else { // fallback: dispatch legacy button click
-  const btn=document.getElementById('open-collections'); if(btn) btn.click(); else console.warn('openCollections not ready'); } }
+  const btn=document.getElementById('open-collections'); if(btn) btn.click(); else logWarn('openCollections not ready'); } }
 
 // 全局点击收起
 function onDocClick(e){
   const t=e.target; if(!(t instanceof Element)) return;
-  if (!t.closest('#sort-dropdown') && !t.closest('.sort-trigger')) store.sortOpen=false;
-  if (!t.closest('.filter-pop') && !t.closest('.filter-trigger') && !t.closest('.filter-combo')) { /* 保持 filterOpen 由按钮控制，点击外部不自动关 */ }
-  if (filterOpen.value && !t.closest('.filter-pop') && !t.closest('.filter-trigger')) { /* 可选自动关 */ }
+  // 用 class 而不是 #sort-dropdown：页面上有两份 .sort-dropdown
+  // （#vanilla-toolbar 里一份、Vue 工具栏一份），id 选择器只会命中前一份。
+  if (!t.closest('.sort-dropdown') && !t.closest('.sort-trigger')) store.sortOpen=false;
 }
 function onKey(e){
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='f'){ e.preventDefault(); toggleSearch(); }
@@ -251,7 +250,6 @@ const timeRange = computed(()=>{
 
 <template>
   <div class="toolbar-wrap">
-    <div class="toolbar" id="vanilla-toolbar" v-if="false"></div>
     <div class="toolbar" id="vue-toolbar-content">
       <button class="ghost-btn back-btn" title="返回选择来源" @click="changeSource"><span aria-hidden="true">←</span><span>返回上一级</span></button>
       <button class="icon-btn" title="设置" @click="openSettings">⚙</button>
@@ -294,7 +292,9 @@ const timeRange = computed(()=>{
     </div>
       </div>
 
-      <div class="sort-dropdown" id="sort-dropdown">
+      <!-- 不要加 id="sort-dropdown"：#vanilla-toolbar 里已经有一个同 id 的节点，
+           重复 id 会让 getElementById / #id 选择器只命中前者。 -->
+      <div class="sort-dropdown">
         <button class="sort-trigger" type="button" aria-haspopup="listbox" :aria-expanded="sortOpen?'true':'false'" @click="toggleSort">
           <span>{{ sortLabel }}</span>
           <svg class="sort-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>

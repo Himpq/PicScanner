@@ -12193,7 +12193,12 @@
     ev.stopPropagation();
   });
   document.addEventListener('click', (ev) => {
-    if (state.sortOpen && !els.sortDropdown.contains(ev.target)) PS.setSortOpen(false);
+    // 不能用 els.sortDropdown.contains()：页面上有两个 .sort-dropdown
+    // （#vanilla-toolbar 里一个、Vue 工具栏里一个），getElementById 只会拿到前一个。
+    // 于是点 Vue 的排序按钮时 contains() 判定为"不在下拉内"，菜单开了就被立刻关掉。
+    // 改成按 class 向上找，两份下拉都能正确识别。
+    const clickedSortDropdown = ev.target && ev.target.closest ? ev.target.closest('.sort-dropdown') : null;
+    if (state.sortOpen && !clickedSortDropdown) PS.setSortOpen(false);
     if (state.quickEdit.histogramMenuOpen && state.quickEdit.el) {
       const menuWrap = ev.target && ev.target.closest ? ev.target.closest('.quick-edit-histogram-rgb-wrap') : null;
       if (!menuWrap || !state.quickEdit.el.contains(menuWrap)) setQuickEditHistogramMenuOpen(false);

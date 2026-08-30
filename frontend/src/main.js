@@ -34,6 +34,7 @@ import { useCollectionsStore } from './stores/collections.js';
 import CollectionsScreen from './islands/CollectionsScreen.vue';
 import CollectionDetailScreen from './islands/CollectionDetailScreen.vue';
 import SettingsScreen from './islands/SettingsScreen.vue';
+import { logWarn } from './utils/log.js';
 
 const COMPONENTS = {
   storage: StorageSettings,
@@ -146,14 +147,14 @@ function resyncToLegacyPS() {
     syncToLegacyPS();
     syncBridgeToLegacyPS();
   } catch (e) {
-    console.warn('[PicScannerVue] resyncToLegacyPS failed', e);
+    logWarn('[PicScannerVue] resyncToLegacyPS failed', e);
   }
   // P1 真源反转：此刻 window.PS 已存在，把 PS.state 代理到 Pinia。
   // 安装成功后各岛屿不再起轮询定时器；失败则自动回退到原来的轮询，行为不变。
   try {
     installLegacyStateProxy(pinia);
   } catch (e) {
-    console.warn('[PicScannerVue] installLegacyStateProxy failed', e);
+    logWarn('[PicScannerVue] installLegacyStateProxy failed', e);
   }
 }
 

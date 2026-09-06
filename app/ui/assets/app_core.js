@@ -592,9 +592,8 @@
     searchClose: elById('search-close'),
     searchStatus: elById('search-status'),
     searchResults: elById('search-results'),
-    galleryScroll: document.getElementById('gallery-scroll'),
-    gallery: document.getElementById('gallery'),
-    olderSentinel: document.getElementById('older-sentinel'),
+    // P4 收口：#gallery-scroll/#gallery/#older-sentinel 已随 legacy 引擎链删除，
+    // 画廊滚动容器是 #vue-photogrid（Vue PhotoGrid 自持）。
     dateRail: document.getElementById('date-rail-list'),
     exifPop: document.getElementById('exif-pop'),
     lightbox: document.getElementById('lightbox'),

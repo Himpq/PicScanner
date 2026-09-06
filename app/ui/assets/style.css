@@ -4643,12 +4643,6 @@ h1 {
   font-weight: 500;
 }
 
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--photo-min-size), var(--photo-min-size)));
-  gap: 10px;
-}
-
 .photo-card {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -4853,14 +4847,6 @@ h1 {
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: 12px;
-}
-
-.older-sentinel {
-  height: 56px;
-  display: grid;
-  place-items: center;
-  color: rgba(255,255,255,0.34);
   font-size: 12px;
 }
 

@@ -244,8 +244,6 @@
         mergeComparePanePhoto(index, merged);
       }
     });
-    const card = els.gallery.querySelector('[data-photo-id="' + photoId + '"]');
-    if (card) PS.updatePhotoCardMeta(card, merged, true);
     return merged;
   }
 
@@ -990,12 +988,6 @@
         state.photoCache.set(photoId, merged);
         // 保留当前灯箱中已有的完整 EXIF，避免被预览接口的空字段覆盖
         state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
-        const card = els.gallery.querySelector('[data-photo-id="' + photoId + '"]');
-        if (card) {
-          const img = card.querySelector('img[data-photo-id]');
-          if (img && !PS.imageHasSource(img)) img.src = merged.preview_url;
-          PS.updatePhotoCardMeta(card, merged, true);
-        }
         loadLightboxImage(merged);
       }).catch((err) => {
         if (!isCurrent()) return;
@@ -1045,12 +1037,6 @@
         const merged = mergePhotoPreserve(cachedPhoto, res.photo);
         state.photoCache.set(photoId, merged);
         state.lightbox.photo = mergePhotoPreserve(state.lightbox.photo, merged);
-        const card = els.gallery.querySelector('[data-photo-id="' + photoId + '"]');
-        if (card) {
-          const img = card.querySelector('img[data-photo-id]');
-          if (img && !PS.imageHasSource(img)) img.src = merged.preview_url;
-          PS.updatePhotoCardMeta(card, merged, true);
-        }
         previewUrl = thumb;
         ensurePreview();
         showPreviewImage();
@@ -1140,10 +1126,13 @@
   }
 
   function lightboxOpenableCards() {
-    return Array.from(els.gallery.querySelectorAll('.photo-card.openable')).filter((card) => {
-      const photo = state.photoCache.get(Number(card.dataset.photoId || 0));
-      return photo && (photo.original_url || photo.lightbox_url || photo.preview_url || photo.previewable);
-    });
+    // P4 收口：#gallery 里已没有 .photo-card。用扁平缓存（Vue 拉取时双写）
+    // 构造 dataset 兼容的轻量对象，旧导航逻辑无需感知 DOM。
+    // 注意：顺序为照片拉取顺序，不再严格等于视觉顺序；默认的灯箱导航
+    // 由 Vue LightboxShell 接管，这里只是 legacy 路径的兜底。
+    return Array.from(state.photoCache.values())
+      .filter((p) => p && (p.original_url || p.lightbox_url || p.preview_url || p.previewable))
+      .map((p) => ({ dataset: { photoId: String(p.id) }, scrollIntoView() {} }));
   }
 
   function currentLightboxCardIndex(cards) {
@@ -1567,7 +1556,6 @@
       });
       state.exifCache.set(photoId, merged);
       state.photoCache.set(photoId, merged);
-      PS.updatePhotoCardMeta(card, merged, true);
       els.exifPop.innerHTML = exifHtml(merged);
       positionExif(ev);
     }).catch((err) => {

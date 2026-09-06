@@ -1,8 +1,6 @@
 (function () {
   function create(options) {
     const config = options || {};
-    const gallery = config.gallery;
-    if (!gallery) throw new Error('批量选择缺少图库容器');
 
     const selected = new Map();
     let sourceId = '';
@@ -25,37 +23,9 @@
       return tag === 'input' || tag === 'textarea' || target.isContentEditable;
     }
 
-    function selectedIndex(photoId) {
-      const id = Number(photoId || 0);
-      let index = 0;
-      for (const key of selected.keys()) {
-        if (key === id) return index;
-        index += 1;
-      }
-      return -1;
-    }
-
-    function updateCard(card) {
-      if (!card) return;
-      const index = selectedIndex(card.dataset.photoId);
-      const active = index >= 0;
-      card.classList.toggle('batch-selected', active);
-      card.setAttribute('aria-selected', active ? 'true' : 'false');
-      let badge = card.querySelector('.photo-batch-badge');
-      if (active) {
-        if (!badge) {
-          badge = document.createElement('div');
-          badge.className = 'photo-batch-badge';
-          card.appendChild(badge);
-        }
-        badge.innerHTML = '<span aria-hidden="true">✓</span><b>' + String(index + 1) + '</b>';
-      } else if (badge) {
-        badge.remove();
-      }
-    }
-
     function sync() {
-      gallery.querySelectorAll('.photo-card').forEach(updateCard);
+      // P4 收口：卡片上的批量角标由 PhotoCard 依 batch store 响应式渲染，
+      // 这里只维护选中状态、计数条与 onChange 通知。
       const count = selected.size;
       const countEl = bar.querySelector('[data-batch-selection-count]');
       if (countEl) countEl.textContent = String(count);
@@ -125,9 +95,6 @@
           return true;
         }
         return false;
-      },
-      decorateCard(card) {
-        updateCard(card);
       },
       setSource(nextSourceId) {
         const next = String(nextSourceId || '');

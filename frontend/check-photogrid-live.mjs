@@ -53,9 +53,9 @@ if (String(active) !== 'true') {
 }
 report('PhotoGrid 已激活', String(active) === 'true', 'vue_photogrid=' + (await evaluate(`localStorage.getItem('vue_photogrid')`)));
 
-// ---- 2) legacy 容器已隐藏 ----
-const legacyHidden = await evaluate(`document.getElementById('gallery-scroll').classList.contains('hidden')`);
-report('legacy #gallery-scroll 已隐藏', legacyHidden === true);
+// ---- 2) legacy 容器已随收口删除 ----
+const legacyGone = await evaluate(`document.getElementById('gallery-scroll') === null && document.getElementById('gallery') === null`);
+report('legacy 画廊容器已删除', legacyGone === true);
 
 // ---- 3) 进入工作区（无来源则点第一张来源卡）----
 let sid = await evaluate(`(window.PS.state.currentSourceId || '')`);

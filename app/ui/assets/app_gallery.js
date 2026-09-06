@@ -122,11 +122,7 @@
     state.sortKey = sortKey;
     renderSortMenu();
     PS.resetGallery();
-    els.galleryScroll.scrollTo({ top: 0 });
-    loadOlderDates({ allowScanRequest: false }).then(() => {
-      scheduleRenderBufferCheck();
-      scheduleVisiblePreviewCheck();
-    });
+    loadOlderDates({ allowScanRequest: false });
   }
 
   function clampItemSize(value) {
@@ -147,7 +143,6 @@
     }
     state.galleryItemSize = Math.round(state.galleryItemSizeRaw);
     document.documentElement.style.setProperty('--photo-min-size', state.galleryItemSizeRaw.toFixed(2) + 'px');
-    if (state.dates && state.dates.length) updateAllDateReserves();
     if (!options || options.save !== false) {
       scheduleGalleryItemSizeSave();
     }
@@ -295,11 +290,7 @@
     closeFilterPop();
     closeFilterMenu();
     PS.resetGallery();
-    els.galleryScroll.scrollTo({ top: 0 });
-    loadOlderDates({ allowScanRequest: false }).then(() => {
-      schedulePlaceholderPhotoFill();
-      scheduleVisiblePreviewCheck();
-    });
+    loadOlderDates({ allowScanRequest: false });
   }
 
   function clearActiveFilter() {
@@ -308,11 +299,7 @@
     closeFilterPop();
     closeFilterMenu();
     PS.resetGallery();
-    els.galleryScroll.scrollTo({ top: 0 });
-    loadOlderDates({ allowScanRequest: false }).then(() => {
-      schedulePlaceholderPhotoFill();
-      scheduleVisiblePreviewCheck();
-    });
+    loadOlderDates({ allowScanRequest: false });
   }
 
   function resetSourceFilterContext() {
@@ -431,12 +418,8 @@
     updateFilterButton();
     renderCategoryList();
     PS.resetGallery();
-    els.galleryScroll.scrollTo({ top: 0 });
     PS.restoreLastViewedPosition(viewedPositionForCategory(state.activeCategory));
-    loadOlderDates({ allowScanRequest: false }).then(() => {
-      schedulePlaceholderPhotoFill();
-      scheduleVisiblePreviewCheck();
-    });
+    loadOlderDates({ allowScanRequest: false });
   }
 
   // 同 applySort：代理之后不能再拿入参跟 state.activeCategory 比，
@@ -1118,7 +1101,6 @@
     state.noMoreDates = false;
     maybeRefreshVisibleDates(true);
     loadOlderDates({ allowScanRequest: false });
-    scheduleVisiblePreviewCheck();
   }
 
   function requestMoreScan(options) {
@@ -1131,7 +1113,6 @@
     state.lastMoreScanAt = now;
     state.scanRequesting = true;
     state.scanRunning = true;
-    els.olderSentinel.textContent = '继续扫描图片...';
     return call('start_scan', state.currentRootPath, 10).then((res) => {
       if (res && res.source_id) {
         state.currentSourceId = res.source_id;
@@ -1155,117 +1136,8 @@
     });
   }
 
-  function isNearGalleryBottom(margin) {
-    const el = els.galleryScroll;
-    return el.scrollTop + el.clientHeight >= el.scrollHeight - margin;
-  }
-
-  function requestMoreScanFromWheel(ev) {
-    if (ev.deltaY <= 0 || state.bottomWheelTicking) return;
-    state.bottomWheelTicking = true;
-    requestAnimationFrame(() => {
-      state.bottomWheelTicking = false;
-      if (isNearGalleryBottom(80)) requestMoreScan({ userGesture: true });
-    });
-  }
-
-  function onGalleryWheel(ev) {
-    if (ev.ctrlKey) {
-      zoomGalleryItemsFromWheel(ev);
-      return;
-    }
-    if (ev.altKey) {
-      scrollGalleryFromAltWheel(ev);
-      requestMoreScanFromWheel(ev);
-      return;
-    }
-    requestMoreScanFromWheel(ev);
-  }
-
-  function scrollGalleryFromAltWheel(ev) {
-    if (!els.galleryScroll.contains(ev.target)) return;
-    if (!Number.isFinite(ev.deltaY) || ev.deltaY === 0) return;
-    const unit = ev.deltaMode === 1 ? 40 : (ev.deltaMode === 2 ? els.galleryScroll.clientHeight : 1);
-    ev.preventDefault();
-    ev.stopPropagation();
-    els.galleryScroll.scrollTop += ev.deltaY * unit;
-  }
-
-  function zoomGalleryItemsFromWheel(ev) {
-    if (!els.workspace || els.workspace.classList.contains('hidden')) return;
-    if (state.settingsOpen || state.statsOpen || !els.lightbox.classList.contains('hidden')) return;
-    if (!els.galleryScroll.contains(ev.target)) return;
-    if (!Number.isFinite(ev.deltaY) || ev.deltaY === 0) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-
-    if (!state.galleryZoomActive) {
-      state.galleryZoomActive = true;
-      closeFilterPop();
-      closeFilterMenu();
-      hideContextMenu();
-      const target = document.elementFromPoint(ev.clientX, ev.clientY);
-      const galleryRect = els.gallery.getBoundingClientRect();
-      state.galleryZoomAnchor = target && target.closest ? target.closest('.photo-card') : null;
-      state.galleryZoomBaseSize = state.galleryItemSizeRaw;
-      state.galleryItemSizeTarget = state.galleryItemSizeRaw;
-      els.gallery.style.setProperty('--gallery-zoom-origin-x', clamp(ev.clientX - galleryRect.left, 0, galleryRect.width || 0).toFixed(2) + 'px');
-      els.gallery.style.setProperty('--gallery-zoom-origin-y', clamp(ev.clientY - galleryRect.top, 0, galleryRect.height || 0).toFixed(2) + 'px');
-      els.gallery.style.setProperty('--gallery-zoom-preview', '1');
-      els.gallery.classList.add('zooming');
-    }
-
-    const delta = normalizedWheelDelta(ev);
-    state.galleryItemSizeTarget = clampItemSize(state.galleryItemSizeTarget - delta * GALLERY_ITEM_SIZE_WHEEL_SCALE);
-    scheduleGalleryZoomFrame();
-    clearTimeout(state.galleryZoomCleanupTimer);
-    state.galleryZoomCleanupTimer = setTimeout(finishGalleryZoom, 180);
-  }
-
-  function normalizedWheelDelta(ev) {
-    let delta = Number(ev.deltaY || 0);
-    if (ev.deltaMode === 1) delta *= 16;
-    else if (ev.deltaMode === 2) delta *= els.galleryScroll.clientHeight || 480;
-    return delta;
-  }
-
-  function scheduleGalleryZoomFrame() {
-    if (state.galleryZoomTicking) return;
-    state.galleryZoomTicking = true;
-    requestAnimationFrame(applyGalleryZoomFrame);
-  }
-
-  function applyGalleryZoomFrame() {
-    const baseSize = Math.max(1, Number(state.galleryZoomBaseSize || state.galleryItemSizeRaw || 168));
-    const scale = clamp(state.galleryItemSizeTarget / baseSize, 0.4, 2.8);
-    els.gallery.style.setProperty('--gallery-zoom-preview', scale.toFixed(4));
-    state.galleryZoomTicking = false;
-  }
-
-  function finishGalleryZoom() {
-    if (state.galleryZoomTicking) {
-      clearTimeout(state.galleryZoomCleanupTimer);
-      state.galleryZoomCleanupTimer = setTimeout(finishGalleryZoom, 80);
-      return;
-    }
-    const anchor = state.galleryZoomAnchor;
-    const beforeTop = anchor && anchor.isConnected ? anchor.getBoundingClientRect().top : 0;
-    state.galleryZoomActive = false;
-    els.gallery.classList.remove('zooming');
-    els.gallery.style.removeProperty('--gallery-zoom-preview');
-    els.gallery.style.removeProperty('--gallery-zoom-origin-x');
-    els.gallery.style.removeProperty('--gallery-zoom-origin-y');
-    applyGalleryItemSize(state.galleryItemSizeTarget, { save: false, preserveTarget: true });
-    if (anchor && anchor.isConnected) {
-      els.galleryScroll.scrollTop += anchor.getBoundingClientRect().top - beforeTop;
-    }
-    state.galleryZoomAnchor = null;
-    scheduleGalleryItemSizeSave();
-    updateAllDateReserves();
-    PS.scheduleDateHighlight();
-    schedulePlaceholderPhotoFill();
-    scheduleVisiblePreviewCheck();
-  }
+  // P4 收口：滚轮缩放/Alt 滚轮/滚到底续扫的 legacy 路径已随引擎链删除。
+  // Vue PhotoGrid 自带 Ctrl+滚轮缩放与滚动续扫（maybeLoadMore → PS.loadOlderDates）。
 
   function toggleScanAll() {
     if (!state.currentRootPath) return;
@@ -1308,15 +1180,6 @@
     });
   }
 
-  function elementNearGalleryViewport(el, margin) {
-    const root = els.galleryScroll.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
-    return rect.bottom >= root.top - margin &&
-      rect.top <= root.bottom + margin &&
-      rect.right >= root.left - margin &&
-      rect.left <= root.right + margin;
-  }
-
   function maybeRefreshVisibleDates(force) {
     if (!state.dates.length || state.loadingDates) return Promise.resolve(false);
     const now = Date.now();
@@ -1353,42 +1216,12 @@
       }
       state.dateCounts.set(dateKey, nextCount);
       state.dateExifCounts.set(dateKey, nextExifCount);
-      const header = els.gallery.querySelector('[data-date-header="' + dateKey + '"] > span');
-      if (header) header.textContent = nextCount + ' 张 · EXIF ' + nextExifCount;
       const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
       if (pill) {
         renderDateLabel(pill, dateKey);
         applyDateCover(pill, dateKey);
       }
-      const section = document.getElementById('date-' + dateKey);
-      const countChanged = hadCount && nextCount !== previousCount;
-      const timeOrderChanged = hadCount &&
-        (state.sortKey === 'datetime_desc' || state.sortKey === 'datetime_asc') &&
-        nextExifCount !== previousExifCount;
-      if (section && (countChanged || timeOrderChanged)) invalidateDatePhotoOrder(dateKey);
-      else if (section) renderPhotoPlaceholders(section, dateKey, nextCount);
-      updateDateReserve(dateKey);
-      if (hadCount && nextCount > previousCount) refreshDateMoreAvailability(dateKey, nextCount);
     });
-  }
-
-  function invalidateDatePhotoOrder(dateKey) {
-    const section = document.getElementById('date-' + dateKey);
-    if (!section) return;
-    section.dataset.photoOrderVersion = String(Number(section.dataset.photoOrderVersion || 0) + 1);
-    section.dataset.photoOrderDirty = '1';
-    if (section.dataset.loadingPhotos === '1') return;
-
-    const grid = section.querySelector('.photo-grid');
-    if (!grid) return;
-    grid.replaceChildren();
-    state.photoOffsets.set(dateKey, 0);
-    section.dataset.photoOrderDirty = '0';
-    renderPhotoPlaceholders(section, dateKey, state.dateCounts.get(dateKey) || 0);
-    updateDateReserve(dateKey);
-    schedulePlaceholderPhotoFill();
-    scheduleVisiblePreviewCheck();
-    PS.updateLightboxNavButtons();
   }
 
   function renderDateLabel(target, dateKey) {
@@ -1476,23 +1309,8 @@
     const clean = String(note || '');
     if (clean) state.dateNotes.set(dateKey, clean);
     else state.dateNotes.delete(dateKey);
-    const header = els.gallery.querySelector('[data-date-header="' + dateKey + '"] strong');
-    if (header) renderDateLabel(header, dateKey);
     const pill = els.dateRail.querySelector('[data-date-pill="' + dateKey + '"]');
     if (pill) renderDateLabel(pill, dateKey);
-  }
-
-  function refreshDateMoreAvailability(dateKey, totalCount) {
-    const section = document.getElementById('date-' + dateKey);
-    if (!section || section.dataset.loadingPhotos === '1') return;
-    const loadedCount = state.photoOffsets.get(dateKey) || 0;
-    updateDateReserve(dateKey);
-    if (loadedCount >= totalCount) return;
-    const more = section.querySelector('.date-more');
-    if (!more) return;
-    more.textContent = '滚动到这里会继续加载';
-    observeDateMore(more, dateKey);
-    if (elementNearGalleryViewport(more, 360)) loadPhotosForDate(dateKey);
   }
 
   function loadOlderDates(options) {
@@ -1503,16 +1321,11 @@
     return call('list_dates', state.dateCursor, requestedLimit, state.currentRootPath || null, state.currentSourceId || null, state.sortKey, filterPayload()).then((data) => {
       const dates = data.dates || [];
       if (!dates.length) {
-        if (state.scanRunning) {
-          els.olderSentinel.textContent = '等待发现图片...';
-        } else if (state.scanStoppedByUser) {
-          els.olderSentinel.textContent = '扫描已停止，点击扫描所有图片继续';
-        } else if (!state.scanComplete) {
-          els.olderSentinel.textContent = '继续扫描图片...';
-          if (allowScanRequest) requestMoreScan();
-        } else {
+        if (!state.scanRunning && !state.scanStoppedByUser && !state.scanComplete && allowScanRequest) {
+          // 库未扫完：触发一轮增量扫描，扫描批次回来后 refreshDatesAfterScanBatch 会再拉日期
+          requestMoreScan();
+        } else if (state.scanComplete) {
           state.noMoreDates = true;
-          els.olderSentinel.textContent = '没有更早日期';
         }
         return false;
       }
@@ -1520,7 +1333,6 @@
       state.dateCursor = state.dates.length ? state.dates[state.dates.length - 1].date_key : null;
       if (!state.activeDate && dates[0] && !state.pendingRestoreDate) PS.setActiveDate(dates[0].date_key);
       setTimeout(PS.tryRestorePendingDate, 0);
-      scheduleRenderBufferCheck();
       return true;
     }).catch((err) => {
       console.warn(err);
@@ -1538,36 +1350,17 @@
     return right.localeCompare(left);
   }
 
+  // P4 收口：legacy 画廊分区 DOM 已随引擎链删除，这里只做数据登记 + 日期胶囊渲染。
+  // 照片列表与分区头（张数/EXIF）由 Vue PhotoGrid 的 windowing 渲染。
   function addDateSection(date) {
-    const existing = document.getElementById('date-' + date.date_key);
-    if (existing) {
+    if (state.dateCounts.has(date.date_key)) {
       updateDateCounts([date]);
       return;
     }
-    const section = document.createElement('section');
-    section.className = 'date-section';
-    section.id = 'date-' + date.date_key;
-    section.dataset.date = date.date_key;
-    section.innerHTML = [
-      '<div class="date-header" data-date-header="' + date.date_key + '"><strong></strong><span></span></div>',
-      '<div class="photo-grid"></div>',
-      '<div class="date-more">继续检查这一天...</div>',
-    ].join('');
     if (date.note) state.dateNotes.set(date.date_key, String(date.note));
     if (date.cover_url) state.dateCovers.set(date.date_key, String(date.cover_url));
-    renderDateLabel(section.querySelector('strong'), date.date_key);
-    section.querySelector('[data-date-header] > span').textContent = date.count + ' 张 · EXIF ' + (date.exif_count || 0);
-    section.querySelector('.date-header').addEventListener('contextmenu', (ev) => {
-      ev.preventDefault();
-      showDateContextMenu(ev.clientX, ev.clientY, date.date_key);
-    });
     state.dateCounts.set(date.date_key, Number(date.count || 0));
     state.dateExifCounts.set(date.date_key, Number(date.exif_count || 0));
-    renderPhotoPlaceholders(section, date.date_key, Number(date.count || 0));
-    const beforeSection = Array.from(els.gallery.querySelectorAll('.date-section'))
-      .find((node) => compareDatesForCurrentSort(node.dataset.date || '', date.date_key) > 0);
-    if (beforeSection) els.gallery.insertBefore(section, beforeSection);
-    else els.gallery.appendChild(section);
 
     const pill = document.createElement('button');
     pill.className = 'date-pill';
@@ -1575,9 +1368,7 @@
     renderDateLabel(pill, date.date_key);
     applyDateCover(pill, date.date_key);
     pill.addEventListener('click', () => {
-      // 经 PS 调用：P4 下 PhotoGrid 劫持 PS.jumpToDate，点击才能滚 Vue 画布；
-      // legacy 模式下 PS.jumpToDate 就是本闭包，行为不变。直调闭包会去滚
-      // 隐藏的 #gallery-scroll —— 表现为「点了不跳转」。
+      // 经 PS 调用：PhotoGrid 劫持 PS.jumpToDate，点击才能滚 Vue 画布。
       PS.jumpToDate(date.date_key);
     });
     pill.addEventListener('contextmenu', (ev) => {
@@ -1593,569 +1384,25 @@
       state.dates.push(date);
       state.dates.sort((a, b) => compareDatesForCurrentSort(a.date_key, b.date_key));
     }
-
-    observeDateSection(section, date.date_key);
-    updateDateReserve(date.date_key);
-    PS.scheduleDateHighlight();
   }
 
-  function renderPhotoPlaceholders(section, dateKey, count) {
-    const grid = section.querySelector('.photo-grid');
-    if (!grid) return;
-    const existing = grid.children.length;
-    const target = Math.max(0, Number(count || 0));
-    if (existing >= target) return;
-    const fragment = document.createDocumentFragment();
-    for (let index = existing; index < target; index += 1) {
-      const card = document.createElement('article');
-      card.className = 'photo-card photo-placeholder';
-      card.dataset.dateKey = dateKey;
-      card.dataset.placeholderIndex = String(index);
-      const fill = document.createElement('div');
-      fill.className = 'placeholder-fill';
-      card.appendChild(fill);
-      fragment.appendChild(card);
-    }
-    grid.appendChild(fragment);
-  }
+  // P4 收口：占位卡渲染 / 可视填充 / 渲染缓冲 / 分区高度预留 / IntersectionObserver
+  // 这套「从 DOM 反推数据」的引擎链已删除，照片渲染归 Vue PhotoGrid（两级 windowing）。
 
-  function numericCssPx(value, fallback) {
-    const n = Number.parseFloat(String(value || ''));
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function galleryContentWidth() {
-    const rawWidth = Math.max(1, Number(els.gallery && els.gallery.clientWidth || 0));
-    if (!els.gallery) return rawWidth;
-    const style = window.getComputedStyle(els.gallery);
-    const left = numericCssPx(style.paddingLeft, 0);
-    const right = numericCssPx(style.paddingRight, 0);
-    return Math.max(1, rawWidth - left - right);
-  }
-
-  // P2 · 纯函数高度模型
-  //
-  // 布局常量，与 frontend/src/gallery/layout.js 及 style.css 三者必须一致：
-  //   .photo-grid  gap: 10px
-  //   .date-header height: 36px
-  //   .date-more   margin-top: 12px + height: 34px = 46px
-  // 命名带 _FALLBACK 是因为正常路径下应优先取 layout 模块导出的同名常量，
-  // 只有 Vue 包加载失败时才用这里的字面量兜底。
-  const PHOTO_GRID_GAP_FALLBACK = 10;
-  const DATE_HEADER_HEIGHT_FALLBACK = 36;
-  const DATE_MORE_HEIGHT_FALLBACK = 46;
-
-  // 旧实现是「测量 DOM 反推高度」：读 getComputedStyle 的 columnGap/rowGap、
-  // 读 header.offsetHeight、读 more.offsetHeight + marginTop。这有三个问题：
-  //   1) 每次调用都会触发样式重算，滚动时是热点
-  //   2) 高度依赖"已经渲染出来的 DOM"，与 Vue 的数据→DOM 方向相反
-  //   3) 与未来的 Vue PhotoGrid 无法共用公式，必然漂移
-  //
-  // 新实现改为纯计算：高度 = f(照片总数, 条目尺寸, 容器宽度, 常量)。
-  // 公式来自 frontend/src/gallery/layout.js，legacy 与 Vue 共用同一份。
-  function sharedLayout() {
-    return (window.PicScannerVue && window.PicScannerVue.layout) || null;
-  }
-
-  function dateSectionIntrinsicHeight(section, dateKey) {
-    const grid = section ? section.querySelector('.photo-grid') : null;
-    const more = section ? section.querySelector('.date-more') : null;
-    // dateCounts 是权威值；grid.children.length 仅为占位符渲染期的下限保护
-    // （读 children.length 只是查 DOM 结构，不触发布局，开销可忽略）
-    const total = Math.max(
-      0,
-      Number(state.dateCounts.get(dateKey) || 0),
-      grid ? grid.children.length : 0,
-    );
-    const itemSize = Math.max(1, Number(state.galleryItemSizeRaw || state.galleryItemSize || 168));
-    const gridWidth = Math.max(1, Number(grid && grid.clientWidth || section && section.clientWidth || galleryContentWidth()));
-    const moreHeight = more ? DATE_MORE_HEIGHT_FALLBACK : 0;
-
-    const L = sharedLayout();
-    if (L && typeof L.dateSectionHeight === 'function') {
-      return L.dateSectionHeight({
-        count: total,
-        itemSize,
-        gridWidth,
-        moreHeight,
-        headerHeight: DATE_HEADER_HEIGHT_FALLBACK,
-      }).height;
-    }
-    // 兜底：Vue 包未加载时退化为等价的内联公式（不再读 DOM 几何）
-    const columns = Math.max(1, Math.floor((gridWidth + PHOTO_GRID_GAP_FALLBACK) / (itemSize + PHOTO_GRID_GAP_FALLBACK)));
-    const rows = total > 0 ? Math.ceil(total / columns) : 0;
-    const gridHeight = rows > 0 ? rows * itemSize + Math.max(0, rows - 1) * PHOTO_GRID_GAP_FALLBACK : 0;
-    return Math.max(80, Math.ceil(DATE_HEADER_HEIGHT_FALLBACK + gridHeight + moreHeight));
-  }
-
-  function updateDateReserve(dateKey) {
-    const section = document.getElementById('date-' + dateKey);
-    if (!section) return;
-    const more = section.querySelector('.date-more');
-    section.style.paddingBottom = '';
-    section.style.setProperty('--date-section-intrinsic-size', dateSectionIntrinsicHeight(section, dateKey) + 'px');
-    if (more) more.dataset.reserve = '0';
-  }
-
-  function updateAllDateReserves() {
-    state.dates.forEach((date) => updateDateReserve(date.date_key));
-  }
-
-  function holdDateSectionLayout(section) {
-    if (!section) return () => {};
-    section.classList.add('restoring-layout');
-    void section.offsetHeight;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      setTimeout(() => {
-        section.classList.remove('restoring-layout');
-      }, 900);
-    };
-  }
-
-  function schedulePlaceholderPhotoFill() {
-    if (state.placeholderFillTicking) return;
-    state.placeholderFillTicking = true;
-    requestAnimationFrame(fillVisiblePlaceholders);
-  }
-
-  function fillVisiblePlaceholders() {
-    state.placeholderFillTicking = false;
-    if (state.loadingDates) return;
-    const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
-    const root = els.galleryScroll.getBoundingClientRect();
-    for (const section of sections) {
-      const dateKey = section.dataset.date || '';
-      if (!dateKey || section.dataset.loadingPhotos === '1') continue;
-      const total = state.dateCounts.get(dateKey) || 0;
-      const loaded = state.photoOffsets.get(dateKey) || 0;
-      if (!total || loaded >= total) continue;
-      const placeholders = Array.from(section.querySelectorAll('.photo-placeholder'));
-      let targetIndex = -1;
-      for (const placeholder of placeholders) {
-        const rect = placeholder.getBoundingClientRect();
-        if (rect.bottom < root.top - 500 || rect.top > root.bottom + 900) continue;
-        targetIndex = Math.max(targetIndex, Number(placeholder.dataset.placeholderIndex || -1));
-      }
-      if (targetIndex < loaded) continue;
-      const targetLoaded = Math.min(total, targetIndex + RENDER_AHEAD_PHOTOS + 1);
-      const limit = Math.max(PHOTO_LOAD_BATCH, targetLoaded - loaded);
-      loadPhotosForDate(dateKey, { limit });
-      return;
-    }
-  }
-
+  // P4 收口：滚动定位归 Vue PhotoGrid（劫持 PS.jumpToDate → vueJumpToDate）。
+  // 这个闭包只剩委托职责——劫持未挂上的窗口期把调用转给 Vue 实现；
+  // 委托前先确认 PS.jumpToDate 不是自己，避免 flag 关闭（无 Vue 网格）时死递归。
   function jumpToDate(dateKey, offset) {
-    const section = document.getElementById('date-' + dateKey);
-    if (!section) {
-      loadOlderDates({ allowScanRequest: false }).then(() => {
-        const next = document.getElementById('date-' + dateKey);
-        if (next) jumpToDate(dateKey, offset);
-      });
-      return;
+    if (window.PS && PS.jumpToDate && PS.jumpToDate !== jumpToDate) {
+      return PS.jumpToDate(dateKey, offset);
     }
-    updateAllDateReserves();
-    PS.setActiveDate(dateKey);
-    const cleanOffset = Math.max(0, Number(offset || 0));
-    const releaseLayout = cleanOffset > 0 ? holdDateSectionLayout(section) : null;
-    const scrollToSection = () => {
-      if (cleanOffset > 0) {
-        section.classList.add('restoring-layout');
-        void section.offsetHeight;
-      }
-      els.galleryScroll.scrollTo({ top: Math.max(0, section.offsetTop + cleanOffset), behavior: 'auto' });
-      PS.scheduleDateHighlight();
-      schedulePlaceholderPhotoFill();
-      scheduleVisiblePreviewCheck();
-    };
-    scrollToSection();
-    loadPhotosForDate(dateKey).finally(() => {
-      requestAnimationFrame(() => {
-        scrollToSection();
-        requestAnimationFrame(() => {
-          scrollToSection();
-          if (releaseLayout) releaseLayout();
-        });
-      });
-    });
+    return Promise.resolve(false);
   }
 
-  function loadPhotosForDate(dateKey, options) {
-    const offset = state.photoOffsets.get(dateKey) || 0;
-    const section = document.getElementById('date-' + dateKey);
-    if (!section) return Promise.resolve(false);
-    if (section.dataset.loadingPhotos === '1') return Promise.resolve(false);
-    const total = state.dateCounts.get(dateKey) || 0;
-    if (total > 0 && offset >= total) return Promise.resolve(false);
-    section.dataset.loadingPhotos = '1';
-    const photoOrderVersion = Number(section.dataset.photoOrderVersion || 0);
-    const more = section.querySelector('.date-more');
-    more.textContent = '加载中...';
-    const requestedLimit = Math.max(1, Number(options && options.limit) || (offset === 0 ? INITIAL_PHOTO_LIMIT : PHOTO_LOAD_BATCH));
-    return call('list_photos', dateKey, offset, requestedLimit, state.currentRootPath || null, state.currentSourceId || null, state.sortKey, filterPayload()).then((data) => {
-      const photos = data.photos || [];
-      const grid = section.querySelector('.photo-grid');
-      return new Promise((resolve) => {
-        requestAnimationFrame(() => {
-          if (Number(section.dataset.photoOrderVersion || 0) !== photoOrderVersion) {
-            resolve(false);
-            return;
-          }
-          photos.forEach((photo, index) => {
-            const card = photoCard(photo);
-            const target = grid.children[offset + index];
-            if (target) grid.replaceChild(card, target);
-            else grid.appendChild(card);
-          });
-          state.photoOffsets.set(dateKey, offset + photos.length);
-          updateDateReserve(dateKey);
-          schedulePlaceholderPhotoFill();
-          const nextOffset = offset + photos.length;
-          const knownTotal = state.dateCounts.get(dateKey) || total;
-          const complete = !photos.length || (knownTotal > 0 && nextOffset >= knownTotal) || photos.length < requestedLimit;
-          more.textContent = complete ? '这一天已加载完' : '滚动到这里会继续加载';
-          if (!complete) observeDateMore(more, dateKey);
-          observeImages();
-          scheduleRenderBufferCheck();
-          scheduleVisiblePreviewCheck();
-          PS.scheduleDateHighlight();
-          PS.updateLightboxNavButtons();
-          resolve(photos.length > 0);
-        });
-      });
-    }).catch((err) => {
-      more.textContent = String(err);
-      return false;
-    }).finally(() => {
-      section.dataset.loadingPhotos = '0';
-      if (section.dataset.photoOrderDirty === '1') invalidateDatePhotoOrder(dateKey);
-    });
-  }
+  // P4 收口：legacy 的逐日期照片加载/预览队列/IntersectionObserver 全部删除，
+  // 照片拉取归 store.fetchPhotosForDate，预览归 usePreviewQueue。
 
   PS.quickEditFrameAssetCache = new Map();
-  function observeDateSection(section, dateKey) {
-    if (!PS.dateSectionObserver) {
-      PS.dateSectionObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          const el = entry.target;
-          PS.dateSectionObserver.unobserve(el);
-          const key = el.dataset.date;
-          if (key) loadPhotosForDate(key);
-        });
-      }, { root: els.galleryScroll, rootMargin: '620px 0px' });
-    }
-    section.dataset.date = dateKey;
-    PS.dateSectionObserver.observe(section);
-  }
-
-  function observeImages() {
-    if (!PS.imageObserver) {
-      PS.imageObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          const img = entry.target;
-          PS.imageObserver.unobserve(img);
-          const photoId = Number(img.dataset.photoId || 0);
-          enqueuePreview(img, photoId);
-        });
-      }, { root: els.galleryScroll, rootMargin: '220px 0px' });
-    }
-    els.gallery.querySelectorAll('img[data-photo-id]:not([data-observed])').forEach((img) => {
-      img.dataset.observed = '1';
-      PS.imageObserver.observe(img);
-    });
-    scheduleVisiblePreviewCheck();
-  }
-
-  function imageHasSource(img) {
-    return !!img.getAttribute('src');
-  }
-
-  function imageNearViewport(img, margin) {
-    const root = els.galleryScroll.getBoundingClientRect();
-    const card = img.closest('.photo-card');
-    const rect = (card || img).getBoundingClientRect();
-    return rect.bottom >= root.top - margin &&
-      rect.top <= root.bottom + margin &&
-      rect.right >= root.left - margin &&
-      rect.left <= root.right + margin;
-  }
-
-  function requestVisiblePreviews() {
-    state.previewTicking = false;
-    const root = els.galleryScroll.getBoundingClientRect();
-    const cards = Array.from(els.gallery.querySelectorAll('.photo-card'));
-    let topIndex = -1;
-    let bottomIndex = -1;
-    cards.forEach((card, index) => {
-      const rect = card.getBoundingClientRect();
-      if (rect.bottom > root.top && topIndex < 0) topIndex = index;
-      if (rect.top < root.bottom && rect.bottom > root.top) bottomIndex = index;
-    });
-    if (topIndex < 0) topIndex = 0;
-    const maxIndex = bottomIndex < 0 ? RENDER_AHEAD_PHOTOS - 1 : bottomIndex + RENDER_AHEAD_PHOTOS;
-    cards.slice(topIndex, maxIndex + 1).forEach((card, offset) => {
-      const img = card.querySelector('img[data-photo-id]');
-      if (!img) return;
-      if (imageHasSource(img) || img.dataset.loadingPreview === '1') return;
-      const absoluteIndex = topIndex + offset;
-      enqueuePreview(img, Number(img.dataset.photoId || 0), { priority: bottomIndex >= 0 && absoluteIndex <= bottomIndex });
-    });
-  }
-
-  function scheduleVisiblePreviewCheck() {
-    if (state.previewTicking) return;
-    state.previewTicking = true;
-    requestAnimationFrame(requestVisiblePreviews);
-  }
-
-  function scheduleRenderBufferCheck() {
-    if (state.renderBufferTicking) return;
-    state.renderBufferTicking = true;
-    requestAnimationFrame(ensureRenderBuffer);
-  }
-
-  function tailLoadableDateKey() {
-    const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
-    for (let i = sections.length - 1; i >= 0; i--) {
-      const dateKey = sections[i].dataset.date || '';
-      const total = state.dateCounts.get(dateKey) || 0;
-      const loaded = state.photoOffsets.get(dateKey) || 0;
-      if (!total || loaded < total) return dateKey;
-    }
-    return '';
-  }
-
-  function ensureRenderBuffer() {
-    state.renderBufferTicking = false;
-    if (state.renderBufferLoading || state.loadingDates) return;
-    const cards = Array.from(els.gallery.querySelectorAll('.photo-card'));
-    if (!cards.length) return;
-    const root = els.galleryScroll.getBoundingClientRect();
-    let bottomIndex = -1;
-    cards.forEach((card, index) => {
-      const rect = card.getBoundingClientRect();
-      if (rect.top < root.bottom && rect.bottom > root.top) bottomIndex = index;
-    });
-    if (bottomIndex < 0) return;
-    const renderedAhead = cards.length - bottomIndex - 1;
-    if (renderedAhead >= RENDER_AHEAD_PHOTOS) return;
-    const need = RENDER_AHEAD_PHOTOS - renderedAhead;
-    const dateKey = tailLoadableDateKey();
-    if (dateKey) {
-      state.renderBufferLoading = true;
-      loadPhotosForDate(dateKey, { limit: need }).finally(() => {
-        state.renderBufferLoading = false;
-        scheduleRenderBufferCheck();
-      });
-      return;
-    }
-    if (!state.noMoreDates) {
-      state.renderBufferLoading = true;
-      loadOlderDates({ allowScanRequest: false }).then(() => {
-        const nextDateKey = tailLoadableDateKey();
-        if (nextDateKey) return loadPhotosForDate(nextDateKey, { limit: need });
-        return false;
-      }).finally(() => {
-        state.renderBufferLoading = false;
-        scheduleRenderBufferCheck();
-      });
-    }
-  }
-
-  function enqueuePreview(img, photoId, options) {
-    if (!photoId || img.dataset.loadingPreview === '1' || imageHasSource(img)) return;
-    const priority = !!(options && options.priority);
-    if (img.dataset.queuedPreview === '1') {
-      if (priority) promoteQueuedPreview(img);
-      return;
-    }
-    img.dataset.queuedPreview = '1';
-    const item = { img, photoId, priority, sessionId: state.previewSessionId };
-    if (priority) insertPriorityPreview(item);
-    else state.previewQueue.push(item);
-    drainPreviewQueue();
-  }
-
-  function promoteQueuedPreview(img) {
-    const index = state.previewQueue.findIndex((item) => item.img === img);
-    if (index < 0) return;
-    const item = state.previewQueue.splice(index, 1)[0];
-    item.priority = true;
-    insertPriorityPreview(item);
-  }
-
-  function insertPriorityPreview(item) {
-    const firstNormal = state.previewQueue.findIndex((queued) => !queued.priority);
-    if (firstNormal < 0) state.previewQueue.push(item);
-    else state.previewQueue.splice(firstNormal, 0, item);
-  }
-
-  function drainPreviewQueue() {
-    while (state.previewActive < PREVIEW_CONCURRENCY && state.previewQueue.length) {
-      const item = state.previewQueue.shift();
-      if (item.sessionId !== state.previewSessionId) continue;
-      if (!item.img.isConnected || imageHasSource(item.img)) {
-        item.img.dataset.queuedPreview = '0';
-        continue;
-      }
-      state.previewActive += 1;
-      item.img.dataset.queuedPreview = '0';
-      item.img.dataset.loadingPreview = '1';
-      call('get_photo_preview', item.photoId).then((res) => {
-        if (item.sessionId !== state.previewSessionId || !item.img.isConnected) return;
-        if (!res || !res.success || !res.photo || !res.photo.preview_url) {
-          item.img.dataset.loadingPreview = '0';
-          item.img.dataset.previewFailed = '1';
-          const failedCard = item.img.closest('.photo-card');
-          if (failedCard) {
-            updatePhotoCardMeta(
-              failedCard,
-              Object.assign({}, state.photoCache.get(item.photoId), { preview_failed: true }),
-              false
-            );
-          }
-          return;
-        }
-        state.photoCache.set(item.photoId, Object.assign({}, state.photoCache.get(item.photoId), res.photo));
-        const card = item.img.closest('.photo-card');
-        if (card) updatePhotoCardMeta(card, res.photo, true);
-        item.img.src = res.photo.preview_url;
-      }).catch(() => {
-        if (item.sessionId !== state.previewSessionId || !item.img.isConnected) return;
-        item.img.dataset.loadingPreview = '0';
-        item.img.dataset.previewFailed = '1';
-        const failedCard = item.img.closest('.photo-card');
-        if (failedCard) {
-          updatePhotoCardMeta(
-            failedCard,
-            Object.assign({}, state.photoCache.get(item.photoId), { preview_failed: true }),
-            false
-          );
-        }
-      }).finally(() => {
-        if (item.sessionId !== state.previewSessionId) return;
-        state.previewActive = Math.max(0, state.previewActive - 1);
-        drainPreviewQueue();
-        scheduleVisiblePreviewCheck();
-      });
-    }
-  }
-
-  PS.moreObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      const el = entry.target;
-      PS.moreObserver.unobserve(el);
-      const dateKey = el.dataset.dateKey;
-      if (dateKey) loadPhotosForDate(dateKey);
-    });
-  }, { root: els.galleryScroll, rootMargin: '320px 0px' });
-
-  function observeDateMore(el, dateKey) {
-    el.dataset.dateKey = dateKey;
-    PS.moreObserver.observe(el);
-  }
-
-  function updatePhotoCardMeta(card, photo, previewLoaded) {
-    const meta = card.querySelector('.photo-meta');
-    if (!meta) return;
-    meta.children[0].textContent = photo.format_label || photo.format || '';
-    // 右下角状态/EXIF 角标不再显示（用户要求移除缩略图上的镜头名与 EXIF 标记）
-    if (meta.children[1]) {
-      meta.children[1].textContent = '';
-      meta.children[1].style.display = 'none';
-    }
-    applyPhotoMarkToCard(card, photo);
-  }
-
-  function applyPhotoMarkToCard(card, photo) {
-    if (!card || !photo) return;
-    const note = String(photo.note || '');
-    const category = String(photo.category || '').trim();
-    card.classList.toggle('favorite', !!photo.favorite);
-    card.classList.toggle('has-note', !!note);
-    card.classList.toggle('has-category', !!category);
-    card.removeAttribute('title');
-    let categoryBadge = card.querySelector('.photo-category-badge');
-    if (category) {
-      if (!categoryBadge) {
-        categoryBadge = document.createElement('div');
-        categoryBadge.className = 'photo-category-badge';
-        card.appendChild(categoryBadge);
-      }
-      categoryBadge.textContent = categoryBadgeText(category);
-      categoryBadge.title = category;
-    } else if (categoryBadge) {
-      categoryBadge.remove();
-    }
-    let icon = card.querySelector('.photo-note-icon');
-    if (note) {
-      if (!icon) {
-        icon = document.createElement('div');
-        icon.className = 'note-icon photo-note-icon';
-        icon.textContent = '✎';
-        icon.tabIndex = 0;
-        card.appendChild(icon);
-      }
-      icon.dataset.note = note;
-    } else if (icon) {
-      icon.remove();
-    }
-  }
-
-  let suppressPhotoClickUntil = 0;
-
-  function resetNativeDragCursor() {
-    call('reset_drag_cursor').catch(() => {});
-  }
-
-  function bindPhotoDrag(card, img, photo) {
-    let dragStart = null;
-    card.draggable = false;
-    img.draggable = false;
-    card.addEventListener('dragstart', (ev) => ev.preventDefault());
-    card.addEventListener('pointerdown', (ev) => {
-      if (ev.button !== 0 || !photo.original_url) return;
-      dragStart = { x: ev.clientX, y: ev.clientY, pointerId: ev.pointerId };
-    });
-    card.addEventListener('pointermove', (ev) => {
-      if (!dragStart || dragStart.pointerId !== ev.pointerId) return;
-      const dx = ev.clientX - dragStart.x;
-      const dy = ev.clientY - dragStart.y;
-      if (Math.hypot(dx, dy) < 8) return;
-      const current = state.photoCache.get(Number(photo.id)) || photo;
-      dragStart = null;
-      if (!current || !current.original_url || !current.path) return;
-      ev.preventDefault();
-      suppressPhotoClickUntil = Date.now() + 700;
-      state.nativePhotoDragging = true;
-      clearTimeout(PS.hoverTimer);
-      PS.hoverCard = null;
-      hide(els.exifPop);
-      hideNoteTooltip();
-      card.classList.add('dragging');
-      resetNativeDragCursor();
-      call('start_photo_drag', Number(current.id || photo.id)).catch((err) => {
-        console.warn(err);
-      }).finally(() => {
-        suppressPhotoClickUntil = Date.now() + 350;
-        resetNativeDragCursor();
-        setTimeout(resetNativeDragCursor, 120);
-        setTimeout(resetNativeDragCursor, 900);
-        setTimeout(() => {
-          state.nativePhotoDragging = false;
-          resetNativeDragCursor();
-        }, 2500);
-        card.classList.remove('dragging');
-      });
-    });
-    card.addEventListener('pointerup', () => { dragStart = null; });
-    card.addEventListener('pointercancel', () => { dragStart = null; });
-  }
 
   function comparePhotoId(photo) {
     return Number(photo && photo.id || 0);
@@ -2288,106 +1535,10 @@
     return true;
   }
 
-  function updateCompareCardState(card) {
-    if (!card) return;
-    const index = compareSelectedIndex(Number(card.dataset.photoId || 0));
-    const visible = index >= 0 && (state.compare.open || state.compare.lightbox);
-    card.classList.toggle('compare-selected', visible);
-    card.classList.toggle('compare-slot-1', visible && index === 0);
-    card.classList.toggle('compare-slot-2', visible && index === 1);
-    let badge = card.querySelector('.photo-compare-badge');
-    if (visible) {
-      if (!badge) {
-        badge = document.createElement('div');
-        badge.className = 'photo-compare-badge';
-        card.appendChild(badge);
-      }
-      badge.textContent = String(index + 1);
-    } else if (badge) {
-      badge.remove();
-    }
-  }
-
-  function updateCompareCardHighlights() {
-    els.gallery.querySelectorAll('.photo-card').forEach(updateCompareCardState);
-  }
-
-  function photoCard(photo) {
-    const card = document.createElement('article');
-    card.className = 'photo-card';
-    card.dataset.photoId = photo.id;
-    card.dataset.filename = photo.filename || '';
-    state.photoCache.set(Number(photo.id), photo);
-    const canPreview = !!(photo.previewable || photo.original_url || photo.preview_url);
-    if (canPreview) {
-      card.classList.add('openable');
-      card.addEventListener('click', (ev) => {
-        if (Date.now() < suppressPhotoClickUntil) return;
-        const currentPhoto = state.photoCache.get(Number(photo.id)) || photo;
-        if (state.quickEdit.picking) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          PS.openQuickEdit(currentPhoto);
-          return;
-        }
-        if (PS.batchSelectionController && PS.batchSelectionController.handlePhotoClick(ev, currentPhoto)) {
-          return;
-        }
-        if (state.compare.open) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          toggleComparePhoto(currentPhoto);
-          return;
-        }
-        PS.openLightbox(currentPhoto);
-      });
-    }
-    if (canPreview) {
-      const img = document.createElement('img');
-      img.alt = photo.filename || '';
-      img.loading = 'eager';
-      img.decoding = 'async';
-      img.dataset.photoId = photo.id;
-      bindPhotoDrag(card, img, photo);
-      img.addEventListener('load', () => {
-        img.classList.add('loaded');
-        card.classList.add('preview-loaded');
-        card.classList.remove('preview-error');
-        img.dataset.loadingPreview = '0';
-        updatePhotoCardMeta(card, state.photoCache.get(Number(photo.id)) || photo, true);
-      });
-      img.addEventListener('error', () => {
-        img.classList.remove('loaded');
-        card.classList.remove('preview-loaded');
-        card.classList.add('preview-error');
-        img.dataset.loadingPreview = '0';
-        img.dataset.previewFailed = '1';
-        updatePhotoCardMeta(card, Object.assign({}, state.photoCache.get(Number(photo.id)) || photo, { preview_failed: true }), false);
-      });
-      if (photo.preview_url) {
-        img.dataset.loadingPreview = '1';
-        img.src = photo.preview_url;
-      }
-      card.appendChild(img);
-    } else {
-      const raw = document.createElement('div');
-      raw.className = 'raw-placeholder';
-      raw.textContent = photo.format || 'RAW';
-      card.appendChild(raw);
-    }
-    const meta = document.createElement('div');
-    meta.className = 'photo-meta';
-    meta.innerHTML = '<span class="badge"></span><span class="badge"></span>';
-    card.appendChild(meta);
-    updatePhotoCardMeta(card, photo, false);
-    card.addEventListener('contextmenu', (ev) => {
-      ev.preventDefault();
-      showPhotoContextMenu(ev.clientX, ev.clientY, card);
-    });
-    updateCompareCardState(card);
-    if (PS.batchSelectionController) PS.batchSelectionController.decorateCard(card);
-    return card;
-  }
+  // P4 收口：对比高亮由 PhotoCard 的响应式类（compare-selected/compare-slot-N）
+  // 驱动，PhotoGrid 包装对比入口后 syncCompareLocal 同步。灯箱仍有 4 处调用
+  // PS.updateCompareCardHighlights —— 保留为空操作维持契约。
+  function updateCompareCardHighlights() {}
 
   let lastPointerX = 0;
   let lastPointerY = 0;
@@ -2432,7 +1583,9 @@
   }
 
   function showExifForCard(card, ev) {
-    if (!card || !card.isConnected || !els.gallery.contains(card)) return false;
+    // P4：卡片来自 activePointerCard()（PS.hoverCard / elementFromPoint），
+    // Vue 网格的卡片不在 #gallery 里，只校验 isConnected。
+    if (!card || !card.isConnected) return false;
     const photo = state.photoCache.get(Number(card.dataset.photoId));
     if (!photo) return false;
     PS.showExif(card, photo, pointerEventForExif(ev));
@@ -2448,35 +1601,17 @@
     return showExifForCard(card, ev);
   }
 
-  function bindGalleryHover() {
-    els.gallery.addEventListener('mouseover', (ev) => {
-      rememberPointer(ev);
-      if (!canShowGalleryExif()) return;
-      const card = cardFromEvent(ev);
-      if (!card || card === PS.hoverCard || card.contains(ev.relatedTarget)) return;
-      PS.hoverCard = card;
-      clearTimeout(PS.hoverTimer);
-      if (ev.altKey) {
-        showExifForCard(card, ev);
-        return;
-      }
-      PS.hoverTimer = setTimeout(() => showExifForCard(card, ev), 560);
-    });
-    els.gallery.addEventListener('mousemove', (ev) => {
-      rememberPointer(ev);
-      if (!canShowGalleryExif()) return;
-      if (!PS.hoverCard || !PS.hoverCard.contains(ev.target)) return;
-      if (ev.altKey && els.exifPop.classList.contains('hidden')) {
-        showExifForCard(PS.hoverCard, ev);
-      }
-      PS.positionExif(ev);
-    });
-    els.gallery.addEventListener('mouseout', (ev) => {
-      if (!PS.hoverCard || PS.hoverCard.contains(ev.relatedTarget)) return;
-      PS.hoverCard = null;
-      clearTimeout(PS.hoverTimer);
-      hide(els.exifPop);
-    });
+  // P4 收口：bindGalleryHover 绑在 #gallery 上（Vue 模式下该容器为空）。
+  // Vue PhotoGrid 自己做 hover 委托并同步 PS.hoverCard，F/笔记/W-S-Space
+  // 经 activePointerCard() 照常工作，这里不再有可绑定的目标。
+
+  function resetNativeDragCursor() {
+    call('reset_drag_cursor').catch(() => {});
+  }
+
+  // 通用小工具：灯箱/快修仍在用（判断 img 是否已有 src）
+  function imageHasSource(img) {
+    return !!img.getAttribute('src');
   }
 
   function blockInternalFileDrop(ev) {
@@ -2618,12 +1753,6 @@
         category: String(mark.category || ''),
       });
     }
-    els.gallery.querySelectorAll('.photo-card').forEach((card) => {
-      if (String(card.dataset.filename || '') !== cleanName) return;
-      const photo = state.photoCache.get(Number(card.dataset.photoId || 0)) || {};
-      applyPhotoMarkToCard(card, photo);
-      updatePhotoCardMeta(card, photo, !!card.querySelector('img.loaded'));
-    });
     // P4：把标记同步进 Vue store（PhotoGrid 卡片的响应式数据源）。
     // 不补这一步的话，Vue 卡片要等预览管线 patchPhoto 回填整个照片对象时
     // 才"顺便"看到新标记，表现为收藏/隐藏/笔记/分类延迟出现。
@@ -2828,57 +1957,16 @@
   // 结论：**凡是操作 #gallery 内部 DOM 的逻辑都归 legacy**，
   // Vue 只有数据、没有虚拟化信息，不能自己实现跳转。
 
-  // 确保某个日期分区已渲染；未渲染则持续拉更早的日期直到它出现（或没有更多）
-  function ensureDateSection(dateKey) {
-    const section = document.getElementById('date-' + dateKey);
-    if (section) return Promise.resolve(section);
-    return loadOlderDates({ allowScanRequest: false }).then((loaded) => {
-      const next = document.getElementById('date-' + dateKey);
-      if (next) return next;
-      if (!loaded || state.noMoreDates) return null;
-      return ensureDateSection(dateKey);
-    });
-  }
-
-  // 加载到「目标下标」为止：一次请求直接要够，不必分批滚很多次
-  function ensurePhotoLoadedAt(dateKey, targetIndex) {
-    const index = Number(targetIndex);
-    if (!Number.isFinite(index) || index < 0) return loadPhotosForDate(dateKey);
-    const loaded = state.photoOffsets.get(dateKey) || 0;
-    if (loaded > index) return Promise.resolve(true);
-    return loadPhotosForDate(dateKey, { limit: index + 1 - loaded }).then(() => (
-      (state.photoOffsets.get(dateKey) || 0) > index
-    ));
-  }
-
-  // 从一条搜索结果跳到它对应的照片卡片（滚动 + 高亮）。
-  // photo.search_offset 由后端给出（api.py:903），是该照片在日期组内的下标。
+  // P4 收口：ensureDateSection / ensurePhotoLoadedAt / jumpToSearchPhoto 的
+  // legacy 实现已随引擎链删除（分区/卡片 DOM 不复存在）。
+  // Vue 工具栏的搜索跳转走 PS.jumpToSearchPhoto —— PhotoGrid 劫持后是
+  // vueJumpToSearchPhoto（自己 ensure 日期与照片加载）。这里保留委托桩，
+  // 供劫持未挂载的窗口期与 typeof 守卫使用。
   function jumpToSearchPhoto(photo) {
-    if (!photo || !photo.date_key) return Promise.resolve(false);
-    state.photoCache.set(Number(photo.id), photo);
-    return ensureDateSection(photo.date_key).then((section) => {
-      if (!section) return false;
-      PS.setActiveDate(photo.date_key);
-      return ensurePhotoLoadedAt(photo.date_key, photo.search_offset).then(() => (
-        new Promise((resolve) => {
-          requestAnimationFrame(() => {
-            const card = els.gallery.querySelector('[data-photo-id="' + Number(photo.id || 0) + '"]');
-            if (!card) {
-              jumpToDate(photo.date_key);
-              resolve(false);
-              return;
-            }
-            card.scrollIntoView({ block: 'center', inline: 'nearest' });
-            card.classList.add('search-target');
-            clearTimeout(card._searchTargetTimer);
-            card._searchTargetTimer = setTimeout(() => card.classList.remove('search-target'), 1500);
-            PS.scheduleDateHighlight();
-            scheduleVisiblePreviewCheck();
-            resolve(true);
-          });
-        })
-      ));
-    });
+    if (window.PS && PS.jumpToSearchPhoto && PS.jumpToSearchPhoto !== jumpToSearchPhoto) {
+      return PS.jumpToSearchPhoto(photo);
+    }
+    return Promise.resolve(false);
   }
 
 
@@ -3141,20 +2229,11 @@
   PS.enterSourceWorkspace = enterSourceWorkspace;
   PS.refreshDatesAfterScanBatch = refreshDatesAfterScanBatch;
   PS.requestMoreScan = requestMoreScan;
-  PS.requestMoreScanFromWheel = requestMoreScanFromWheel;
-  PS.onGalleryWheel = onGalleryWheel;
   PS.toggleScanAll = toggleScanAll;
   PS.toggleExifRead = toggleExifRead;
   PS.maybeRefreshVisibleDates = maybeRefreshVisibleDates;
   PS.loadOlderDates = loadOlderDates;
   PS.addDateSection = addDateSection;
-  PS.loadPhotosForDate = loadPhotosForDate;
-  PS.observeImages = observeImages;
-  PS.requestVisiblePreviews = requestVisiblePreviews;
-  PS.ensureRenderBuffer = ensureRenderBuffer;
-  PS.photoCard = photoCard;
-  PS.bindPhotoDrag = bindPhotoDrag;
-  PS.bindGalleryHover = bindGalleryHover;
   PS.blockInternalFileDrop = blockInternalFileDrop;
   PS.bindNoteTooltip = bindNoteTooltip;
   PS.ensureContextMenu = ensureContextMenu;
@@ -3172,7 +2251,6 @@
   PS.editDateNote = editDateNote;
   PS.closeSearchPanel = closeSearchPanel;
   PS.jumpToSearchPhoto = jumpToSearchPhoto;
-  PS.ensureDateSection = ensureDateSection;
   PS.openCategoryPickerForHover = openCategoryPickerForHover;
   PS.closeCategoryPicker = closeCategoryPicker;
   PS.handleCategoryPickerKey = handleCategoryPickerKey;
@@ -3219,16 +2297,8 @@
   PS.activePointerCard = activePointerCard;
   PS.isTypingTarget = isTypingTarget;
   PS.updateDateCounts = updateDateCounts;
-  PS.invalidateDatePhotoOrder = invalidateDatePhotoOrder;
   PS.setDateCover = setDateCover;
   PS.setDateNote = setDateNote;
-  PS.refreshDateMoreAvailability = refreshDateMoreAvailability;
-  PS.galleryContentWidth = galleryContentWidth;
-  PS.schedulePlaceholderPhotoFill = schedulePlaceholderPhotoFill;
-  PS.scheduleVisiblePreviewCheck = scheduleVisiblePreviewCheck;
-  PS.scheduleRenderBufferCheck = scheduleRenderBufferCheck;
-  PS.scheduleGalleryZoomFrame = scheduleGalleryZoomFrame;
-  PS.finishGalleryZoom = finishGalleryZoom;
   PS.closePanelScreen = closePanelScreen;
   PS.currentExportPreset = currentExportPreset;
   PS.showCategoryExportMenu = showCategoryExportMenu;
@@ -3239,10 +2309,7 @@
   PS.normalizeLightboxInfoSize = normalizeLightboxInfoSize;
   PS.viewedCategoryKey = viewedCategoryKey;
   PS.closeFilterCombos = closeFilterCombos;
-  PS.zoomGalleryItemsFromWheel = zoomGalleryItemsFromWheel;
-  PS.updateAllDateReserves = updateAllDateReserves;
   PS.imageHasSource = imageHasSource;
-  PS.updatePhotoCardMeta = updatePhotoCardMeta;
   PS.comparePhotoId = comparePhotoId;
   PS.comparePhotoReady = comparePhotoReady;
   PS.currentComparePhoto = currentComparePhoto;

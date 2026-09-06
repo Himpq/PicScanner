@@ -416,17 +416,14 @@ const ISLANDS = [
     retryMs: 200,
     mount: (el) => window.PicScannerVue.mountLightboxShell(el),
   },
-  // P4：Vue PhotoGrid。defaultOn=false —— 灰度开关，?vue_photogrid=1 或
-  // localStorage['vue_photogrid']='1' 开启；真实库验收（滚穿 1806 张大分区 /
-  // Ctrl+缩放锚点 / 滚动中切排序）通过前不动默认值。
-  // vanillaId 指向 legacy 的滚动容器 #gallery-scroll：flag 开启时整体隐藏，
-  // 关闭时原样恢复（legacy 引擎不动，随时可回退）。
+  // P4 收口：Vue PhotoGrid 是画廊唯一实现（legacy 引擎链已删除）。
+  // defaultOn=true；?vue_photogrid=0 仅作紧急止血（画廊为空，无 legacy 回退）。
   {
     name: 'photoGrid',
     vueId: 'vue-photogrid',
-    vanillaId: 'gallery-scroll',
+    vanillaId: null,
     flag: 'vue_photogrid',
-    defaultOn: false,
+    defaultOn: true,
     retryMs: 200,
     mount: (el) => window.PicScannerVue.mountPhotoGridIsland(el),
   },

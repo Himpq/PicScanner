@@ -183,13 +183,6 @@
     state.dateFocus = new Map();
     state.lastVisibleRefreshAt = 0;
     state.lastStatsSignature = '';
-    state.previewQueue = [];
-    state.previewActive = 0;
-    state.previewTicking = false;
-    state.previewSessionId += 1;
-    state.renderBufferTicking = false;
-    state.renderBufferLoading = false;
-    state.placeholderFillTicking = false;
     state.pendingRestoreDate = '';
     state.pendingRestoreOffset = 0;
     state.restoringDate = false;
@@ -197,10 +190,6 @@
     state.suppressLastViewedSaveUntil = 0;
     clearTimeout(state.saveViewedDateTimer);
     state.saveViewedDateTimer = null;
-    if (PS.imageObserver) PS.imageObserver.disconnect();
-    if (PS.dateSectionObserver) PS.dateSectionObserver.disconnect();
-    if (PS.moreObserver) PS.moreObserver.disconnect();
-    els.gallery.innerHTML = '';
     els.dateRail.innerHTML = '';
   }
 
@@ -11193,11 +11182,8 @@
     return beginQuickEditPicking();
   }
 
-  const olderObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) PS.loadOlderDates();
-    });
-  }, { root: els.galleryScroll, rootMargin: '700px 0px' });
+  // P4 收口：older-sentinel 随 legacy 引擎链删除，日期分页由 PhotoGrid 的
+  // maybeLoadMore 在滚动接近底部时驱动（PS.loadOlderDates）。
 
   function saveLastViewedDate(dateKey, options) {
     const category = options && Object.prototype.hasOwnProperty.call(options, 'category') ? options.category : state.activeCategory;
@@ -11231,36 +11217,13 @@
     }, 500);
   }
 
-  function viewedOffsetForDate(dateKey) {
-    const section = document.getElementById('date-' + dateKey);
-    if (!section) return 0;
-    return Math.max(0, Math.round(els.galleryScroll.scrollTop - section.offsetTop));
+  function viewedOffsetForDate() {
+    // P4 收口：legacy 分区 DOM 已删，日期内偏移不再可得，恢复落在分区顶部
+    return 0;
   }
 
   function viewedPositionFromScroll(fallbackDate) {
-    const fallback = String(fallbackDate || '').trim();
-    const fallbackSection = fallback ? document.getElementById('date-' + fallback) : null;
-    if (fallbackSection) {
-      const viewTop = els.galleryScroll.scrollTop;
-      const viewBottom = viewTop + els.galleryScroll.clientHeight;
-      const top = fallbackSection.offsetTop;
-      const bottom = top + fallbackSection.offsetHeight;
-      if (Math.min(bottom, viewBottom) - Math.max(top, viewTop) > 12) {
-        return { date: fallback, offset: Math.max(0, Math.round(viewTop - top)) };
-      }
-    }
-    const anchor = els.galleryScroll.scrollTop + 4;
-    const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
-    for (const section of sections) {
-      const date = String(section.dataset.date || '');
-      if (!date) continue;
-      const top = section.offsetTop;
-      const bottom = top + section.offsetHeight;
-      if (anchor >= top && anchor < bottom) {
-        return { date, offset: Math.max(0, Math.round(els.galleryScroll.scrollTop - top)) };
-      }
-    }
-    return { date: fallback, offset: viewedOffsetForDate(fallback) };
+    return { date: String(fallbackDate || '').trim(), offset: 0 };
   }
 
   function restoreLastViewedPosition(position) {
@@ -11280,8 +11243,9 @@
     const dateKey = state.pendingRestoreDate;
     const offset = state.pendingRestoreOffset;
     if (!dateKey || state.restoringDate || state.loadingDates) return;
-    const section = document.getElementById('date-' + dateKey);
-    if (section) {
+    // P4 收口：分区 DOM 不存在了，改用日期计数表判定目标日期是否已加载
+    const known = state.dateCounts instanceof Map && state.dateCounts.has(dateKey);
+    if (known) {
       state.pendingRestoreDate = '';
       state.pendingRestoreOffset = 0;
       PS.jumpToDate(dateKey, offset);
@@ -11369,74 +11333,9 @@
     btn.classList.toggle('focus-center', focus >= 0.72);
   }
 
-  function scheduleDateHighlight() {
-    if (state.scrollTicking) return;
-    state.scrollTicking = true;
-    requestAnimationFrame(() => {
-      state.scrollTicking = false;
-      updateDateHighlight();
-    });
-  }
-
-  function updateDateHighlight() {
-    // P4：日期栏高亮由 PhotoGrid 的 syncRailFromScroll 回写接管。
-    // 隐藏的 #gallery 里所有分区 offsetTop/offsetHeight 均为 0，
-    // 下面的锚点计算会对每个分区都命中 top<=0<=bottom，best 恒被覆盖成
-    // 最后一个分区 —— 表现为日期栏高亮锁死在最后一位。
-    if (window.PicScannerVue && typeof window.PicScannerVue.isPhotoGridActive === 'function' && window.PicScannerVue.isPhotoGridActive()) return;
-    const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
-    if (!sections.length) return;
-
-    const viewTop = els.galleryScroll.scrollTop;
-    const viewBottom = viewTop + els.galleryScroll.clientHeight;
-    const viewHeight = Math.max(1, els.galleryScroll.clientHeight);
-    const anchorY = viewTop + els.galleryScroll.clientHeight / 2;
-    const centerBandHalf = Math.max(72, viewHeight * 0.22);
-    const centerTop = anchorY - centerBandHalf;
-    const centerBottom = anchorY + centerBandHalf;
-    const centerBandHeight = Math.max(1, centerBottom - centerTop);
-    let best = null;
-    let bestDistance = Infinity;
-    const visible = [];
-    const focusByDate = new Map();
-
-    sections.forEach((section) => {
-      const date = section.dataset.date;
-      const top = section.offsetTop;
-      const bottom = top + section.offsetHeight;
-      const overlap = Math.min(bottom, viewBottom) - Math.max(top, viewTop);
-      if (overlap > 12 && date) {
-        visible.push(date);
-        const centerOverlap = Math.min(bottom, centerBottom) - Math.max(top, centerTop);
-        const focus = clamp(centerOverlap / centerBandHeight, 0, 1);
-        focusByDate.set(date, focus);
-      }
-      if (top <= anchorY && bottom >= anchorY) {
-        best = date;
-        bestDistance = 0;
-        return;
-      }
-      const distance = Math.min(Math.abs(top - anchorY), Math.abs(bottom - anchorY));
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = date;
-      }
-    });
-
-    setVisibleDates(visible);
-    setDateFocus(focusByDate);
-    if (best) setActiveDate(best);
-  }
-
-  function onGalleryScroll() {
-    state.lastScrollAt = Date.now();
-    PS.hideContextMenu();
-    PS.hideNoteTooltip();
-    scheduleDateHighlight();
-    PS.scheduleRenderBufferCheck();
-    PS.schedulePlaceholderPhotoFill();
-    PS.scheduleVisiblePreviewCheck();
-  }
+  // P4 收口：日期栏高亮由 PhotoGrid 的 syncRailFromScroll 回写接管
+  // （setVisibleDates / setDateFocus / setActiveDate），legacy 的
+  // updateDateHighlight 及其 DOM 几何计算随引擎链删除。
 
   function batchSelectionShortcutsAvailable() {
     return !!els.workspace
@@ -11627,7 +11526,6 @@
       detachLightbox: PS.detachBatchLightbox,
     });
     PS.batchSelectionController = window.PicScannerBatchSelection.create({
-      gallery: els.gallery,
       getSourceId: () => state.currentSourceId || '',
       canUseShortcuts: batchSelectionShortcutsAvailable,
       onProcess: (photos) => {
@@ -11677,11 +11575,6 @@
   });
   els.filterTrigger.addEventListener('click', PS.onFilterTriggerClick);
   els.filterTrigger.addEventListener('contextmenu', PS.onFilterTriggerContextMenu);
-  els.galleryScroll.addEventListener('scroll', onGalleryScroll, { passive: true });
-  els.galleryScroll.addEventListener('wheel', PS.onGalleryWheel, { passive: false });
-  document.addEventListener('wheel', (ev) => {
-    if (ev.ctrlKey) PS.zoomGalleryItemsFromWheel(ev);
-  }, { passive: false, capture: true });
   els.lightboxClose.addEventListener('click', PS.closeLightbox);
   els.lightbox.addEventListener('click', (ev) => {
     if (state.compare.lightbox) return;
@@ -12246,7 +12139,6 @@
     PS.hideContextMenu();
   });
   initializeBatchControllers();
-  PS.bindGalleryHover();
   PS.bindNoteTooltip();
   // P3：图表 tooltip 绑定随统计屏渲染代码一起删除
 
@@ -12299,9 +12191,6 @@
   window.addEventListener('dragover', PS.blockInternalFileDrop, true);
   window.addEventListener('drop', PS.blockInternalFileDrop, true);
   window.addEventListener('resize', () => {
-    PS.updateAllDateReserves();
-    scheduleDateHighlight();
-    PS.schedulePlaceholderPhotoFill();
     requestAnimationFrame(PS.clampLightboxInfoPosition);
     requestAnimationFrame(PS.clampCompareInfoPositions);
     requestAnimationFrame(() => {
@@ -12353,9 +12242,7 @@
   PS.setVisibleDates = setVisibleDates;
   PS.setDateFocus = setDateFocus;
   PS.updateDatePill = updateDatePill;
-  PS.scheduleDateHighlight = scheduleDateHighlight;
-  PS.updateDateHighlight = updateDateHighlight;
-  PS.onGalleryScroll = onGalleryScroll;
+
   PS.batchSelectionShortcutsAvailable = batchSelectionShortcutsAvailable;
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -12378,5 +12265,4 @@
   });
   setTimeout(startApp, 0);
 
-  olderObserver.observe(els.olderSentinel);
 })();

@@ -73,6 +73,7 @@ import { useQuickEditStore } from '../../stores/quickEdit.js';
 import { usePreviewQueue } from '../../composables/usePreviewQueue.js';
 import { renderPlan, zoomPlan } from '../../gallery/windowing.js';
 import { sectionMetrics, itemPosition, PHOTO_GRID_GAP, DATE_HEADER_HEIGHT } from '../../gallery/layout.js';
+import { getPhotoPreviewUrl } from '../../gallery/previewUrl.js';
 import { call } from '../../bridge/index.js';
 import { log, logWarn } from '../../utils/log.js';
 import PhotoCard from './PhotoCard.vue';
@@ -250,7 +251,7 @@ function enqueueVisiblePreviews(p) {
     for (const it of s.items) {
       const ph = it.photo;
       if (!ph) continue;
-      if (ph.thumbnail_url || ph.preview_url || ph.lightbox_url) continue;
+      if (getPhotoPreviewUrl(ph)) continue;
       if (ph.preview_failed) continue;
       if (ph.previewable === false && !ph.is_raw) continue;
       const absTop = s.top + it.y;
@@ -733,6 +734,8 @@ function installHijacks() {
   if (typeof PS.resetGallery === 'function' && !PS.resetGallery.__photoGrid) {
     originals.resetGallery = PS.resetGallery;
     const wrapped = function resetGalleryPhotoGrid(...args) {
+      queue.bumpSession();
+      queue.clearFailed();
       const r = originals.resetGallery.apply(PS, args);
       store.resetPhotoData();
       // legacy 的 applySort/applyFilter 只把隐藏的 #gallery-scroll 滚回顶部,
@@ -802,7 +805,20 @@ onMounted(() => {
   installHijacks();
 });
 
+// 来源上下文变化时，旧预览请求即使稍后完成也不能回填新来源。
+watch(
+  () => [store.currentRootPath, store.currentSourceId],
+  (next, previous) => {
+    if (!previous || (next[0] === previous[0] && next[1] === previous[1])) return;
+    queue.bumpSession();
+    queue.clearFailed();
+  },
+  { flush: 'sync' },
+);
+
 onBeforeUnmount(() => {
+  queue.bumpSession();
+  queue.clearFailed();
   restoreHijacks();
   document.removeEventListener('wheel', onDocCaptureWheel, { capture: true });
   if (resizeObserver) {

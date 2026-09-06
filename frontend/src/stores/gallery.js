@@ -41,6 +41,10 @@ export const useGalleryStore = defineStore('gallery', () => {
   const photoOffsets = ref(new Map());
   const photoCache = ref(new Map());
   const photoLoading = ref(new Set());
+  // 同一日期的并发读取复用同一个 Promise，搜索跳转不会把“正在加载”误判成失败。
+  const photoLoadPromises = new Map();
+  // reset/source 切换后，旧请求即使晚到也不能重新写入新画廊。
+  let photoDataVersion = 0;
   const INITIAL_PHOTO_LIMIT = 40;
   const PHOTO_LOAD_BATCH = 20;
   const RENDER_AHEAD_PHOTOS = 20;
@@ -519,6 +523,8 @@ export const useGalleryStore = defineStore('gallery', () => {
   // 优化点：按 id 去重、稀疏数组改 push 连续、Map 只做一次重赋值
   async function fetchPhotosForDate(dateKey, { limit } = {}) {
     if (!dateKey) return false;
+    const inFlight = photoLoadPromises.get(dateKey);
+    if (inFlight) return inFlight;
     if (photoLoading.value.has(dateKey)) return false;
     const total = dateCounts.value.get(dateKey) || 0;
     const offset = photoOffsets.value.get(dateKey) || 0;
@@ -531,37 +537,53 @@ export const useGalleryStore = defineStore('gallery', () => {
     // 空参校验：filterPayload 显式 null，sortKey 兜底
     const safeSort = SORT_OPTIONS.some((o) => o.key === sortKey.value) ? sortKey.value : 'datetime_desc';
     const payload = filterPayload();
-    try {
-      const res = await call('list_photos', dateKey, offset, reqLimit, currentRootPath.value || null, currentSourceId.value || null, safeSort, payload);
-      const photos = res.photos || [];
-      if (!photos.length) return false;
-      const existing = photoCache.value.get(dateKey) || [];
-      // 去重：按 id 过滤已存在的照片，避免重复插入导致 offset 漂移
-      const existingIds = new Set(existing.map((p) => String(p.id || p.photo_id || '')));
-      const deduped = photos.filter((p) => !existingIds.has(String(p.id || p.photo_id || '')));
-      if (!deduped.length && photos.length) {
-        // 全部重复，说明后端分页与前端 offset 已错位，直接推进 offset
+    const requestVersion = photoDataVersion;
+    const requestRootPath = currentRootPath.value;
+    const requestSourceId = currentSourceId.value;
+    const request = (async () => {
+      try {
+        const res = await call('list_photos', dateKey, offset, reqLimit, requestRootPath || null, requestSourceId || null, safeSort, payload);
+        // reset/source 切换期间返回的旧结果只能丢弃，不能重新污染新缓存。
+        if (
+          requestVersion !== photoDataVersion
+          || requestRootPath !== currentRootPath.value
+          || requestSourceId !== currentSourceId.value
+        ) return false;
+        const photos = res.photos || [];
+        if (!photos.length) return false;
+        const existing = photoCache.value.get(dateKey) || [];
+        // 去重：按 id 过滤已存在的照片，避免重复插入导致 offset 漂移
+        const existingIds = new Set(existing.map((p) => String(p.id || p.photo_id || '')));
+        const deduped = photos.filter((p) => !existingIds.has(String(p.id || p.photo_id || '')));
+        if (!deduped.length && photos.length) {
+          // 全部重复，说明后端分页与前端 offset 已错位，直接推进 offset
+          photoOffsets.value.set(dateKey, offset + photos.length);
+          photoOffsets.value = new Map(photoOffsets.value);
+          return false;
+        }
+        const next = [...existing, ...deduped];
+        // 同步到 legacy 的 photoCache 以便灯箱/批量/对比复用
+        if (PS && PS.state && PS.state.photoCache) {
+          deduped.forEach((p) => { try { if (p && p.id) PS.state.photoCache.set(Number(p.id), p); } catch {} });
+        }
+        photoCache.value.set(dateKey, next);
+        photoCache.value = new Map(photoCache.value);
         photoOffsets.value.set(dateKey, offset + photos.length);
         photoOffsets.value = new Map(photoOffsets.value);
+        return deduped.length > 0;
+      } catch (err) {
+        logWarn('[gallery] list_photos failed', dateKey, err);
         return false;
+      } finally {
+        if (requestVersion === photoDataVersion) {
+          photoLoading.value.delete(dateKey);
+          photoLoading.value = new Set(photoLoading.value);
+        }
+        if (photoLoadPromises.get(dateKey) === request) photoLoadPromises.delete(dateKey);
       }
-      const next = deduped.length === photos.length ? [...existing, ...deduped] : [...existing, ...deduped];
-      // 同步到 legacy 的 photoCache 以便灯箱/批量/对比复用
-      if (PS && PS.state && PS.state.photoCache) {
-        deduped.forEach((p) => { try { if (p && p.id) PS.state.photoCache.set(Number(p.id), p); } catch {} });
-      }
-      photoCache.value.set(dateKey, next);
-      photoCache.value = new Map(photoCache.value);
-      photoOffsets.value.set(dateKey, offset + photos.length);
-      photoOffsets.value = new Map(photoOffsets.value);
-      return deduped.length > 0;
-    } catch (err) {
-      logWarn('[gallery] list_photos failed', dateKey, err);
-      return false;
-    } finally {
-      photoLoading.value.delete(dateKey);
-      photoLoading.value = new Set(photoLoading.value);
-    }
+    })();
+    photoLoadPromises.set(dateKey, request);
+    return request;
   }
 
   function photosForDate(dateKey) {
@@ -606,6 +628,8 @@ export const useGalleryStore = defineStore('gallery', () => {
   // legacy 的 resetGallery 会清 state.photoCache/photoOffsets，store 侧若不同步清，
   // 排序/筛选切换后旧照片会残留到新筛选结果的分区里。
   function resetPhotoData() {
+    photoDataVersion += 1;
+    photoLoadPromises.clear();
     photoCache.value = new Map();
     photoOffsets.value = new Map();
     photoLoading.value = new Set();
@@ -647,10 +671,8 @@ export const useGalleryStore = defineStore('gallery', () => {
       PS.state.currentRootPath = currentRootPath.value;
       PS.state.currentSourceId = currentSourceId.value;
     }
-    // 切换来源时清空照片缓存
-    photoCache.value = new Map();
-    photoOffsets.value = new Map();
-    photoLoading.value = new Set();
+    // 切换来源时清空照片缓存并使旧请求失效。
+    resetPhotoData();
   }
 
   const dateCount = computed(() => dates.value.length);

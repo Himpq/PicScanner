@@ -20,7 +20,9 @@
         @load="loaded = true"
         @error="onImgError"
       />
-      <div v-else class="raw-placeholder">{{ photo.format || 'RAW' }}</div>
+      <div v-else class="placeholder-fill" :class="{ 'raw-placeholder': !previewPending }">
+        <span v-if="!previewPending">{{ photo.format || 'RAW' }}</span>
+      </div>
 
       <div class="photo-meta">
         <span class="badge">{{ photo.format_label || photo.format || '' }}</span>
@@ -52,6 +54,7 @@
 // 迁移不改外观。唯一新增的是定位方式：windowing 下条目不连续，改绝对定位 +
 // translate3d（scoped，不影响 legacy 的 grid 布局）。
 import { computed, ref } from 'vue';
+import { getPhotoPreviewUrl } from '../../gallery/previewUrl.js';
 
 const props = defineProps({
   // photo 为 null 时渲染占位卡（photoAt 未加载到该下标）
@@ -73,9 +76,13 @@ const failed = ref(false);
 
 const canPreview = computed(() => {
   const p = props.photo;
-  return !!(p && (p.previewable || p.original_url || p.preview_url));
+  return !!(p && getPhotoPreviewUrl(p));
 });
-const previewSrc = computed(() => (props.photo && props.photo.preview_url) || '');
+const previewSrc = computed(() => getPhotoPreviewUrl(props.photo));
+const previewPending = computed(() => {
+  const p = props.photo;
+  return !!(p && p.previewable && !p.preview_failed && !canPreview.value);
+});
 const note = computed(() => (props.photo ? String(props.photo.note || '') : ''));
 const category = computed(() => (props.photo ? String(props.photo.category || '').trim() : ''));
 

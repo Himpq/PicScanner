@@ -2,7 +2,7 @@
   const PS = window.PS;
   // P5-3 切片 1：像素色彩基元改由共享模块提供
   // （frontend/src/quickedit/pixel/color.js，经 Vue 包挂到 window）。
-  // Vue 包先于本脚本加载，此处解构时序成立；worker 拷贝在切片 2 收敛。
+  // Vue 包先于本脚本加载，此处解构时序成立；Worker 也从同一套共享模块构建。
   const quickeditPixel = (window.PicScannerVue && window.PicScannerVue.quickeditPixel) || {};
   const quickEditRgbToHsl = quickeditPixel.quickEditRgbToHsl;
   const quickEditHueToRgb = quickeditPixel.quickEditHueToRgb;
@@ -10,6 +10,35 @@
   const quickEditHslToPackedRgb = quickeditPixel.quickEditHslToPackedRgb;
   const quickEditSmoothStep = quickeditPixel.quickEditSmoothStep;
   const quickEditLuma = quickeditPixel.quickEditLuma;
+  // 切片 3：HSL 混色器 / 分离色调 / LUT / 色调与细节效果
+  const quickEditHueDistance = quickeditPixel.quickEditHueDistance;
+  const quickEditHslBandWeight = quickeditPixel.quickEditHslBandWeight;
+  const quickEditActiveHslAdjustments = quickeditPixel.quickEditActiveHslAdjustments;
+  const quickEditApplyHslMixer = quickeditPixel.quickEditApplyHslMixer;
+  const quickEditSplitToneActive = quickeditPixel.quickEditSplitToneActive;
+  const quickEditSplitToneWeight = quickeditPixel.quickEditSplitToneWeight;
+  const quickEditSplitToneColor = quickeditPixel.quickEditSplitToneColor;
+  const quickEditBlendSplitToneChannel = quickeditPixel.quickEditBlendSplitToneChannel;
+  const quickEditApplySplitTone = quickeditPixel.quickEditApplySplitTone;
+  const quickEditPrepareLut = quickeditPixel.quickEditPrepareLut;
+  const quickEditLerpLutChannel = quickeditPixel.quickEditLerpLutChannel;
+  const quickEditApplyLut = quickeditPixel.quickEditApplyLut;
+  const quickEditBlendLutColor = quickeditPixel.quickEditBlendLutColor;
+  const quickEditToneChannel = quickeditPixel.quickEditToneChannel;
+  const quickEditApplyContrastChannel = quickeditPixel.quickEditApplyContrastChannel;
+  const quickEditApplyContrast = quickeditPixel.quickEditApplyContrast;
+  const quickEditApplyWhiteBlackLevels = quickeditPixel.quickEditApplyWhiteBlackLevels;
+  const quickEditApplyDehaze = quickeditPixel.quickEditApplyDehaze;
+  const quickEditApplyHighlightShadow = quickeditPixel.quickEditApplyHighlightShadow;
+  const quickEditApplyVibrance = quickeditPixel.quickEditApplyVibrance;
+  const quickEditBwWeightForHue = quickeditPixel.quickEditBwWeightForHue;
+  const quickEditApplyBlackWhiteMixer = quickeditPixel.quickEditApplyBlackWhiteMixer;
+  const quickEditApplyVignette = quickeditPixel.quickEditApplyVignette;
+  const applyQuickEditSharpening = quickeditPixel.applyQuickEditSharpening;
+  const applyQuickEditClarity = quickeditPixel.applyQuickEditClarity;
+  const quickEditGrainNoise = quickeditPixel.quickEditGrainNoise;
+  const applyQuickEditGrain = quickeditPixel.applyQuickEditGrain;
+  const applyQuickEditDetailEffects = quickeditPixel.applyQuickEditDetailEffects;
   const state = PS.state;
   const els = PS.els;
   const lightboxHomeParent = PS.lightboxHomeParent;
@@ -667,112 +696,6 @@
     ctx.putImageData(data, 0, 0);
   }
 
-  function quickEditSplitToneActive(params) {
-    return !!(
-      Number(params.splitToneShadowsStrength || 0)
-      || Number(params.splitToneMidtonesStrength || 0)
-      || Number(params.splitToneHighlightsStrength || 0)
-    );
-  }
-
-  function quickEditSplitToneWeight(value, center, width) {
-    const distance = Math.abs(Number(value || 0) - Number(center || 0));
-    const raw = clamp(1 - distance / Math.max(0.0001, Number(width || 1)), 0, 1);
-    return raw * raw * (3 - 2 * raw);
-  }
-
-  function quickEditSplitToneColor(hue) {
-    return quickEditHslToRgb(hue, 0.72, 0.5);
-  }
-
-  function quickEditBlendSplitToneChannel(value, toneValue, weight) {
-    return quickEditClampByte(Number(value || 0) + (Number(toneValue || 0) - Number(value || 0)) * weight);
-  }
-
-  function quickEditApplySplitTone(r, g, b, clean) {
-    const luminance = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255, 0, 1);
-    const balance = clamp(Number(clean.splitToneBalance || 0) / 100, -1, 1);
-    const shadowCenter = 0.24 + balance * 0.16;
-    const highlightCenter = 0.76 + balance * 0.16;
-    const midCenter = 0.5 + balance * 0.08;
-    const shadowWeight = quickEditSplitToneWeight(luminance, shadowCenter, 0.46) * clamp(Number(clean.splitToneShadowsStrength || 0) / 100, 0, 1);
-    const midtoneWeight = quickEditSplitToneWeight(luminance, midCenter, 0.38) * clamp(Number(clean.splitToneMidtonesStrength || 0) / 100, 0, 1);
-    const highlightWeight = quickEditSplitToneWeight(luminance, highlightCenter, 0.46) * clamp(Number(clean.splitToneHighlightsStrength || 0) / 100, 0, 1);
-    const totalWeight = shadowWeight + midtoneWeight + highlightWeight;
-    if (totalWeight <= 0.0001) return r | (g << 8) | (b << 16);
-    const shadowColor = quickEditSplitToneColor(clean.splitToneShadowsHue);
-    const midtoneColor = quickEditSplitToneColor(clean.splitToneMidtonesHue);
-    const highlightColor = quickEditSplitToneColor(clean.splitToneHighlightsHue);
-    const strength = clamp(totalWeight * 0.42, 0, 0.72);
-    const toneR = (shadowColor.r * shadowWeight + midtoneColor.r * midtoneWeight + highlightColor.r * highlightWeight) / totalWeight;
-    const toneG = (shadowColor.g * shadowWeight + midtoneColor.g * midtoneWeight + highlightColor.g * highlightWeight) / totalWeight;
-    const toneB = (shadowColor.b * shadowWeight + midtoneColor.b * midtoneWeight + highlightColor.b * highlightWeight) / totalWeight;
-    return quickEditBlendSplitToneChannel(r, toneR, strength)
-      | (quickEditBlendSplitToneChannel(g, toneG, strength) << 8)
-      | (quickEditBlendSplitToneChannel(b, toneB, strength) << 16);
-  }
-
-  function quickEditHueDistance(a, b) {
-    const diff = Math.abs((((a - b) % 360) + 540) % 360 - 180);
-    return diff;
-  }
-
-  function quickEditHslBandWeight(hue, center) {
-    return clamp(1 - quickEditHueDistance(hue, center) / 42, 0, 1);
-  }
-
-  function quickEditActiveHslAdjustments(params) {
-    const active = [];
-    QUICK_EDIT_HSL_COLORS.forEach((color) => {
-      const hue = Number(params['hsl_' + color.key + '_hue'] || 0);
-      const saturation = Number(params['hsl_' + color.key + '_saturation'] || 0);
-      const luminance = Number(params['hsl_' + color.key + '_luminance'] || 0);
-      if (!hue && !saturation && !luminance) return;
-      active.push({
-        hueCenter: color.hue,
-        hueShift: hue,
-        saturationShift: saturation / 100,
-        luminanceShift: luminance / 100,
-      });
-    });
-    return active;
-  }
-
-  function quickEditApplyHslMixer(r, g, b, adjustments) {
-    const rn = r / 255;
-    const gn = g / 255;
-    const bn = b / 255;
-    const max = Math.max(rn, gn, bn);
-    const min = Math.min(rn, gn, bn);
-    const l = (max + min) / 2;
-    let h = 0;
-    let s = 0;
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
-      else if (max === gn) h = ((bn - rn) / d + 2) * 60;
-      else h = ((rn - gn) / d + 4) * 60;
-    }
-    let hueShift = 0;
-    let saturationShift = 0;
-    let luminanceShift = 0;
-    for (let index = 0; index < adjustments.length; index += 1) {
-      const adjustment = adjustments[index];
-      const weight = quickEditHslBandWeight(h, adjustment.hueCenter);
-      if (!weight) continue;
-      hueShift += adjustment.hueShift * weight;
-      saturationShift += adjustment.saturationShift * weight;
-      luminanceShift += adjustment.luminanceShift * weight;
-    }
-    if (!hueShift && !saturationShift && !luminanceShift) return r | (g << 8) | (b << 16);
-    return quickEditHslToPackedRgb(
-      h + hueShift,
-      clamp(s * (1 + saturationShift), 0, 1),
-      clamp(l + luminanceShift * 0.5, 0, 1),
-    );
-  }
-
   function hasQuickEditHslAdjustments(params) {
     return quickEditActiveHslAdjustments(normalizeQuickEditParams(params)).length > 0;
   }
@@ -786,359 +709,6 @@
         lut: quickEditPrepareLut(lut),
         strength: clamp(Number(lut.strength || 0), 0, 100) / 100,
       }));
-  }
-
-  function quickEditPrepareLut(lut) {
-    const size = lut.size;
-    const domainMin = lut.domainMin || [0, 0, 0];
-    const domainMax = lut.domainMax || [1, 1, 1];
-    const key = [
-      size,
-      Number(domainMin[0] || 0), Number(domainMin[1] || 0), Number(domainMin[2] || 0),
-      Number(domainMax[0] || 1), Number(domainMax[1] || 1), Number(domainMax[2] || 1),
-    ].join('|');
-    if (lut._quickEditPrepared && lut._quickEditPrepared.key === key) return lut._quickEditPrepared;
-    const buildAxis = (axis) => {
-      const min = Number(domainMin[axis] || 0);
-      const max = Number(domainMax[axis] || 1);
-      const span = Math.max(0.000001, max - min);
-      const low = new Uint16Array(256);
-      const high = new Uint16Array(256);
-      const mix = new Float32Array(256);
-      for (let value = 0; value < 256; value += 1) {
-        const mapped = clamp(((value / 255) - min) / span, 0, 1) * (size - 1);
-        const base = Math.floor(mapped);
-        low[value] = base;
-        high[value] = Math.min(size - 1, base + 1);
-        mix[value] = mapped - base;
-      }
-      return { low, high, mix };
-    };
-    const red = buildAxis(0);
-    const green = buildAxis(1);
-    const blue = buildAxis(2);
-    lut._quickEditPrepared = {
-      key,
-      size,
-      data: lut.data,
-      r0: red.low,
-      r1: red.high,
-      rt: red.mix,
-      g0: green.low,
-      g1: green.high,
-      gt: green.mix,
-      b0: blue.low,
-      b1: blue.high,
-      bt: blue.mix,
-    };
-    return lut._quickEditPrepared;
-  }
-
-  function quickEditLerpLutChannel(data, i000, i001, i010, i011, i100, i101, i110, i111, channel, rt, gt, bt) {
-    const c000 = data[i000 + channel] || 0;
-    const c001 = data[i001 + channel] || 0;
-    const c010 = data[i010 + channel] || 0;
-    const c011 = data[i011 + channel] || 0;
-    const c100 = data[i100 + channel] || 0;
-    const c101 = data[i101 + channel] || 0;
-    const c110 = data[i110 + channel] || 0;
-    const c111 = data[i111 + channel] || 0;
-    const c00 = c000 + (c100 - c000) * rt;
-    const c01 = c001 + (c101 - c001) * rt;
-    const c10 = c010 + (c110 - c010) * rt;
-    const c11 = c011 + (c111 - c011) * rt;
-    const c0 = c00 + (c10 - c00) * gt;
-    const c1 = c01 + (c11 - c01) * gt;
-    return c0 + (c1 - c0) * bt;
-  }
-
-  function quickEditApplyLut(r, g, b, lut) {
-    const data = lut.data;
-    const size = lut.size;
-    const r0 = lut.r0[r];
-    const g0 = lut.g0[g];
-    const b0 = lut.b0[b];
-    const r1 = lut.r1[r];
-    const g1 = lut.g1[g];
-    const b1 = lut.b1[b];
-    const rt = lut.rt[r];
-    const gt = lut.gt[g];
-    const bt = lut.bt[b];
-    const i000 = ((b0 * size + g0) * size + r0) * 3;
-    const i001 = ((b1 * size + g0) * size + r0) * 3;
-    const i010 = ((b0 * size + g1) * size + r0) * 3;
-    const i011 = ((b1 * size + g1) * size + r0) * 3;
-    const i100 = ((b0 * size + g0) * size + r1) * 3;
-    const i101 = ((b1 * size + g0) * size + r1) * 3;
-    const i110 = ((b0 * size + g1) * size + r1) * 3;
-    const i111 = ((b1 * size + g1) * size + r1) * 3;
-    const outR = quickEditClampByte(quickEditLerpLutChannel(data, i000, i001, i010, i011, i100, i101, i110, i111, 0, rt, gt, bt) * 255);
-    const outG = quickEditClampByte(quickEditLerpLutChannel(data, i000, i001, i010, i011, i100, i101, i110, i111, 1, rt, gt, bt) * 255);
-    const outB = quickEditClampByte(quickEditLerpLutChannel(data, i000, i001, i010, i011, i100, i101, i110, i111, 2, rt, gt, bt) * 255);
-    return outR | (outG << 8) | (outB << 16);
-  }
-
-  function quickEditBlendLutColor(r, g, b, activeLuts) {
-    if (!activeLuts || !activeLuts.length) return r | (g << 8) | (b << 16);
-    let nextR = r;
-    let nextG = g;
-    let nextB = b;
-    activeLuts.forEach((activeLut) => {
-      const mapped = quickEditApplyLut(nextR, nextG, nextB, activeLut.lut);
-      const strength = activeLut.strength;
-      const mappedR = mapped & 255;
-      const mappedG = (mapped >> 8) & 255;
-      const mappedB = (mapped >> 16) & 255;
-      nextR = quickEditClampByte(nextR + (mappedR - nextR) * strength);
-      nextG = quickEditClampByte(nextG + (mappedG - nextG) * strength);
-      nextB = quickEditClampByte(nextB + (mappedB - nextB) * strength);
-    });
-    return nextR | (nextG << 8) | (nextB << 16);
-  }
-
-  function quickEditToneChannel(value, amount, weight) {
-    const strength = clamp(Number(amount || 0) / 100, -1, 1) * clamp(Number(weight || 0), 0, 1);
-    if (!strength) return value;
-    return strength > 0
-      ? value + (255 - value) * strength * 0.72
-      : value + value * strength * 0.72;
-  }
-
-  function quickEditApplyContrastChannel(value, contrast) {
-    const amount = clamp(Number(contrast || 0) / 100, -1, 1);
-    if (!amount) return value;
-    const factor = amount > 0 ? 1 + amount * 1.45 : 1 + amount * 0.82;
-    return quickEditClampByte((value - 128) * factor + 128);
-  }
-
-  function quickEditApplyContrast(r, g, b, contrast) {
-    if (!contrast) return r | (g << 8) | (b << 16);
-    return quickEditApplyContrastChannel(r, contrast)
-      | (quickEditApplyContrastChannel(g, contrast) << 8)
-      | (quickEditApplyContrastChannel(b, contrast) << 16);
-  }
-
-  function quickEditApplyWhiteBlackLevels(r, g, b, whites, blacks) {
-    const whiteAmount = Number(whites || 0);
-    const blackAmount = Number(blacks || 0);
-    if (!whiteAmount && !blackAmount) return r | (g << 8) | (b << 16);
-    const luma = quickEditLuma(r, g, b);
-    const whiteWeight = quickEditSmoothStep(0.58, 0.96, luma);
-    const blackWeight = 1 - quickEditSmoothStep(0.04, 0.42, luma);
-    const nextR = quickEditToneChannel(quickEditToneChannel(r, blackAmount, blackWeight), whiteAmount, whiteWeight);
-    const nextG = quickEditToneChannel(quickEditToneChannel(g, blackAmount, blackWeight), whiteAmount, whiteWeight);
-    const nextB = quickEditToneChannel(quickEditToneChannel(b, blackAmount, blackWeight), whiteAmount, whiteWeight);
-    return quickEditClampByte(nextR) | (quickEditClampByte(nextG) << 8) | (quickEditClampByte(nextB) << 16);
-  }
-
-  function quickEditApplyDehaze(r, g, b, dehaze) {
-    const amount = clamp(Number(dehaze || 0) / 100, -1, 1);
-    if (!amount) return r | (g << 8) | (b << 16);
-    const luma = quickEditLuma(r, g, b);
-    const gray = luma * 255;
-    if (amount > 0) {
-      const darkChannel = Math.min(r, g, b) / 255;
-      const hazeWeight = quickEditSmoothStep(0.18, 0.92, luma) * (1 - darkChannel * 0.48);
-      const contrastFactor = 1 + amount * (0.52 + hazeWeight * 0.78);
-      const saturationFactor = 1 + amount * (0.10 + hazeWeight * 0.24);
-      const density = amount * hazeWeight * 18;
-      const nextR = (gray + (((r - 128) * contrastFactor + 128 - density) - gray) * saturationFactor);
-      const nextG = (gray + (((g - 128) * contrastFactor + 128 - density) - gray) * saturationFactor);
-      const nextB = (gray + (((b - 128) * contrastFactor + 128 - density) - gray) * saturationFactor);
-      return quickEditClampByte(nextR) | (quickEditClampByte(nextG) << 8) | (quickEditClampByte(nextB) << 16);
-    }
-    const haze = -amount;
-    const contrastFactor = 1 - haze * 0.42;
-    const saturationFactor = 1 - haze * 0.28;
-    const veil = haze * (0.12 + quickEditSmoothStep(0.18, 0.94, luma) * 0.16);
-    const nextR = gray + (((r - 128) * contrastFactor + 128) - gray) * saturationFactor;
-    const nextG = gray + (((g - 128) * contrastFactor + 128) - gray) * saturationFactor;
-    const nextB = gray + (((b - 128) * contrastFactor + 128) - gray) * saturationFactor;
-    const veilColor = 224;
-    return quickEditClampByte(nextR + (veilColor - nextR) * veil)
-      | (quickEditClampByte(nextG + (veilColor - nextG) * veil) << 8)
-      | (quickEditClampByte(nextB + (veilColor - nextB) * veil) << 16);
-  }
-
-  function quickEditApplyHighlightShadow(r, g, b, highlights, shadows) {
-    const highlightAmount = Number(highlights || 0);
-    const shadowAmount = Number(shadows || 0);
-    if (!highlightAmount && !shadowAmount) return r | (g << 8) | (b << 16);
-    const luma = quickEditLuma(r, g, b);
-    const highlightWeight = quickEditSmoothStep(0.48, 0.96, luma);
-    const shadowWeight = 1 - quickEditSmoothStep(0.04, 0.52, luma);
-    const nextR = quickEditToneChannel(quickEditToneChannel(r, shadowAmount, shadowWeight), highlightAmount, highlightWeight);
-    const nextG = quickEditToneChannel(quickEditToneChannel(g, shadowAmount, shadowWeight), highlightAmount, highlightWeight);
-    const nextB = quickEditToneChannel(quickEditToneChannel(b, shadowAmount, shadowWeight), highlightAmount, highlightWeight);
-    return quickEditClampByte(nextR) | (quickEditClampByte(nextG) << 8) | (quickEditClampByte(nextB) << 16);
-  }
-
-  function quickEditApplyVibrance(r, g, b, vibrance) {
-    const amount = clamp(Number(vibrance || 0) / 100, -1, 1);
-    if (!amount) return r | (g << 8) | (b << 16);
-    const hsl = quickEditRgbToHsl(r, g, b);
-    const protect = 1 - hsl.s;
-    const factor = amount > 0
-      ? 1 + amount * (0.35 + protect * 0.85)
-      : 1 + amount * (0.72 + hsl.s * 0.28);
-    const packed = quickEditHslToPackedRgb(hsl.h, clamp(hsl.s * factor, 0, 1), hsl.l);
-    return packed;
-  }
-
-  function quickEditBwWeightForHue(hue, center, width) {
-    const distance = quickEditHueDistance(hue, center);
-    return clamp(1 - distance / Math.max(1, Number(width || 1)), 0, 1);
-  }
-
-  function quickEditApplyBlackWhiteMixer(r, g, b, clean) {
-    const amount = clamp(Number(clean.blackWhite || 0) / 100, 0, 1);
-    if (!amount) return r | (g << 8) | (b << 16);
-    const hsl = quickEditRgbToHsl(r, g, b);
-    const weights = [
-      quickEditBwWeightForHue(hsl.h, 0, 42) * Number(clean.bwRed || 0),
-      quickEditBwWeightForHue(hsl.h, 60, 48) * Number(clean.bwYellow || 0),
-      quickEditBwWeightForHue(hsl.h, 120, 54) * Number(clean.bwGreen || 0),
-      quickEditBwWeightForHue(hsl.h, 180, 48) * Number(clean.bwAqua || 0),
-      quickEditBwWeightForHue(hsl.h, 230, 54) * Number(clean.bwBlue || 0),
-      quickEditBwWeightForHue(hsl.h, 310, 54) * Number(clean.bwMagenta || 0),
-    ];
-    const mixAdjust = weights.reduce((sum, value) => sum + value, 0) / 100;
-    const luma = clamp((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 + mixAdjust * 0.32, 0, 1);
-    const gray = quickEditClampByte(luma * 255);
-    return quickEditClampByte(r + (gray - r) * amount)
-      | (quickEditClampByte(g + (gray - g) * amount) << 8)
-      | (quickEditClampByte(b + (gray - b) * amount) << 16);
-  }
-
-  function quickEditApplyVignette(pixels, width, height, clean) {
-    const amount = clamp(Number(clean.vignette || 0) / 100, -1, 1);
-    const w = Math.max(1, Math.round(Number(width || 0)));
-    const h = Math.max(1, Math.round(Number(height || 0)));
-    if (!amount || w < 2 || h < 2 || pixels.length < w * h * 4) return;
-    const feather = clamp(Number(clean.vignetteFeather === undefined ? 58 : clean.vignetteFeather) / 100, 0, 1);
-    const inner = 0.18 + feather * 0.34;
-    const outer = 0.92 + feather * 0.18;
-    const cx = (w - 1) / 2;
-    const cy = (h - 1) / 2;
-    const invX = 1 / Math.max(1, cx);
-    const invY = 1 / Math.max(1, cy);
-    for (let y = 0; y < h; y += 1) {
-      const ny = (y - cy) * invY;
-      for (let x = 0; x < w; x += 1) {
-        const i = (y * w + x) * 4;
-        if (!pixels[i + 3]) continue;
-        const nx = (x - cx) * invX;
-        const distance = Math.sqrt(nx * nx + ny * ny);
-        const raw = clamp((distance - inner) / Math.max(0.0001, outer - inner), 0, 1);
-        const weight = raw * raw * (3 - 2 * raw);
-        const factor = amount > 0 ? 1 - weight * amount * 0.72 : 1 + weight * (-amount) * 0.48;
-        pixels[i] = quickEditClampByte(pixels[i] * factor);
-        pixels[i + 1] = quickEditClampByte(pixels[i + 1] * factor);
-        pixels[i + 2] = quickEditClampByte(pixels[i + 2] * factor);
-      }
-    }
-  }
-
-  function applyQuickEditSharpening(pixels, width, height, sharpening) {
-    const amount = clamp(Number(sharpening || 0), 0, 100) / 100;
-    const w = Math.max(1, Math.round(Number(width || 0)));
-    const h = Math.max(1, Math.round(Number(height || 0)));
-    if (!amount || w < 3 || h < 3 || pixels.length < w * h * 4) return;
-    const source = new Uint8ClampedArray(pixels);
-    const row = w * 4;
-    const strength = amount * 1.25;
-    const threshold = 1 + amount * 3;
-    for (let y = 1; y < h - 1; y += 1) {
-      let offset = y * row + 4;
-      for (let x = 1; x < w - 1; x += 1, offset += 4) {
-        if (!source[offset + 3]) continue;
-        for (let channel = 0; channel < 3; channel += 1) {
-          const index = offset + channel;
-          const center = source[index];
-          const blur = (
-            source[index] * 2
-            + source[index - 4]
-            + source[index + 4]
-            + source[index - row]
-            + source[index + row]
-          ) / 6;
-          const delta = center - blur;
-          if (Math.abs(delta) < threshold) continue;
-          pixels[index] = quickEditClampByte(center + delta * strength);
-        }
-      }
-    }
-  }
-
-  function applyQuickEditClarity(pixels, width, height, clarity) {
-    const amount = clamp(Number(clarity || 0), -100, 100) / 100;
-    const w = Math.max(1, Math.round(Number(width || 0)));
-    const h = Math.max(1, Math.round(Number(height || 0)));
-    if (!amount || w < 3 || h < 3 || pixels.length < w * h * 4) return;
-    const source = new Uint8ClampedArray(pixels);
-    const row = w * 4;
-    const strength = amount * 0.92;
-    const threshold = amount > 0 ? 1.5 : 0;
-    for (let y = 1; y < h - 1; y += 1) {
-      let offset = y * row + 4;
-      for (let x = 1; x < w - 1; x += 1, offset += 4) {
-        if (!source[offset + 3]) continue;
-        const luma = quickEditLuma(source[offset], source[offset + 1], source[offset + 2]);
-        const midtoneWeight = clamp(1 - Math.abs(luma - 0.5) * 1.65, 0, 1);
-        if (!midtoneWeight) continue;
-        for (let channel = 0; channel < 3; channel += 1) {
-          const index = offset + channel;
-          const center = source[index];
-          const blur = (
-            center * 4
-            + source[index - 4] * 2
-            + source[index + 4] * 2
-            + source[index - row] * 2
-            + source[index + row] * 2
-            + source[index - row - 4]
-            + source[index - row + 4]
-            + source[index + row - 4]
-            + source[index + row + 4]
-          ) / 16;
-          const delta = center - blur;
-          if (Math.abs(delta) < threshold) continue;
-          pixels[index] = quickEditClampByte(center + delta * strength * midtoneWeight);
-        }
-      }
-    }
-  }
-
-  function quickEditGrainNoise(x, y, seed) {
-    let value = Math.imul(x + 1, 374761393) ^ Math.imul(y + 1, 668265263) ^ Math.imul(seed + 1, 224682251);
-    value = Math.imul(value ^ (value >>> 13), 1274126177);
-    return (((value ^ (value >>> 16)) >>> 0) / 2147483647.5) - 1;
-  }
-
-  function applyQuickEditGrain(pixels, width, height, grain) {
-    const amount = clamp(Number(grain || 0), 0, 100) / 100;
-    const w = Math.max(1, Math.round(Number(width || 0)));
-    const h = Math.max(1, Math.round(Number(height || 0)));
-    if (!amount || w < 1 || h < 1 || pixels.length < w * h * 4) return;
-    const strength = amount * 28;
-    const seed = Math.round(amount * 997);
-    for (let y = 0; y < h; y += 1) {
-      let offset = y * w * 4;
-      for (let x = 0; x < w; x += 1, offset += 4) {
-        if (!pixels[offset + 3]) continue;
-        const luma = quickEditLuma(pixels[offset], pixels[offset + 1], pixels[offset + 2]);
-        const midtoneWeight = 0.36 + clamp(1 - Math.abs(luma - 0.5) * 2, 0, 1) * 0.64;
-        const noise = quickEditGrainNoise(x, y, seed) * strength * midtoneWeight;
-        pixels[offset] = quickEditClampByte(pixels[offset] + noise);
-        pixels[offset + 1] = quickEditClampByte(pixels[offset + 1] + noise);
-        pixels[offset + 2] = quickEditClampByte(pixels[offset + 2] + noise);
-      }
-    }
-  }
-
-  function applyQuickEditDetailEffects(pixels, width, height, clean) {
-    applyQuickEditClarity(pixels, width, height, clean.clarity);
-    applyQuickEditSharpening(pixels, width, height, clean.sharpening);
-    applyQuickEditGrain(pixels, width, height, clean.grain);
   }
 
   function applyQuickEditPixelAdjustments(pixels, params, width, height) {

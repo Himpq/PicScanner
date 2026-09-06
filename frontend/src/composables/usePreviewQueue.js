@@ -14,6 +14,7 @@ import { ref } from 'vue';
 import { call } from '../bridge/index.js';
 import { log as logTo } from '../utils/log.js';
 import { PREVIEW_CONCURRENCY } from '../constants.js';
+import { getPhotoPreviewUrl } from '../gallery/previewUrl.js';
 
 export function usePreviewQueue(options = {}) {
   const concurrency = Number(options.concurrency ?? PREVIEW_CONCURRENCY) || 4;
@@ -74,14 +75,11 @@ export function usePreviewQueue(options = {}) {
     const pid = Number(photo && (photo.id ?? photo.photo_id));
     if (!pid) return false;
     const idStr = String(pid);
-    const previewUrl = photo.thumbnail_url || photo.preview_url || photo.lightbox_url || '';
+    const previewUrl = getPhotoPreviewUrl(photo);
     // 已有图或已失败/队列中则跳过
     if (previewUrl) return false;
-    if (!photo.previewable && !photo.preview_url && !photo.is_raw) {
-      // 非 previewable 且非 RAW，无需排队；RAW 会显示占位
-      // 但 raw 若 previewable=false 也应显示 RAW 文字，不入队
-      if (!photo.previewable) return false;
-    }
+    // 没有可直接展示的 URL 时，只有后端声明可生成预览的照片才入队。
+    if (!photo.previewable) return false;
     if (photo.preview_failed || isFailed(pid)) return false;
     if (isPending(pid)) {
       if (opts.priority) promoteQueuedPreview(pid);
@@ -111,7 +109,7 @@ export function usePreviewQueue(options = {}) {
           const arr = store.photoCache.get(item.dateKey);
           if (arr) {
             const found = arr.find((p) => Number(p.id ?? p.photo_id) === Number(item.photoId));
-            if (found && (found.thumbnail_url || found.preview_url || found.lightbox_url)) {
+            if (found && getPhotoPreviewUrl(found)) {
               pending.delete(String(item.photoId));
               continue;
             }
@@ -159,8 +157,8 @@ export function usePreviewQueue(options = {}) {
           }
         } catch {}
       }).finally(() => {
-        pending.delete(String(pid));
         if (item.sessionId !== sessionId.value) return;
+        pending.delete(String(pid));
         active.value = Math.max(0, active.value - 1);
         // 触发下一次调度
         drain();

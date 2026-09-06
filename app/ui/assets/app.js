@@ -10816,6 +10816,9 @@
     if (!state.quickEdit.picking) return;
     state.quickEdit.picking = false;
     if (els.gallery) els.gallery.classList.remove('quick-edit-picking');
+    // P1：通知 Vue 同步。Q/Esc 取消不经过 openQuickEdit（那里有自己的 notifyVue），
+    // PhotoGrid 的高亮边框依赖这条信号熄灭。
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
   }
 
   function closeQuickEdit(options) {
@@ -11134,6 +11137,8 @@
     PS.hideContextMenu();
     PS.hideNoteTooltip();
     if (els.gallery) els.gallery.classList.add('quick-edit-picking');
+    // P1：通知 Vue 同步（PhotoGrid 依 quickEdit store 的 picking 点亮选图边框）
+    if (typeof PS !== 'undefined' && PS && typeof PS.notifyVue === 'function') PS.notifyVue();
     showToast('选择一张照片进行快速调整');
     return true;
   }
@@ -11374,6 +11379,11 @@
   }
 
   function updateDateHighlight() {
+    // P4：日期栏高亮由 PhotoGrid 的 syncRailFromScroll 回写接管。
+    // 隐藏的 #gallery 里所有分区 offsetTop/offsetHeight 均为 0，
+    // 下面的锚点计算会对每个分区都命中 top<=0<=bottom，best 恒被覆盖成
+    // 最后一个分区 —— 表现为日期栏高亮锁死在最后一位。
+    if (window.PicScannerVue && typeof window.PicScannerVue.isPhotoGridActive === 'function' && window.PicScannerVue.isPhotoGridActive()) return;
     const sections = Array.from(els.gallery.querySelectorAll('.date-section'));
     if (!sections.length) return;
 

@@ -28,7 +28,7 @@
         <span class="badge" style="display:none"></span>
       </div>
 
-      <div v-if="category" class="photo-category-badge" :title="category">{{ category }}</div>
+      <div v-if="category" class="photo-category-badge" :title="category">{{ categoryBadge }}</div>
       <div v-if="note" class="note-icon photo-note-icon" :data-note="note" tabindex="0">✎</div>
 
       <div v-if="batchIndex > 0" class="photo-batch-badge"><span aria-hidden="true">✓</span><b>{{ batchIndex }}</b></div>
@@ -78,6 +78,10 @@ const canPreview = computed(() => {
 const previewSrc = computed(() => (props.photo && props.photo.preview_url) || '');
 const note = computed(() => (props.photo ? String(props.photo.note || '') : ''));
 const category = computed(() => (props.photo ? String(props.photo.category || '').trim() : ''));
+
+// 与 legacy categoryBadgeText 对齐：22×22 徽标只放首字符（全名进 title）。
+// 渲染全名会在定宽徽标里一字一行竖排溢出（2026-09 用户截图的「同学照片」竖条）。
+const categoryBadge = computed(() => (category.value ? category.value.slice(0, 1) : ''));
 
 const classes = computed(() => {
   const p = props.photo;

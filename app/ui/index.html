@@ -68,6 +68,14 @@
           <div id="gallery" class="gallery"></div>
           <div id="older-sentinel" class="older-sentinel">检查更早日期...</div>
         </div>
+        <!-- P4：Vue PhotoGrid 的滚动容器（灰度开关 vue_photogrid 开启时，
+             main.js 显示本元素并隐藏 #gallery-scroll，关闭时反之）。
+             挂载契约：必须带 .gallery-scroll —— PhotoGrid 组件根节点是
+             display:contents，画布直接成为本元素的布局子项。
+             .photogrid-scroller 禁用浏览器滚动锚定（islands-shared.css），
+             否则 windowing 更新 canvas 高度时 scroll anchoring 会掰动
+             scrollTop，表现为视图瞬移/弹回。 -->
+        <div id="vue-photogrid" class="gallery-scroll photogrid-scroller hidden" aria-label="照片墙（Vue）"></div>
       </section>
 
       <nav class="date-rail" id="vanilla-date-rail">
@@ -232,12 +240,12 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=1788099094362"></script>
+  <script src="assets/vue/picscanner-vue.js?v=1788713162357"></script>
   <script src="assets/app_core.js?v=plugins-20260901-1"></script>
-  <script src="assets/app_gallery.js?v=fix6-20260901"></script>
+  <script src="assets/app_gallery.js?v=p4-rail-fix-20260907"></script>
   <script src="assets/app_lightbox.js?v=preview-with-loading-20260828-4"></script>
   <script src="assets/app_modules.js?v=modules-20260723-2"></script>
   <script src="assets/collections.js?v=fix6-20260901"></script>
-  <script src="assets/app.js?v=fix7-20260902"></script>
+  <script src="assets/app.js?v=p4-rail-fix-20260907"></script>
 </body>
 </html>

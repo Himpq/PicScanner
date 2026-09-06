@@ -16,7 +16,7 @@
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
   >
-    <div ref="canvasEl" class="photogrid-canvas" :class="{ zooming: zoomPreview.active }" :style="canvasStyle">
+    <div ref="canvasEl" class="photogrid-canvas" :class="{ zooming: zoomPreview.active, 'quick-edit-picking': quickEditStore.picking }" :style="canvasStyle">
       <section
         v-for="s in plan.sections"
         :key="s.dateKey"
@@ -69,6 +69,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useGalleryStore } from '../../stores/gallery.js';
 import { useBatchStore } from '../../stores/batch.js';
+import { useQuickEditStore } from '../../stores/quickEdit.js';
 import { usePreviewQueue } from '../../composables/usePreviewQueue.js';
 import { renderPlan, zoomPlan } from '../../gallery/windowing.js';
 import { sectionMetrics, itemPosition, PHOTO_GRID_GAP, DATE_HEADER_HEIGHT } from '../../gallery/layout.js';
@@ -90,6 +91,7 @@ const LOAD_DATE_BOTTOM_MARGIN = 700;
 
 const store = useGalleryStore();
 const batchStore = useBatchStore();
+const quickEditStore = useQuickEditStore();
 
 // rootEl 是 display:contents 的组件根;真正的滚动容器是它的父元素
 // (#vue-photogrid,挂载契约要求它带 .gallery-scroll)。scrollEl 指向滚动容器。
@@ -193,6 +195,8 @@ function headerCount(s) {
 function moreText(s) {
   const loaded = store.photoOffsets.get(s.dateKey) || 0;
   if (store.isPhotoLoading(s.dateKey)) return '加载中...';
+  // 计数未同步（瞬态为 0）时沿用 legacy 的初始文案，避免满屏「这一天已加载完」
+  if (!s.count) return '继续检查这一天...';
   if (loaded >= s.count) return '这一天已加载完';
   return '滚动到这里会继续加载';
 }

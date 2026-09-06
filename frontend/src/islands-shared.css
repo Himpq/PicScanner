@@ -149,3 +149,16 @@
 .photogrid-scroller {
   overflow-anchor: none;
 }
+
+/* P4 快速调整选图（Q）的高亮：legacy 规则挂在 .gallery.quick-edit-picking
+   （隐藏的 #gallery，Vue 卡片不在其子树里），这里在 Vue 画布上镜像同一份声明。
+   类由 PhotoGrid 依 quickEdit store 的 picking 绑定，开/关经 PS.notifyVue 同步。 */
+.photogrid-canvas.quick-edit-picking .photo-card.openable {
+  border-color: rgba(224,164,90,0.56);
+}
+
+.photogrid-canvas.quick-edit-picking .photo-card.openable:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(224,164,90,0.26);
+}
+

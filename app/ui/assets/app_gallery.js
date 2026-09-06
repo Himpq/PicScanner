@@ -1575,7 +1575,10 @@
     renderDateLabel(pill, date.date_key);
     applyDateCover(pill, date.date_key);
     pill.addEventListener('click', () => {
-      jumpToDate(date.date_key);
+      // 经 PS 调用：P4 下 PhotoGrid 劫持 PS.jumpToDate，点击才能滚 Vue 画布；
+      // legacy 模式下 PS.jumpToDate 就是本闭包，行为不变。直调闭包会去滚
+      // 隐藏的 #gallery-scroll —— 表现为「点了不跳转」。
+      PS.jumpToDate(date.date_key);
     });
     pill.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
@@ -2621,6 +2624,13 @@
       applyPhotoMarkToCard(card, photo);
       updatePhotoCardMeta(card, photo, !!card.querySelector('img.loaded'));
     });
+    // P4：把标记同步进 Vue store（PhotoGrid 卡片的响应式数据源）。
+    // 不补这一步的话，Vue 卡片要等预览管线 patchPhoto 回填整个照片对象时
+    // 才"顺便"看到新标记，表现为收藏/隐藏/笔记/分类延迟出现。
+    // legacy 模式下 store 没有按日期照片数组，此调用为 no-op。
+    if (window.PicScannerVue && typeof window.PicScannerVue.onLegacyPhotoMarksChanged === 'function') {
+      try { window.PicScannerVue.onLegacyPhotoMarksChanged(cleanName); } catch {}
+    }
   }
 
   function setPhotoFavorite(photo, favorite) {

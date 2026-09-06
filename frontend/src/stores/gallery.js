@@ -82,16 +82,27 @@ export const useGalleryStore = defineStore('gallery', () => {
   function hydrateFromLegacy() {
     const PS = window.PS;
     if (!PS || !PS.state) return;
+    // resetGallery 瞬态保护：legacy 重置时把集合整体替换成空 Map（随后重填）。
+    // dates 已有「空 legacy 不覆盖非空 store」守卫；counts/exif 若无对称守卫，
+    // 头部会全部变成「0 张 · EXIF 0」、页脚满屏「这一天已加载完」。
+    // 规则：空 legacy 集合不覆盖非空 store 数据；非空数据照常同步；
+    // 退回来源屏（isReset，无来源上下文）时显式一起清空。
+    let forceClearCounts = false;
     if (Array.isArray(PS.state.dates)) {
       if (PS.state.dates.length === 0 && dates.value.length > 0) {
         const isReset = !PS.state.loadingDates && PS.state.dates.length === 0 && !PS.state.currentSourceId;
-        if (!isReset) { /* 保留 Vue 侧 dates */ } else if (dates.value.length) dates.value = [];
+        if (!isReset) { /* resetGallery 瞬态：dates 保留 */ } else if (dates.value.length) { dates.value = []; forceClearCounts = true; }
       } else if (!arraysEqualShallow(dates.value, PS.state.dates)) {
         dates.value = [...PS.state.dates];
       }
     }
-    if (PS.state.dateCounts instanceof Map && !shallowMapEqual(dateCounts.value, PS.state.dateCounts)) dateCounts.value = new Map(PS.state.dateCounts);
-    if (PS.state.dateExifCounts instanceof Map && !shallowMapEqual(dateExifCounts.value, PS.state.dateExifCounts)) dateExifCounts.value = new Map(PS.state.dateExifCounts);
+    const syncCounts = (legacyMap, storeRef) => {
+      if (!(legacyMap instanceof Map)) return;
+      if (!forceClearCounts && legacyMap.size === 0 && storeRef.value.size > 0) return;
+      if (!shallowMapEqual(storeRef.value, legacyMap)) storeRef.value = new Map(legacyMap);
+    };
+    syncCounts(PS.state.dateCounts, dateCounts);
+    syncCounts(PS.state.dateExifCounts, dateExifCounts);
     if (PS.state.dateCovers instanceof Map && !shallowMapEqual(dateCovers.value, PS.state.dateCovers)) dateCovers.value = new Map(PS.state.dateCovers);
     if (PS.state.dateNotes instanceof Map && !shallowMapEqual(dateNotes.value, PS.state.dateNotes)) dateNotes.value = new Map(PS.state.dateNotes);
     if (PS.state.visibleDates instanceof Set && !shallowSetEqual(visibleDates.value, PS.state.visibleDates)) visibleDates.value = new Set(PS.state.visibleDates);

@@ -5,6 +5,10 @@ export const useQuickEditStore = defineStore('quickEdit', () => {
   const photo = ref(null);
   const params = ref(null);
   const open = ref(false);
+  // Q 进入的「快速调整选图」模式。唯一写入口在 legacy 的 beginQuickEditPicking /
+  // cancelQuickEditPicking，经 PS.notifyVue → hydrateFromLegacy 同步过来；
+  // PhotoGrid 依它点亮选图边框高亮。
+  const picking = ref(false);
   const viewZoom = ref(1);
   const collapsed = ref({});
 
@@ -15,6 +19,7 @@ export const useQuickEditStore = defineStore('quickEdit', () => {
     photo.value = qe.photo || null;
     if (qe.params && typeof qe.params === 'object') params.value = { ...qe.params };
     open.value = !!qe.open;
+    picking.value = !!qe.picking;
     viewZoom.value = Number(qe.viewZoom || 1);
     try {
       if (PS.quickEditCollapsedSections) collapsed.value = { ...PS.quickEditCollapsedSections() };
@@ -87,7 +92,7 @@ export const useQuickEditStore = defineStore('quickEdit', () => {
   const hasPhoto = computed(() => !!photo.value);
 
   return {
-    photo, params, open, viewZoom, collapsed, hasPhoto,
+    photo, params, open, picking, viewZoom, collapsed, hasPhoto,
     hydrateFromLegacy, syncToLegacy,
     setParam, setTemperature, openQuickEdit, closeQuickEdit, toggleSection,
   };

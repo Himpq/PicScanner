@@ -35,6 +35,7 @@ import { useCollectionsStore } from './stores/collections.js';
 import CollectionsScreen from './islands/CollectionsScreen.vue';
 import CollectionDetailScreen from './islands/CollectionDetailScreen.vue';
 import SettingsScreen from './islands/SettingsScreen.vue';
+import * as quickeditPixelColor from './quickedit/pixel/color.js';
 import { logWarn } from './utils/log.js';
 
 const COMPONENTS = {
@@ -353,6 +354,10 @@ window.PicScannerVue = {
   // PhotoGrid 由 legacy #gallery 渲染（P4 前不做 Vue 版，避免双轨竞态）
   // P2 纯函数高度模型，供 legacy 与未来的 Vue PhotoGrid 共用
   layout,
+  // P5-3：QuickEdit 像素基元共享模块。app.js（经典 IIFE，不能 import）与
+  // quick-edit-worker（切片 2 起改为模块 worker）都从这里取同一份实现，
+  // 消除历史上 app.js / worker 两份拷贝的漂移隐患。
+  quickeditPixel: quickeditPixelColor,
   // P4：Vue PhotoGrid 是否在运行。legacy 的 renderPhotoPlaceholders 用它跳过
   // 隐藏容器里的占位卡构建（进入工作区曾是 ~1.9 万个空节点）。
   isPhotoGridActive: () => !!photoGridApp,

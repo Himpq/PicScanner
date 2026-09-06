@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -128,13 +129,14 @@ def print_results(results: list[tuple[str, float]], conf: list[float] | None = N
 
 
 def open_result(path: str) -> None:
+    # 参数以列表形式传给系统打开器，不经 shell 拼接（修复命令注入面）
     try:
         if sys.platform == "win32":
             os.startfile(path)  # noqa: S606
         elif sys.platform == "darwin":
-            os.system(f'open "{path}"')  # noqa: S605
+            subprocess.run(["open", path], check=False)
         else:
-            os.system(f'xdg-open "{path}"')  # noqa: S605
+            subprocess.run(["xdg-open", path], check=False)
     except Exception as exc:
         print(f"  无法打开: {exc}")
 

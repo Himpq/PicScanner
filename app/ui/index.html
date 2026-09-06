@@ -230,7 +230,9 @@
        权威常量与 bridgeCall 写回 window.PS，双向桥接在此处真正生效。若反序，app_core 将无法调用该方法。
     3) app_core.js → app_gallery.js → app_lightbox.js → app_modules.js → app.js 为 Vanilla 状态机与业务总线，必须在 Vue 之后
   -->
-  <script src="assets/quick_edit_worker.js?v=edit-stages-20260717-3"></script>
+  <!-- P5-3 切片 2：worker 源已改为 vite 构建产物（构建时内联 pixel 共享模块，
+       并被变换为「源码字符串赋值」文件；?v= 由构建自动盖章）。 -->
+  <script src="assets/vue/quick-edit-worker.js?v=1788718234063"></script>
   <script src="assets/quick_edit_geometry.js?v=frame-axis-space-20260819-1"></script>
   <script src="assets/pic_modification.js?v=settings-alt-exif-20260703-1"></script>
   <script src="assets/raw_edit.js?v=edit-stages-20260717-3"></script>
@@ -238,7 +240,7 @@
   <script src="assets/batch_renderer.js?v=edit-stages-20260717-3"></script>
   <script src="assets/batch_processing.js?v=batch-edit-tabs-20260717-1"></script>
   <script src="assets/batch_selection.js?v=batch-edit-tabs-20260717-1"></script>
-  <script src="assets/vue/picscanner-vue.js?v=1788715474818"></script>
+  <script src="assets/vue/picscanner-vue.js?v=1788718233468"></script>
   <script src="assets/app_core.js?v=plugins-20260901-1"></script>
   <script src="assets/app_gallery.js?v=p4-engine-out-20260907"></script>
   <script src="assets/app_lightbox.js?v=p4-engine-out-20260907"></script>

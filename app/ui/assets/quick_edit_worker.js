@@ -1,3 +1,18 @@
+// P5-3 切片 2：色彩基元改由共享模块提供（与 app.js 主线程同源，消除双份漂移）。
+// 本文件现在是 vite 的 worker 入口（vite.worker.config.js）：import 会被内联进
+// 自包含 bundle，构建产物再被插件变换为「源码字符串赋值」文件，供 index.html
+// 加载后由 app.js 造 Blob Worker（file:// 下无法直接构造文件 Worker，字符串是硬约束）。
+import {
+  clamp,
+  quickEditClampByte,
+  quickEditRgbToHsl,
+  quickEditHueToRgb,
+  quickEditHslToRgb,
+  quickEditHslToPackedRgb,
+  quickEditSmoothStep,
+  quickEditLuma,
+} from '../../../frontend/src/quickedit/pixel/color.js';
+
 function quickEditWorkerMain() {
   'use strict';
 
@@ -22,13 +37,6 @@ function quickEditWorkerMain() {
     { key: 'magenta', hue: 320 },
   ];
 
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function quickEditClampByte(value) {
-    return clamp(Math.round(Number(value || 0)), 0, 255);
-  }
 
   function quickEditPerfNow() {
     return self.performance && typeof self.performance.now === 'function'
@@ -201,61 +209,6 @@ function quickEditWorkerMain() {
       map[i] = Math.round(quickEditCurveOutput(params, i / 255) * 255);
     }
     return map;
-  }
-
-  function quickEditRgbToHsl(r, g, b) {
-    const rn = r / 255;
-    const gn = g / 255;
-    const bn = b / 255;
-    const max = Math.max(rn, gn, bn);
-    const min = Math.min(rn, gn, bn);
-    const l = (max + min) / 2;
-    if (max === min) return { h: 0, s: 0, l };
-    const d = max - min;
-    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    let h = 0;
-    if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
-    else if (max === gn) h = (bn - rn) / d + 2;
-    else h = (rn - gn) / d + 4;
-    return { h: h * 60, s, l };
-  }
-
-  function quickEditHueToRgb(p, q, t) {
-    let next = t;
-    if (next < 0) next += 1;
-    if (next > 1) next -= 1;
-    if (next < 1 / 6) return p + (q - p) * 6 * next;
-    if (next < 1 / 2) return q;
-    if (next < 2 / 3) return p + (q - p) * (2 / 3 - next) * 6;
-    return p;
-  }
-
-  function quickEditHslToRgb(h, s, l) {
-    const hue = (((h % 360) + 360) % 360) / 360;
-    if (s <= 0) {
-      const gray = quickEditClampByte(l * 255);
-      return { r: gray, g: gray, b: gray };
-    }
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return {
-      r: quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255),
-      g: quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255),
-      b: quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255),
-    };
-  }
-
-  function quickEditHslToPackedRgb(h, s, l) {
-    const hue = (((h % 360) + 360) % 360) / 360;
-    if (s <= 0) {
-      const gray = quickEditClampByte(l * 255);
-      return gray | (gray << 8) | (gray << 16);
-    }
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255)
-      | (quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255) << 8)
-      | (quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255) << 16);
   }
 
   function quickEditSplitToneActive(params) {
@@ -482,21 +435,12 @@ function quickEditWorkerMain() {
     return nextR | (nextG << 8) | (nextB << 16);
   }
 
-  function quickEditSmoothStep(edge0, edge1, value) {
-    const t = clamp((Number(value || 0) - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1);
-    return t * t * (3 - 2 * t);
-  }
-
   function quickEditToneChannel(value, amount, weight) {
     const strength = clamp(Number(amount || 0) / 100, -1, 1) * clamp(Number(weight || 0), 0, 1);
     if (!strength) return value;
     return strength > 0
       ? value + (255 - value) * strength * 0.72
       : value + value * strength * 0.72;
-  }
-
-  function quickEditLuma(r, g, b) {
-    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   }
 
   function quickEditApplyContrastChannel(value, contrast) {
@@ -1215,8 +1159,10 @@ function quickEditWorkerMain() {
   };
 }
 
-if (typeof document !== 'undefined') {
-  window.PicScannerQuickEditWorkerSource = '(' + quickEditWorkerMain.toString() + '());';
-} else {
+// 构建产物会被 vite 插件（vite.worker.config.js）整体变换为
+// 「window.PicScannerQuickEditWorkerSource = <bundle 文本>」的赋值文件：
+// 页面加载只定义字符串，永不执行 bundle；Blob Worker 评估整段 bundle 时
+// document 不存在 → 此处启动主循环。
+if (typeof document === 'undefined') {
   quickEditWorkerMain();
 }

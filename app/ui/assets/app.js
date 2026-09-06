@@ -1,5 +1,15 @@
 (function () {
   const PS = window.PS;
+  // P5-3 切片 1：像素色彩基元改由共享模块提供
+  // （frontend/src/quickedit/pixel/color.js，经 Vue 包挂到 window）。
+  // Vue 包先于本脚本加载，此处解构时序成立；worker 拷贝在切片 2 收敛。
+  const quickeditPixel = (window.PicScannerVue && window.PicScannerVue.quickeditPixel) || {};
+  const quickEditRgbToHsl = quickeditPixel.quickEditRgbToHsl;
+  const quickEditHueToRgb = quickeditPixel.quickEditHueToRgb;
+  const quickEditHslToRgb = quickeditPixel.quickEditHslToRgb;
+  const quickEditHslToPackedRgb = quickeditPixel.quickEditHslToPackedRgb;
+  const quickEditSmoothStep = quickeditPixel.quickEditSmoothStep;
+  const quickEditLuma = quickeditPixel.quickEditLuma;
   const state = PS.state;
   const els = PS.els;
   const lightboxHomeParent = PS.lightboxHomeParent;
@@ -657,61 +667,6 @@
     ctx.putImageData(data, 0, 0);
   }
 
-  function quickEditRgbToHsl(r, g, b) {
-    const rn = r / 255;
-    const gn = g / 255;
-    const bn = b / 255;
-    const max = Math.max(rn, gn, bn);
-    const min = Math.min(rn, gn, bn);
-    const l = (max + min) / 2;
-    if (max === min) return { h: 0, s: 0, l };
-    const d = max - min;
-    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    let h = 0;
-    if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
-    else if (max === gn) h = (bn - rn) / d + 2;
-    else h = (rn - gn) / d + 4;
-    return { h: h * 60, s, l };
-  }
-
-  function quickEditHueToRgb(p, q, t) {
-    let next = t;
-    if (next < 0) next += 1;
-    if (next > 1) next -= 1;
-    if (next < 1 / 6) return p + (q - p) * 6 * next;
-    if (next < 1 / 2) return q;
-    if (next < 2 / 3) return p + (q - p) * (2 / 3 - next) * 6;
-    return p;
-  }
-
-  function quickEditHslToRgb(h, s, l) {
-    const hue = (((h % 360) + 360) % 360) / 360;
-    if (s <= 0) {
-      const gray = quickEditClampByte(l * 255);
-      return { r: gray, g: gray, b: gray };
-    }
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return {
-      r: quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255),
-      g: quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255),
-      b: quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255),
-    };
-  }
-
-  function quickEditHslToPackedRgb(h, s, l) {
-    const hue = (((h % 360) + 360) % 360) / 360;
-    if (s <= 0) {
-      const gray = quickEditClampByte(l * 255);
-      return gray | (gray << 8) | (gray << 16);
-    }
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return quickEditClampByte(quickEditHueToRgb(p, q, hue + 1 / 3) * 255)
-      | (quickEditClampByte(quickEditHueToRgb(p, q, hue) * 255) << 8)
-      | (quickEditClampByte(quickEditHueToRgb(p, q, hue - 1 / 3) * 255) << 16);
-  }
-
   function quickEditSplitToneActive(params) {
     return !!(
       Number(params.splitToneShadowsStrength || 0)
@@ -941,21 +896,12 @@
     return nextR | (nextG << 8) | (nextB << 16);
   }
 
-  function quickEditSmoothStep(edge0, edge1, value) {
-    const t = clamp((Number(value || 0) - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1);
-    return t * t * (3 - 2 * t);
-  }
-
   function quickEditToneChannel(value, amount, weight) {
     const strength = clamp(Number(amount || 0) / 100, -1, 1) * clamp(Number(weight || 0), 0, 1);
     if (!strength) return value;
     return strength > 0
       ? value + (255 - value) * strength * 0.72
       : value + value * strength * 0.72;
-  }
-
-  function quickEditLuma(r, g, b) {
-    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   }
 
   function quickEditApplyContrastChannel(value, contrast) {
@@ -3227,7 +3173,9 @@
       }
       return PS.quickEditPreviewWorkerObjectUrl;
     }
-    return new URL('assets/quick_edit_worker.js?v=' + encodeURIComponent(APP_BUILD), window.location.href).href;
+    // P5-3 切片 2：worker 源已改为 vite 构建产物（assets/vue/quick-edit-worker.js，
+    // 页面脚本加载后由上面的字符串路径接管；此处只是源缺失时的兜底 URL）。
+    return new URL('assets/vue/quick-edit-worker.js?v=' + encodeURIComponent(APP_BUILD), window.location.href).href;
   }
 
   function cancelQuickEditPreviewWorker() {

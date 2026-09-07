@@ -1,6 +1,6 @@
 (function () {
   const PS = window.PS;
-  // P5-3 切片 1：像素色彩基元改由共享模块提供
+  // P5-3：像素数学基元改由共享模块提供
   // （frontend/src/quickedit/pixel/color.js，经 Vue 包挂到 window）。
   // Vue 包先于本脚本加载，此处解构时序成立；Worker 也从同一套共享模块构建。
   const quickeditPixel = (window.PicScannerVue && window.PicScannerVue.quickeditPixel) || {};
@@ -10,7 +10,9 @@
   const quickEditHslToPackedRgb = quickeditPixel.quickEditHslToPackedRgb;
   const quickEditSmoothStep = quickeditPixel.quickEditSmoothStep;
   const quickEditLuma = quickeditPixel.quickEditLuma;
-  // 切片 3：HSL 混色器 / 分离色调 / LUT / 色调与细节效果
+  const quickEditCurveOutputShared = quickeditPixel.quickEditCurveOutput;
+  const quickEditCurveMapShared = quickeditPixel.quickEditCurveMap;
+  // HSL 混色器 / 分离色调 / LUT / 色调与细节效果
   const quickEditHueDistance = quickeditPixel.quickEditHueDistance;
   const quickEditHslBandWeight = quickeditPixel.quickEditHslBandWeight;
   const quickEditActiveHslAdjustments = quickeditPixel.quickEditActiveHslAdjustments;
@@ -607,33 +609,11 @@
   }
 
   function quickEditCurveOutput(params, input) {
-    const points = quickEditCurvePoints(params);
-    const x = clamp(Number(input || 0), 0, 1) * 100;
-    let index = 0;
-    while (index < points.length - 2 && x > points[index + 1].x) index += 1;
-    const p0 = points[Math.max(0, index - 1)];
-    const p1 = points[index];
-    const p2 = points[Math.min(points.length - 1, index + 1)];
-    const p3 = points[Math.min(points.length - 1, index + 2)];
-    const span = Math.max(0.0001, p2.x - p1.x);
-    const t = clamp((x - p1.x) / span, 0, 1);
-    const t2 = t * t;
-    const t3 = t2 * t;
-    const slope1 = (p2.y - p0.y) / Math.max(0.0001, p2.x - p0.x) * span;
-    const slope2 = (p3.y - p1.y) / Math.max(0.0001, p3.x - p1.x) * span;
-    const y = (2 * t3 - 3 * t2 + 1) * p1.y
-      + (t3 - 2 * t2 + t) * slope1
-      + (-2 * t3 + 3 * t2) * p2.y
-      + (t3 - t2) * slope2;
-    return clamp(y / 100, 0, 1);
+    return quickEditCurveOutputShared(quickEditCurvePoints(params), input);
   }
 
   function quickEditCurveMap(params) {
-    const map = new Array(256);
-    for (let i = 0; i < 256; i += 1) {
-      map[i] = Math.round(quickEditCurveOutput(params, i / 255) * 255);
-    }
-    return map;
+    return quickEditCurveMapShared(quickEditCurvePoints(params));
   }
 
   function quickEditCurveTableValues(params) {
@@ -2743,7 +2723,7 @@
       }
       return PS.quickEditPreviewWorkerObjectUrl;
     }
-    // P5-3 切片 2：worker 源已改为 vite 构建产物（assets/vue/quick-edit-worker.js，
+    // P5-3：worker 源已改为 vite 构建产物（assets/vue/quick-edit-worker.js，
     // 页面脚本加载后由上面的字符串路径接管；此处只是源缺失时的兜底 URL）。
     return new URL('assets/vue/quick-edit-worker.js?v=' + encodeURIComponent(APP_BUILD), window.location.href).href;
   }

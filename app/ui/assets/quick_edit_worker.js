@@ -7,11 +7,16 @@ import {
   quickEditClampByte,
 } from '../../../frontend/src/quickedit/pixel/color.js';
 import {
+  QUICK_EDIT_HSL_COLORS,
   quickEditActiveHslAdjustments,
   quickEditApplyHslMixer,
   quickEditApplySplitTone,
   quickEditSplitToneActive,
 } from '../../../frontend/src/quickedit/pixel/hsl.js';
+import {
+  quickEditCurveMap as sharedQuickEditCurveMap,
+  quickEditCurveOutput as sharedQuickEditCurveOutput,
+} from '../../../frontend/src/quickedit/pixel/curve.js';
 import {
   quickEditPrepareLut,
   quickEditBlendLutColor,
@@ -41,18 +46,6 @@ function quickEditWorkerMain() {
     { x: 0, y: 0 },
     { x: 100, y: 100 },
   ];
-  const QUICK_EDIT_HSL_COLORS = [
-    { key: 'red', hue: 0 },
-    { key: 'orange', hue: 30 },
-    { key: 'yellow', hue: 60 },
-    { key: 'green', hue: 120 },
-    { key: 'aqua', hue: 180 },
-    { key: 'blue', hue: 230 },
-    { key: 'purple', hue: 275 },
-    { key: 'magenta', hue: 320 },
-  ];
-
-
   function quickEditPerfNow() {
     return self.performance && typeof self.performance.now === 'function'
       ? self.performance.now()
@@ -197,33 +190,11 @@ function quickEditWorkerMain() {
   }
 
   function quickEditCurveOutput(params, input) {
-    const points = quickEditCurvePoints(params);
-    const x = clamp(Number(input || 0), 0, 1) * 100;
-    let index = 0;
-    while (index < points.length - 2 && x > points[index + 1].x) index += 1;
-    const p0 = points[Math.max(0, index - 1)];
-    const p1 = points[index];
-    const p2 = points[Math.min(points.length - 1, index + 1)];
-    const p3 = points[Math.min(points.length - 1, index + 2)];
-    const span = Math.max(0.0001, p2.x - p1.x);
-    const t = clamp((x - p1.x) / span, 0, 1);
-    const t2 = t * t;
-    const t3 = t2 * t;
-    const slope1 = (p2.y - p0.y) / Math.max(0.0001, p2.x - p0.x) * span;
-    const slope2 = (p3.y - p1.y) / Math.max(0.0001, p3.x - p1.x) * span;
-    const y = (2 * t3 - 3 * t2 + 1) * p1.y
-      + (t3 - 2 * t2 + t) * slope1
-      + (-2 * t3 + 3 * t2) * p2.y
-      + (t3 - t2) * slope2;
-    return clamp(y / 100, 0, 1);
+    return sharedQuickEditCurveOutput(quickEditCurvePoints(params), input);
   }
 
   function quickEditCurveMap(params) {
-    const map = new Array(256);
-    for (let i = 0; i < 256; i += 1) {
-      map[i] = Math.round(quickEditCurveOutput(params, i / 255) * 255);
-    }
-    return map;
+    return sharedQuickEditCurveMap(quickEditCurvePoints(params));
   }
 
   function quickEditActiveLuts(params) {

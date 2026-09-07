@@ -230,7 +230,7 @@
        权威常量与 bridgeCall 写回 window.PS，双向桥接在此处真正生效。若反序，app_core 将无法调用该方法。
     3) app_core.js → app_gallery.js → app_lightbox.js → app_modules.js → app.js 为 Vanilla 状态机与业务总线，必须在 Vue 之后
   -->
-  <!-- P5-3 切片 2：worker 源已改为 vite 构建产物（构建时内联 pixel 共享模块，
+  <!-- P5-3：worker 源已改为 vite 构建产物（构建时内联 pixel 共享模块，
        并被变换为「源码字符串赋值」文件；?v= 由构建自动盖章）。 -->
   <script src="assets/vue/quick-edit-worker.js?v=1788718234063"></script>
   <script src="assets/quick_edit_geometry.js?v=frame-axis-space-20260819-1"></script>

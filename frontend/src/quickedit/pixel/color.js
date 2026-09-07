@@ -1,6 +1,6 @@
 // P5-3 · QuickEdit 像素基元 —— 色彩转换（纯函数，无 DOM）
 //
-// 本模块是 app.js 与 quick-edit-worker 的共享真源（切片 2 收敛 worker 拷贝）。
+// 本模块是 app.js 与 quick-edit-worker 的共享真源。
 // 函数体自 app.js 原样搬入，行为不变；quickEditClampByte/clamp 一并随迁。
 
 function clamp(value, min, max) {

@@ -1,4 +1,4 @@
-// P5-3 切片 3 · QuickEdit 像素基元 —— LUT 三线性插值与混合（纯函数，无 DOM）
+// P5-3 · QuickEdit 像素基元 —— LUT 三线性插值与混合（纯函数，无 DOM）
 // 函数体自 app.js 原样搬入。
 
 import { clamp, quickEditClampByte } from './color.js';

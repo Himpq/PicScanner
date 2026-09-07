@@ -1,4 +1,4 @@
-// P5-3 切片 3 · QuickEdit 像素基元 —— HSL 混色器与分离色调（纯函数，无 DOM）
+// P5-3 · QuickEdit 像素基元 —— HSL 混色器与分离色调（纯函数，无 DOM）
 // 函数体自 app.js 原样搬入；色彩转换基元来自 ./color.js。
 
 import {

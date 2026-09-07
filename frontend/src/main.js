@@ -36,6 +36,7 @@ import CollectionsScreen from './islands/CollectionsScreen.vue';
 import CollectionDetailScreen from './islands/CollectionDetailScreen.vue';
 import SettingsScreen from './islands/SettingsScreen.vue';
 import * as quickeditPixelColor from './quickedit/pixel/color.js';
+import * as quickeditPixelCurve from './quickedit/pixel/curve.js';
 import * as quickeditPixelHsl from './quickedit/pixel/hsl.js';
 import * as quickeditPixelLut from './quickedit/pixel/lut.js';
 import * as quickeditPixelToning from './quickedit/pixel/toning.js';
@@ -358,11 +359,12 @@ window.PicScannerVue = {
   // P2 纯函数高度模型，供 legacy 与未来的 Vue PhotoGrid 共用
   layout,
   // P5-3：QuickEdit 像素基元共享模块。app.js（经典 IIFE，不能 import）与
-  // quick-edit-worker（切片 2 起改为模块 worker）都从这里取同一份实现，
+  // quick-edit-worker（模块 worker）都从这里取同一份实现，
   // 消除历史上 app.js / worker 两份拷贝的漂移隐患。
   quickeditPixel: Object.assign(
     {},
     quickeditPixelColor,
+    quickeditPixelCurve,
     quickeditPixelHsl,
     quickeditPixelLut,
     quickeditPixelToning,
@@ -532,4 +534,3 @@ autoMountScreen('settings-screen', 'mountSettingsScreen');
 autoMountScreen('source-screen', 'mountSourceScreen');
 autoMountScreen('collections-screen', 'mountCollectionsScreen');
 autoMountScreen('collection-detail-screen', 'mountCollectionDetailScreen');
-

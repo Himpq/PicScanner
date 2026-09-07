@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// P5-3 切片 2 · QuickEdit Worker 的独立构建。
+// P5-3 · QuickEdit Worker 的独立构建。
 //
 // 背景：应用运行在 file:// 协议下，WebView2 无法直接 `new Worker(file://...)`，
 // 既有机制是「页面脚本加载 worker 源码 → app.js 取源码字符串 → Blob Worker」。

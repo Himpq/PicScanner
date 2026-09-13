@@ -81,7 +81,7 @@ def cmd_scan(store: VectorStore, encoder: ClipEncoder, folder: Path, rebuild: bo
     print(f"[scan] 共 {len(files)} 张图片，已索引 {len(files) - len(pending)} 张，待处理 {len(pending)} 张"
           + (f"，清理失效 {len(removed)} 条" if removed else ""))
 
-    batch_size = GPU_BATCH_SIZE if encoder.device == "cuda" else CPU_BATCH_SIZE
+    batch_size = GPU_BATCH_SIZE if encoder.device in ("cuda", "dml") else CPU_BATCH_SIZE
     started = time.time()
     done = 0
     for start in range(0, len(pending), batch_size):

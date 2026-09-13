@@ -1,6 +1,7 @@
 """Chinese-CLIP ONNX 编码器：把图片和文本映射到同一个 512 维向量空间。
 
-- 推理走 onnxruntime，import 仅 0.2s，打包体积小，CPU/GPU 自动选择
+- 推理走 onnxruntime（directml 包 = CPU 超集），import 仅 0.2s，打包体积小
+- provider 自动选择：CUDA > DirectML > CPU；DML/CUDA 初始化失败自动回退 CPU
 - 预处理不依赖 transformers：图像走 PIL+numpy 手写，文本走 tokenizers（0.04s import）
   彻底规避 transformers 15s 的 import，首次加载从 22s -> 1.2s
 - 对外 API 与 encoder.py:ClipEncoder 完全兼容，可无缝切换
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 from pathlib import Path
 
 # 国内网络默认走 hf-mirror，必须在 import transformers 之前设置（lite 模式不依赖 transformers，但保留以防回退）
@@ -69,6 +71,23 @@ def onnx_available() -> bool:
 
 def _log(msg: str):
     print(f"[encoder_onnx] {msg}", flush=True)
+
+
+def lite_images_to_pixel_values(images: list[Image.Image]) -> np.ndarray:
+    """PIL list -> (N,3,224,224) float32，BICUBIC resize + rescale + normalize。
+
+    模块级函数：进程内 ClipEncoder 与 encoder_worker 父端共用。
+    """
+    out = np.empty((len(images), 3, _IMAGE_SIZE, _IMAGE_SIZE), dtype=np.float32)
+    for i, img in enumerate(images):
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        # 与 preprocessor_config 一致：BICUBIC (resample 3)
+        resized = img.resize((_IMAGE_SIZE, _IMAGE_SIZE), Image.BICUBIC)
+        arr = np.asarray(resized, dtype=np.float32) / 255.0  # HWC 0-1
+        arr = (arr - _IMAGE_MEAN) / _IMAGE_STD
+        out[i] = arr.transpose(2, 0, 1)  # HWC -> CHW
+    return out
 
 
 def _get_providers():
@@ -151,23 +170,41 @@ class ClipEncoder:
         providers, prov_name = _get_providers()
         if device is not None:
             device = str(device).lower()
-            if device == "cuda" and "CUDAExecutionProvider" in providers:
-                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-                prov_name = "cuda"
+            if device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers():
+                providers, prov_name = ["CUDAExecutionProvider", "CPUExecutionProvider"], "cuda"
+            elif device == "dml" and "DmlExecutionProvider" in ort.get_available_providers():
+                providers, prov_name = ["DmlExecutionProvider", "CPUExecutionProvider"], "dml"
             elif device == "cpu":
-                providers = ["CPUExecutionProvider"]
-                prov_name = "cpu"
-        self.device = prov_name
-        self.providers = providers
+                providers, prov_name = ["CPUExecutionProvider"], "cpu"
 
-        so = ort.SessionOptions()
-        # BASIC 与 ALL 速度几乎一致（0.44s vs 0.42s），用 ENABLE_ALL 保持最佳推理速度
-        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # DirectML 不允许同一个 session 被多个线程同时 Run；索引与搜索可能并发进入，
+        # 加速 provider 上的 vision session 需串行化。text session 固定走 CPU：
+        # 文本模型小（短序列），GPU 上传开销反而更慢（本机实测 CPU 32ms vs DML 47ms），
+        # 且 ORT CPU session 的并发 Run 是线程安全的，无需加锁。
+        self._vision_lock = threading.RLock()
+
+        def _make_session(model_path, provs):
+            so = ort.SessionOptions()
+            # BASIC 与 ALL 速度几乎一致（0.44s vs 0.42s），用 ENABLE_ALL 保持最佳推理速度
+            so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            if "DmlExecutionProvider" in provs:
+                # DirectML 不支持 memory pattern，也不支持并行执行。
+                so.enable_mem_pattern = False
+                so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            return ort.InferenceSession(str(model_path), sess_options=so, providers=provs)
 
         t_sess = _t.time()
-        self.vision_sess = ort.InferenceSession(str(onnx_dir / "vision_model.onnx"), sess_options=so, providers=providers)
-        self.text_sess = ort.InferenceSession(str(onnx_dir / "text_model.onnx"), sess_options=so, providers=providers)
-        _log(f"ONNX sessions 已加载 用时 {_t.time()-t_sess:.2f}s providers={providers}")
+        try:
+            self.vision_sess = _make_session(onnx_dir / "vision_model.onnx", providers)
+        except Exception as e:
+            # 老旧核显/虚拟机/远程会话下 DML/CUDA 可能初始化失败，回退 CPU 保证可用
+            _log(f"provider {prov_name} 初始化失败，回退 CPU: {e}")
+            providers, prov_name = ["CPUExecutionProvider"], "cpu"
+            self.vision_sess = _make_session(onnx_dir / "vision_model.onnx", providers)
+        self.text_sess = _make_session(onnx_dir / "text_model.onnx", ["CPUExecutionProvider"])
+        self.device = prov_name
+        self.providers = providers
+        _log(f"ONNX sessions 已加载 用时 {_t.time()-t_sess:.2f}s vision={providers} text=cpu")
 
         self._vision_input_name = self.vision_sess.get_inputs()[0].name
         self._vision_output_name = self.vision_sess.get_outputs()[0].name
@@ -201,18 +238,7 @@ class ClipEncoder:
     def _images_to_pixel_values(self, images: list[Image.Image]) -> np.ndarray:
         """PIL list -> (N,3,224,224) float32，已做 rescale+normalize"""
         if self._use_lite:
-            # 手写路径：BICUBIC resize + rescale + normalize
-            out = np.empty((len(images), 3, _IMAGE_SIZE, _IMAGE_SIZE), dtype=np.float32)
-            for i, img in enumerate(images):
-                if img.mode != "RGB":
-                    img = img.convert("RGB")
-                # 与 preprocessor_config 一致：BICUBIC (resample 3)
-                resized = img.resize((_IMAGE_SIZE, _IMAGE_SIZE), Image.BICUBIC)
-                arr = np.asarray(resized, dtype=np.float32) / 255.0  # HWC 0-1
-                arr = (arr - _IMAGE_MEAN) / _IMAGE_STD
-                arr = arr.transpose(2, 0, 1)  # HWC -> CHW
-                out[i] = arr
-            return out
+            return lite_images_to_pixel_values(images)
         else:
             # 回退 transformers
             try:
@@ -263,13 +289,16 @@ class ClipEncoder:
         """(N,) 张 RGB PIL 图片 -> (N, 512) float32 归一化向量。"""
         if not images:
             return np.zeros((0, EMBED_DIM), dtype=np.float32)
-        pixel_values = self._images_to_pixel_values(images)
-        feats = self.vision_sess.run([self._vision_output_name], {self._vision_input_name: pixel_values})[0]
+        return self.encode_pixel_values(self._images_to_pixel_values(images))
+
+    def encode_pixel_values(self, pixel_values: np.ndarray) -> np.ndarray:
+        """(N,3,224,224) float32 -> (N, 512) 归一化向量（encoder_worker 子进程调用）。"""
+        with self._vision_lock:
+            feats = self.vision_sess.run([self._vision_output_name], {self._vision_input_name: pixel_values})[0]
         feats = np.asarray(feats, dtype=np.float32)
         norms = np.linalg.norm(feats, axis=1, keepdims=True)
         norms = np.maximum(norms, 1e-9)
-        feats = feats / norms
-        return feats.astype(np.float32)
+        return (feats / norms).astype(np.float32)
 
     def encode_texts(self, texts: list[str]) -> np.ndarray:
         """多条文本 -> (T, 512) float32 归一化矩阵。"""

@@ -1,0 +1,10 @@
+# onnx_runtime 共享插件 _libs 构建清单
+# 打包插件 zip 时执行（产物随 onnx_runtime 插件 zip 分发，主程序启动时注入 sys.path）：
+#   pip install --target=plugins/onnx_runtime/_libs -r plugins/onnx_runtime/requirements.txt
+#
+# onnxruntime-directml 只发 Windows wheel，自包含 DirectML.dll（无 CUDA/cuDNN 外部依赖），
+# 且内置 CPUExecutionProvider——无 GPU / DML 初始化失败的机器自动走 CPU，无需另装 CPU 包。
+# 非 Windows 构建请把第一行换成 onnxruntime。
+onnxruntime-directml>=1.24
+opencv-contrib-python>=4.10
+tokenizers>=0.20

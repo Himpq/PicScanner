@@ -50,6 +50,8 @@ class ModuleHandle:
     description: str
     frontend_url: str
     methods: dict = field(default_factory=dict)
+    # 后端实例（用于主窗口就绪等生命周期通知，如 on_ui_ready()；仅内部使用）
+    instance: object = None
 
 
 def _find_module_class(backend):
@@ -170,6 +172,7 @@ def discover_modules(data_dir=None, storage_ref=None, plugin_configs=None, push=
                 description=str(manifest.get("description") or ""),
                 frontend_url=frontend_url,
                 methods=methods,
+                instance=instance,
             )
             print(f"[PicScannerModules] 已加载模块：{key}（{len(methods)} 个方法）")
         except Exception as exc:

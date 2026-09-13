@@ -5,7 +5,9 @@
 
 后续 PicScanner 提供 API 后，可将 encoder/store 迁入正式插件体系。
 
-打包分发：`pip install --target=plugins/semantic_search/_libs -r plugins/semantic_search/requirements.txt`
+打包分发：onnxruntime/cv2 由 onnx_runtime 共享插件提供（见 plugins/onnx_runtime/requirements.txt，
+用 onnxruntime-directml 即启用 DirectML GPU 加速，包内自带 CPU 回退）；
+本插件自身依赖装 `pip install --target=plugins/semantic_search/_libs -r plugins/semantic_search/requirements.txt`
 后 `_libs/` 随插件 zip 分发，无 Python 机器上 exe 内嵌解释器会自动优先从此加载。
 """
 import sys as _sys

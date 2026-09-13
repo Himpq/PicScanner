@@ -21,6 +21,8 @@ _cached_encoder = None
 _cached_encoder_id = None
 _encoder_lock = threading.Lock()
 _encoder_loading_logged = False
+# 主窗口就绪信号的兜底超时：页面异常导致 loaded 不来时也要预热
+_UI_READY_FALLBACK_S = 10.0
 
 _PLUGIN_MISSING_HINT = "语义插件未安装/依赖缺失：请将 semantic_search 插件包解压到 plugins/semantic_search（含 _libs/onnxruntime、tokenizers）且确保 data/plugins/semantic_search/model_onnx 存在"
 
@@ -69,8 +71,16 @@ def _get_encoder():
         import time
 
         t0 = time.time()
-        enc = ClipEncoder()
-        print(f"[semantic_search] 模型加载完成 ({_backend_kind}) device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
+        try:
+            # 优先：ONNX session 放独立进程（ORT 建会话持 GIL，进程内加载会把 UI 卡住）
+            from plugins.semantic_search.encoder_worker import RemoteClipEncoder  # type: ignore
+
+            enc = RemoteClipEncoder()
+            print(f"[semantic_search] 模型加载完成 (onnx@worker) device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
+        except Exception as exc:
+            _log(f"独立进程编码器不可用，回退进程内加载（加载期间 UI 可能短暂卡顿）: {exc}")
+            enc = ClipEncoder()
+            print(f"[semantic_search] 模型加载完成 ({_backend_kind}) device={enc.device} 用时{time.time()-t0:.1f}s", flush=True)
         _cached_encoder = enc
         _cached_encoder_id = cache_key
         return enc
@@ -97,8 +107,11 @@ class SemanticSearchModule:
         self._index_stop = threading.Event()
         self._lock = threading.RLock()
         self._warmup_thread: threading.Thread | None = None
+        self._ui_ready_timer: threading.Timer | None = None
 
-        # 自动懒加载模型：app 启动后于后台线程预热，绝不阻塞主线程/UI。
+        # 自动懒加载模型：等主窗口页面 loaded（api 广播 on_ui_ready）后再于后台线程
+        # 预热——ORT 建 session 在 C++ 层持 GIL（DML 冷启动 2-4s），太早开始会把
+        # 建窗/首帧卡住（表现为“模型加载完窗口才出来”）。信号 10s 未到则兜底预热。
         # 默认开启，可在模块配置里设 auto_load_model=false 关闭。
         try:
             auto_load = True
@@ -106,8 +119,9 @@ class SemanticSearchModule:
                 v = self._config.get("auto_load_model")
                 if v is not None:
                     auto_load = bool(v)
+            self._auto_load = auto_load
             if auto_load:
-                self.warmup_model(delay=0.3)
+                self._arm_warmup()
         except Exception as exc:
             _log(f"安排模型预热失败（已忽略）: {exc}")
 
@@ -169,6 +183,35 @@ class SemanticSearchModule:
         }
 
     # ---------- 后台懒加载模型（启动预热，不阻塞） ----------
+
+    def _arm_warmup(self) -> None:
+        """安排预热：优先等主窗口就绪信号（on_ui_ready），超时兜底直接预热。"""
+        timer = threading.Timer(_UI_READY_FALLBACK_S, self._warmup_fallback)
+        timer.daemon = True
+        self._ui_ready_timer = timer
+        timer.start()
+        _log(f"模型预热已安排：等待主窗口就绪信号（兜底 {_UI_READY_FALLBACK_S:.0f}s）")
+
+    def _warmup_fallback(self) -> None:
+        if self._ui_ready_timer is None:
+            return
+        self._ui_ready_timer = None
+        _log("未收到主窗口就绪信号，走兜底预热")
+        self.warmup_model(delay=0.0)
+
+    def on_ui_ready(self) -> None:
+        """主窗口页面加载完成（由 PicScannerApi._on_main_loaded 广播）。只生效一次。"""
+        if getattr(self, "_ui_ready_done", False):
+            return
+        self._ui_ready_done = True
+        timer = getattr(self, "_ui_ready_timer", None)
+        self._ui_ready_timer = None
+        if timer is not None:
+            timer.cancel()
+        if not getattr(self, "_auto_load", False):
+            return
+        # 缓 1s 再加载，让首屏数据请求先跑，错开 GIL 争抢
+        self.warmup_model(delay=1.0)
 
     def warmup_model(self, delay: float = 0.0) -> bool:
         """在后台线程预热 Chinese-CLIP 模型，立即返回不阻塞调用方。
@@ -353,8 +396,8 @@ class SemanticSearchModule:
         self._push_event("semantic_index_progress", {"phase": "indexing", "done": 0, "total": todo, "source_id": source_id})
         _log(f"开始编码 {todo} 张")
 
-        # 批量编码
-        batch_size = 32 if getattr(encoder, "device", "") == "cuda" else 8
+        # 批量编码（GPU 路径用大批次；索引侧喂的是缩略图，内存压力可控）
+        batch_size = 32 if getattr(encoder, "device", "") in ("cuda", "dml") else 8
         done = 0
         started = time.time()
         try:

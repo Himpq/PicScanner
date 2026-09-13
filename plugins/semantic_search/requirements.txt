@@ -1,0 +1,4 @@
+# semantic_search 插件自身依赖（onnxruntime/cv2 由 onnx_runtime 共享插件提供，
+# 见 plugins/onnx_runtime/requirements.txt）
+#   pip install --target=plugins/semantic_search/_libs -r plugins/semantic_search/requirements.txt
+tokenizers>=0.20

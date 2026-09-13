@@ -46,7 +46,12 @@ python -m plugins.semantic_search.cli search "沙滩"
 - **存储**：`data/plugins/semantic_search/index.db`（SQLite 单表，向量以 BLOB 存储；
   3k 张约 6MB，numpy 暴力检索毫秒级返回精确结果，无需专用向量数据库）
 - **增量**：以 (mtime, size) 为文件签名，未变化文件跳过重编码；自动清理已删除文件的条目
-- **设备**：自动选择 CUDA / CPU
+- **设备**：自动选择 CUDA / DirectML / CPU。打包用 `onnxruntime-directml`（内置 CPU
+  provider，无 GPU 机器照常运行）；DML/CUDA 初始化失败自动回退 CPU
+- **进程隔离**：ONNX session 位于独立 worker 进程（`encoder_worker.py` +
+  `app/ort_worker_entry.py` 垫片），主进程只做图像预处理与管道收发——ORT 建会话
+  在 C++ 层持 GIL（DML 冷启动 2-4s），进程隔离保证模型加载/推理完全不卡 UI；
+  worker 不可用时自动回退进程内编码器
 
 ## 已知限制（测试版）
 

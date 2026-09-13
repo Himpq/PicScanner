@@ -1,0 +1,7 @@
+{
+  "key": "map_service",
+  "name": "地图服务",
+  "version": "0.1.0",
+  "description": "通用地图服务：provider 配置与连通性校验（天地图），供照片位置展示使用",
+  "frontend": ""
+}

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useSettingsStore } from '../stores/settings.js';
 import InterfaceSettings from '../settings/InterfaceSettings.vue';
+import MapSettings from '../settings/MapSettings.vue';
 import ExportSettings from '../settings/ExportSettings.vue';
 import StorageSettings from '../settings/StorageSettings.vue';
 import PluginsSettings from '../settings/PluginsSettings.vue';
@@ -14,6 +15,7 @@ const activeTab = computed(() => store.tab);
 
 const PANELS = {
   interface: InterfaceSettings,
+  map: MapSettings,
   export: ExportSettings,
   storage: StorageSettings,
   plugins: PluginsSettings,

@@ -15,6 +15,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (PS && Array.isArray(PS.SETTINGS_TABS) && PS.SETTINGS_TABS.length) return PS.SETTINGS_TABS;
     return [
       { key: 'interface', label: '界面', hint: '缩略图与参数面板' },
+      { key: 'map', label: '地图', hint: '天地图密钥与照片位置' },
       { key: 'export', label: '导出', hint: '目录与命名模板' },
       { key: 'storage', label: '存储', hint: '已登记来源' },
       { key: 'plugins', label: '插件', hint: '已装载模块与状态' },

@@ -1,11 +1,14 @@
 <script setup>
 import { computed } from 'vue';
+import LightboxMiniMap from '../components/lightbox/LightboxMiniMap.vue';
+import { useMapStore } from '../stores/map.js';
 
 const props = defineProps({
   state: { type: Object, required: true },
 });
 
 const photo = computed(() => props.state.photo);
+const mapStore = useMapStore();
 
 function joinClean(items, sep) {
   return items.filter((x) => x !== null && x !== undefined && x !== '').join(sep);
@@ -53,6 +56,16 @@ const summary = computed(() => {
 
 const primaryItems = computed(() => (summary.value.primary.length ? summary.value.primary : ['未知']));
 
+function formatGps(p) {
+  const latRaw = p && p.gps_lat;
+  const lonRaw = p && p.gps_lon;
+  if (latRaw === null || latRaw === undefined || latRaw === '' || lonRaw === null || lonRaw === undefined || lonRaw === '') return '';
+  const lat = Number(latRaw);
+  const lon = Number(lonRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return lat.toFixed(6) + ', ' + lon.toFixed(6);
+}
+
 const infoRows = computed(() => {
   const p = photo.value;
   if (!p) return [];
@@ -62,6 +75,7 @@ const infoRows = computed(() => {
     ['镜头', p.lens_model],
     ['尺寸', formatPixelDimensions(p)],
     ['格式', joinClean([p.format, p.size_text], ' · ')],
+    ['定位', p.gps_place || formatGps(p)],
   ];
 });
 </script>
@@ -85,5 +99,6 @@ const infoRows = computed(() => {
         <span>{{ displayText(row[1]) }}</span>
       </template>
     </div>
+    <LightboxMiniMap v-if="mapStore.showInInfoPanel" :photo="photo" />
   </div>
 </template>

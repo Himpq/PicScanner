@@ -27,6 +27,12 @@
   const marks = data.marks || {};
   const state = { itemSize: 168, sourceId: data.sources[0] ? data.sources[0].id : '' };
 
+  // 地图测试用的 tk（仅 index.dev.html 环境）：把天地图密钥写进
+  // localStorage.mock_tianditu_tk，即可在浏览器里验证 LightboxMiniMap。
+  function readMockTk() {
+    try { return localStorage.getItem('mock_tianditu_tk') || ''; } catch { return ''; }
+  }
+
   function applyMarks(p) {
     const m = marks[p.filename];
     if (m) {
@@ -86,6 +92,29 @@
     get_gallery_item_size: () => ({ success: true, size: state.itemSize }),
     set_gallery_item_size: (v) => { state.itemSize = Number(v) || 168; return { success: true }; },
     get_export_preset: () => ({ success: true, preset: { enabled: false, destination: '', template: '{origin_name}_edited' } }),
+    get_module_config: (key) => ({
+      success: true,
+      config: key === 'map_service'
+        ? {
+            provider: 'tianditu',
+            show_in_info_panel: true,
+            tianditu: { tk: readMockTk(), api_version: '4.0', timeout: 12 },
+          }
+        : {},
+    }),
+    set_module_config: (key, field, value) => {
+      if (key === 'map_service' && field === 'tianditu' && value && typeof value === 'object') {
+        try { localStorage.setItem('mock_tianditu_tk', String(value.tk || '')); } catch {}
+      }
+      return { success: true };
+    },
+    module_api: (key, method) => {
+      if (key === 'map_service' && method === 'test_connection') {
+        return { success: false, message: 'mock 桥不做真实探测，请在应用内测试' };
+      }
+      return { success: true };
+    },
+    open_external_url: () => ({ success: true }),
     start_scan: () => { setTimeout(() => window.dispatchEvent(new Event('pywebviewready')), 0); return { success: true }; },
     stop_scan: () => ({ success: true }),
     log: () => {},

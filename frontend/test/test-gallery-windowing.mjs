@@ -258,4 +258,93 @@ function planAt(scrollTop, { itemSize = ITEM, gridWidth = GRID_W, viewportHeight
     + '不带 gap 的旧模型漂移 ' + Math.round(driftNoGap) + 'px（反证成立）');
 }
 
-console.log('P4 渲染计划：全部 7 组断言通过');
+// ============ 8) 窗口 resize：宽度变化后视口顶部仍是同一张照片 ============
+//
+// 复现报障：改窗体大小 → 列数变化 → 同一 scrollTop 落到别的日期分区。
+// zoomPlan 走"宽度重排"路径：prevGridWidth + itemSize 不变 + pinItemTop，
+// 锚点照片相对视口顶部的距离分毫不差（可为负），而不是被吸附到行首。
+{
+  const W_WIDE = 1200;   // 6 列
+  const W_NARROW = 700;  // 3 列
+  const colsWide = Math.max(1, Math.floor((W_WIDE + GAP) / (ITEM + GAP)));
+  const colsNarrow = Math.max(1, Math.floor((W_NARROW + GAP) / (ITEM + GAP)));
+  assert.ok(colsWide !== colsNarrow,
+    '测试宽度必须跨列数，实际 ' + colsWide + ' vs ' + colsNarrow);
+
+  const GAP_BETWEEN = 28;
+  function dateAt(gridWidth, y) {
+    const m = sectionMetrics(dates, { counts, itemSize: ITEM, gridWidth, sectionGap: GAP_BETWEEN });
+    const secs = m.sections;
+    let i = secs.findIndex((s) => y < s.top + s.height);
+    if (i < 0) i = secs.length - 1;
+    return { metrics: m, dateKey: secs[i].dateKey };
+  }
+
+  function widthCheck(fromW, toW, label) {
+    const mOld = sectionMetrics(dates, { counts, itemSize: ITEM, gridWidth: fromW, sectionGap: GAP_BETWEEN });
+    // 大分区中部、行内偏移 37px：验证 pinItemTop 精确保留行内距离，而非吸附行首
+    const scrollTop = mOld.sections[200].top + 500 + 37;
+    const { scrollTop: nextScroll, anchor, plan: after } = zoomPlan({
+      dates, counts, gridWidth: toW, prevGridWidth: fromW,
+      prevItemSize: ITEM, itemSize: ITEM,
+      scrollTop, viewportHeight: VIEWPORT, cursorY: 0, pinItemTop: true,
+      photoAt: (dk, idx) => ({ id: dk + ':' + idx }),
+      sectionGap: GAP_BETWEEN,
+    });
+    assert.ok(anchor, label + '：宽度重排应能找到视口顶部锚点');
+
+    // 锚点照片在新布局下与视口顶部的距离，应与旧布局完全一致（误差 < 1px）
+    const afterSec = after.sections.find((s) => s.dateKey === anchor.dateKey);
+    assert.ok(afterSec, label + '：锚点分区在重排后仍应在渲染窗口内');
+    const { y } = itemPosition({ index: anchor.index, cols: afterSec.cols, itemSize: ITEM, gap: GAP, headerHeight: HEADER });
+    const oldSec = mOld.sections.find((s) => s.dateKey === anchor.dateKey);
+    const oldPos = itemPosition({ index: anchor.index, cols: oldSec.cols, itemSize: ITEM, gap: GAP, headerHeight: HEADER });
+    const oldOffset = oldSec.top + oldPos.y - scrollTop;
+    assert.ok(oldOffset !== 0, label + '：测试位置应带行内偏移（否则测不出 pinItemTop）');
+    assert.ok(Math.abs((afterSec.top + y - nextScroll) - oldOffset) < 1,
+      label + '：锚点相对距离应分毫不差，实际偏差 '
+      + Math.abs((afterSec.top + y - nextScroll) - oldOffset).toFixed(2) + 'px');
+
+    // 视口顶部仍是同一日期（没跳到别的日期）
+    assert.equal(dateAt(toW, nextScroll).dateKey, anchor.dateKey,
+      label + '：重排后视口顶部应仍是同一日期');
+
+    // 反证：沿用旧 scrollTop 则顶部已是别的日期（否则测不出修复效果）
+    assert.notEqual(dateAt(toW, scrollTop).dateKey, anchor.dateKey,
+      label + '：旧 scrollTop 在新宽度下顶部应已是别的日期');
+  }
+  widthCheck(W_WIDE, W_NARROW, '变窄');
+  widthCheck(W_NARROW, W_WIDE, '变宽');
+
+  // 列数不变的宽度微调（1200 -> 1150，同为 6 列）：scrollTop 应原样返回
+  {
+    const W_SLIGHT = 1150;
+    assert.equal(Math.max(1, Math.floor((W_SLIGHT + GAP) / (ITEM + GAP))), colsWide,
+      '1150px 宽仍应是 6 列');
+    const m = sectionMetrics(dates, { counts, itemSize: ITEM, gridWidth: W_WIDE, sectionGap: GAP_BETWEEN });
+    const scrollTop = m.sections[200].top + 537;
+    const { scrollTop: nextScroll } = zoomPlan({
+      dates, counts, gridWidth: W_SLIGHT, prevGridWidth: W_WIDE,
+      prevItemSize: ITEM, itemSize: ITEM,
+      scrollTop, viewportHeight: VIEWPORT, cursorY: 0, pinItemTop: true,
+      photoAt: (dk, idx) => ({ id: dk + ':' + idx }),
+      sectionGap: GAP_BETWEEN,
+    });
+    assert.equal(nextScroll, scrollTop, '列数不变时 scrollTop 应原样保留');
+  }
+
+  // 空库：无锚点，原样返回
+  {
+    const { scrollTop: nextScroll, anchor } = zoomPlan({
+      dates: [], counts: new Map(), gridWidth: W_NARROW, prevGridWidth: W_WIDE,
+      prevItemSize: ITEM, itemSize: ITEM,
+      scrollTop: 100, viewportHeight: VIEWPORT, cursorY: 0, pinItemTop: true,
+    });
+    assert.equal(anchor, null, '空库应无锚点');
+    assert.equal(nextScroll, 100, '空库 scrollTop 应原样返回');
+  }
+
+  console.log('  宽度锚点：1200<->700 跨列重排后视口顶部仍是同一张照片（像素级）；同列微调位置不变');
+}
+
+console.log('P4 渲染计划：全部 8 组断言通过');

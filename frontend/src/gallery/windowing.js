@@ -110,28 +110,44 @@ export function renderPlan({
 }
 
 /**
- * 缩放：算出缩放后应保持的 scrollTop，以及新的渲染计划。
+ * 缩放 / 宽度重排：算出新布局下应保持的 scrollTop，以及新的渲染计划。
  *
  * legacy 用 holdDateSectionLayout + 三层嵌套 rAF 反复滚动去"猜"位置；
  * 这里一次算到位（底层是 layout.zoomAnchorScrollTop）。
  *
+ * 两种调用场景共用同一条锚点路径：
+ *   缩放（Ctrl+滚轮）—— prevItemSize/itemSize 变化，gridWidth 不变，
+ *     锚点取光标位置（cursorY），光标下的照片不位移；
+ *   窗口 resize —— gridWidth 变化（列数变化），itemSize 不变，
+ *     锚点取视口顶部（cursorY 传 0），顶部的照片不动。
+ *     若不做这一步，同一 scrollTop 在重排后会落到别的日期分区，
+ *     表现为"改窗体大小就跳到新的日期"。
+ *
  * 必须同时给 prevItemSize 与 itemSize：
- * 锚点要用「缩放前」的布局反查是哪张照片，定位要用「缩放后」的布局算 scrollTop。
+ * 锚点要用「变化前」的布局反查是哪张照片，定位要用「变化后」的布局算 scrollTop。
  * 只给一个就会算错，而且错得很隐蔽（锚点漂移但看起来能滚）。
  *
  * @param prevItemSize 缩放前的条目边长
  * @param itemSize     缩放后的条目边长
- * @param cursorY      光标相对滚动容器顶部的位置
+ * @param prevGridWidth 变化前的网格宽度（仅 resize 传；缺省等于 gridWidth）
+ * @param gridWidth    变化后的网格宽度
+ * @param cursorY      锚点相对滚动容器顶部的位置（缩放传光标，resize 传 0 取视口顶部）
+ * @param pinItemTop   resize 专用：true 时不按 cursorY 落位，而是精确保留
+ *   「锚点照片顶部与视口顶部的相对距离」（可为负，即照片顶部已滚出上沿；
+ *   顶部是分区头时为正）。效果是像素级稳定 —— 列数不变的宽度微调与纯高度
+ *   变化会原样返回 scrollTop，一点都不动。缩放保持 cursorY 语义，不得传它。
  */
 export function zoomPlan({
   dates,
   counts,
   gridWidth,
+  prevGridWidth,
   prevItemSize,
   itemSize,
   scrollTop,
   viewportHeight,
   cursorY = 0,
+  pinItemTop = false,
   gap = PHOTO_GRID_GAP,
   headerHeight = DATE_HEADER_HEIGHT,
   sectionBufferPx = DEFAULT_SECTION_BUFFER_PX,
@@ -148,7 +164,8 @@ export function zoomPlan({
     throw new Error('zoomPlan 需要 prevItemSize（缩放前的条目边长）');
   }
 
-  const prevMetrics = sectionMetrics(dates, { counts, itemSize: prevItemSize, gridWidth, gap, hasMore, sectionGap });
+  const prevW = Number.isFinite(prevGridWidth) ? prevGridWidth : gridWidth;
+  const prevMetrics = sectionMetrics(dates, { counts, itemSize: prevItemSize, gridWidth: prevW, gap, hasMore, sectionGap });
   const anchor = anchorAtPoint(prevMetrics, {
     scrollTop,
     pointOffset: cursorY,
@@ -158,6 +175,17 @@ export function zoomPlan({
   });
   if (!anchor) {
     return { scrollTop, anchor: null, plan: renderPlan({ ...planArgs, itemSize, scrollTop, viewportHeight }) };
+  }
+
+  // pinItemTop：把落位基准从 cursorY 换成"锚点照片在旧布局下的屏内位置"。
+  // cursorY=0 只能保证"同一张照片回到顶部"，行内偏移会被吸附到行首；
+  // 这里保留精确距离，新 scrollTop = 新照片顶部 − 旧相对距离，分毫不差。
+  if (pinItemTop) {
+    const prevSec = prevMetrics.sections.find((s) => s.dateKey === anchor.dateKey);
+    if (prevSec) {
+      const prevPos = itemPosition({ index: anchor.index, cols: prevSec.cols, itemSize: prevItemSize, gap, headerHeight });
+      anchor.offsetInViewport = (prevSec.top + prevPos.y) - scrollTop;
+    }
   }
 
   const { scrollTop: next } = zoomAnchorScrollTop({

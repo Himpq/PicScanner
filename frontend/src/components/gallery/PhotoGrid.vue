@@ -72,6 +72,7 @@ import { useBatchStore } from '../../stores/batch.js';
 import { useQuickEditStore } from '../../stores/quickEdit.js';
 import { usePreviewQueue } from '../../composables/usePreviewQueue.js';
 import { renderPlan, zoomPlan } from '../../gallery/windowing.js';
+import { activeDateAtTop } from '../../gallery/dateRail.js';
 import { sectionMetrics, itemPosition, PHOTO_GRID_GAP, DATE_HEADER_HEIGHT } from '../../gallery/layout.js';
 import { getPhotoPreviewUrl } from '../../gallery/previewUrl.js';
 import { call } from '../../bridge/index.js';
@@ -283,6 +284,7 @@ function onScroll() {
 function syncRailFromScroll() {
   const PS = window.PS;
   if (!PS || typeof PS.setVisibleDates !== 'function') return;
+  if (scrollEl.value) scrollTop.value = scrollEl.value.scrollTop;
   const st = contentScrollTop.value;
   const vh = Math.max(1, viewportH.value);
   const viewTop = st;
@@ -294,8 +296,7 @@ function syncRailFromScroll() {
   const bandH = Math.max(1, centerBottom - centerTop);
   const visible = [];
   const focusByDate = new Map();
-  let best = null;
-  let bestDistance = Infinity;
+  const best = activeDateAtTop(metricsPitched.value.sections, st);
   for (const sec of metricsPitched.value.sections) {
     const top = sec.top;
     const bottom = sec.top + sec.height;
@@ -305,16 +306,7 @@ function syncRailFromScroll() {
       const centerOverlap = Math.min(bottom, centerBottom) - Math.max(top, centerTop);
       focusByDate.set(sec.dateKey, Math.max(0, Math.min(1, centerOverlap / bandH)));
     }
-    if (top <= anchorY && bottom >= anchorY) {
-      best = sec.dateKey;
-      bestDistance = 0;
-      continue;
-    }
-    const distance = Math.min(Math.abs(top - anchorY), Math.abs(bottom - anchorY));
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = sec.dateKey;
-    }
+
   }
   try {
     PS.setVisibleDates(visible);
@@ -777,6 +769,10 @@ function restoreHijacks() {
 }
 
 // ---- 尺寸测量 ----
+// 宽度变化会改变列数：同一 scrollTop 在重排后会落到别的日期分区。
+// 与 Ctrl+缩放同一原理 —— 先按旧宽度反查视口顶部锚点，再按新宽度一次落位
+// （底层都是 zoomPlan，只是这里 itemSize 不变、prevGridWidth 变化、锚点取顶部）。
+// 纯高度变化不移动内容，只更新 viewportH。
 let resizeObserver = null;
 function measure() {
   const el = scrollEl.value;
@@ -786,6 +782,40 @@ function measure() {
   scrollTop.value = el.scrollTop;
 }
 
+function onContainerResize() {
+  const el = scrollEl.value;
+  if (!el) return;
+  const nextW = Math.max(1, el.clientWidth - CANVAS_PAD * 2);
+  const nextH = el.clientHeight;
+  const prevW = gridWidth.value;
+  if (nextW === prevW) {
+    viewportH.value = nextH;
+    scrollTop.value = el.scrollTop;
+    return;
+  }
+  const { scrollTop: nextContent } = zoomPlan({
+    ...planArgs.value,
+    prevItemSize: itemSize.value,
+    itemSize: itemSize.value,
+    prevGridWidth: prevW,
+    gridWidth: nextW,
+    scrollTop: Math.max(0, el.scrollTop - CANVAS_PAD),
+    viewportHeight: nextH,
+    cursorY: 0,
+    // pinItemTop：保留锚点照片相对视口顶部的精确距离（像素级稳定）；
+    // 若只传 cursorY: 0，行内偏移会被吸附到行首。
+    pinItemTop: true,
+  });
+  gridWidth.value = nextW;
+  viewportH.value = nextH;
+  if (Number.isFinite(nextContent) && nextContent != null) {
+    el.scrollTop = nextContent + CANVAS_PAD;
+    scrollTop.value = el.scrollTop;
+  } else {
+    scrollTop.value = el.scrollTop;
+  }
+}
+
 onMounted(() => {
   // 挂载契约:组件根(display:contents)的父元素就是滚动容器
   scrollEl.value = rootEl.value ? rootEl.value.parentElement : null;
@@ -793,7 +823,7 @@ onMounted(() => {
   measure();
   if (el) {
     if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(measure);
+      resizeObserver = new ResizeObserver(onContainerResize);
       resizeObserver.observe(el);
     }
     el.addEventListener('scroll', onScroll, { passive: true });

@@ -57,13 +57,30 @@ except Exception:
 
 from WebViewUI import WebViewApp
 from app.backend.api import PicScannerApi
+from app.backend.thumbnailer import is_previewable_image
+
+
+def launch_photo_path(arguments=None) -> Path | None:
+    """返回通过 EXE/快捷方式拖入的首个有效图片路径。"""
+    values = sys.argv[1:] if arguments is None else arguments
+    for value in values:
+        text = str(value or "").strip().strip('"')
+        if not text or text.startswith("-"):
+            continue
+        candidate = Path(text).expanduser().resolve(strict=False)
+        if candidate.is_file() and is_previewable_image(candidate):
+            return candidate
+    return None
 
 
 def main():
     entry = APP_ROOT / "ui" / "index.html"
+    launch_photo = launch_photo_path()
+    if launch_photo:
+        print(f"[PicScanner] launch photo: {launch_photo}", flush=True)
     app = WebViewApp(
         entry_url=str(entry),
-        js_api=PicScannerApi(),
+        js_api=PicScannerApi(launch_photo=launch_photo),
         title="PicScanner",
         width=1280,
         height=820,

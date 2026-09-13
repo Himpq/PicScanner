@@ -1338,7 +1338,7 @@
       && !state.quickEdit.rawPreviewQueuedSignature
     );
     setQuickEditRawPreviewLoading(true);
-    return call('develop_quick_edit_raw_preview', photoId, params, maxSide).then((res) => {
+    return call('develop_quick_edit_raw_preview', photoId, params, maxSide, true, String(state.quickEdit.photo.path || '')).then((res) => {
       if (!shouldDisplay()) return false;
       if (!res || !res.success || !res.url) {
         throw new Error(res && res.message ? res.message : 'RAW 显影预览失败');
@@ -5522,7 +5522,7 @@
     }
     const params = quickEditRawDevelopParams(quickEditEffectiveParams());
     setQuickEditSaveProgress('RAW 显影', 5, '生成全尺寸显影源');
-    const res = await call('develop_quick_edit_raw_preview', photoId, params, 0, false);
+    const res = await call('develop_quick_edit_raw_preview', photoId, params, 0, false, String(photo.path || ''));
     if (!res || !res.success || !res.url) {
       throw new Error(res && res.message ? res.message : 'RAW 全尺寸显影失败');
     }
@@ -11488,6 +11488,17 @@
       ev.stopPropagation();
       return;
     }
+    // Consume lightbox keys before closing the screen underneath it.
+    if (isLbOpenForGuard && (ev.key === 'Escape' || ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.key === 'Escape') PS.closeLightbox();
+      else if (window.__lightboxStore && window.__lightboxStore.open) {
+        if (ev.key === 'ArrowLeft') window.__lightboxStore.prevPhoto();
+        else window.__lightboxStore.nextPhoto();
+      } else PS.navigateLightbox(ev.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
     if (ev.key === 'Escape' && state.searchOpen) {
       PS.closeSearchPanel();
       ev.preventDefault();
@@ -11673,6 +11684,9 @@
       const scan = (data && data.scan) || {};
       if (!PS.enterCachedWorkspace(scan)) {
         show(els.sourceScreen);
+      }
+      if (data && data.launch_photo) {
+        openQuickEdit(data.launch_photo, { skipPairChoice: true });
       }
       startStatePolling();
       setInterval(() => {

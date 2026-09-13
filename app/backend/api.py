@@ -22,7 +22,7 @@ from ..modules.loader import discover_modules
 from .batch_processor import BatchProcessingApiMixin
 from .config_store import DATA_DIR, config_store
 from .plugin_config import PluginConfigStore
-from .exif_reader import is_renderable_image
+from .exif_reader import is_renderable_image, read_metadata
 from .metadata_copy import MetadataCopyError, copy_complete_metadata
 from .scanner import scanner
 from .source_discovery import discover_marked_sources
@@ -120,12 +120,42 @@ def _versioned_file_uri(path: str | Path) -> str:
 
 
 class PicScannerApi(BatchProcessingApiMixin, WindowApi):
-    def __init__(self):
+    def __init__(self, launch_photo: str | Path | None = None):
         super().__init__()
+        self._launch_photo = Path(launch_photo).resolve(strict=False) if launch_photo else None
         self._plugin_configs = PluginConfigStore(DATA_DIR)
+        self._ui_ready_notified = False
         self._modules = discover_modules(
             DATA_DIR, storage, plugin_configs=self._plugin_configs, push=self._module_push, scanner_ref=scanner
         )
+
+    def bind(self, window, api_prefix=""):
+        """绑定窗口；主窗口页面 loaded 后向模块广播 on_ui_ready（见 _on_main_loaded）。"""
+        super().bind(window, api_prefix)
+        if api_prefix == "":
+            try:
+                window.events.loaded += self._on_main_loaded
+            except Exception as exc:
+                print(f"[PicScannerApi] 挂载 loaded 事件失败（模块将走兜底预热）: {exc}")
+
+    def _on_main_loaded(self):
+        """主窗口页面加载完成：窗口已显示，可以安全开始后台重活。
+
+        ORT 建 session 在 C++ 层持 GIL（DML 冷启动 2-4s），若在建窗阶段发生
+        会直接拖住主线程导致窗口迟迟不出现；页面 loaded 后 GIL 卡顿只表现为
+        Python 桥接调用短暂排队，渲染进程不受影响。
+        """
+        if self._ui_ready_notified:
+            return
+        self._ui_ready_notified = True
+        for handle in self._modules.values():
+            instance = getattr(handle, "instance", None)
+            notify = getattr(instance, "on_ui_ready", None)
+            if callable(notify):
+                try:
+                    notify()
+                except Exception as exc:
+                    print(f"[PicScannerApi] 模块 {handle.key} on_ui_ready 失败（已忽略）: {exc}")
 
     def log(self, msg):
         """前端调试日志转发入口（仅开发期使用）。msg 可为字符串或任意 JSON 可序列化对象。"""
@@ -705,11 +735,58 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         sources = self.get_sources()
         last_source = str(sources.get("last_source") or "")
         last_source_id = str(sources.get("last_source_id") or "")
+        launch_photo = self._launch_photo_payload()
         return {
             "success": True,
             "sources": sources,
             "scan": self.get_scan_state(last_source or None, last_source_id or None),
+            "launch_photo": launch_photo,
         }
+
+    def _launch_photo_payload(self) -> dict | None:
+        source = self._launch_photo
+        if not source or not source.is_file() or not is_previewable_image(source):
+            return None
+        try:
+            stat = source.stat()
+            metadata = read_metadata(source)
+            row = {
+                **metadata,
+                "id": -1,
+                "source_id": "",
+                "path": str(source),
+                "filename": source.name,
+                "relative_path": source.name,
+                "is_raw": 1 if is_raw_image(source) else 0,
+                "is_jpg": 1 if source.suffix.lower() in {".jpg", ".jpeg"} else 0,
+                "has_raw_pair": 0,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            }
+            return self._photo_payload(row, full=True, include_thumbnail=True)
+        except Exception as exc:
+            print(f"[PicScannerLaunch] 无法打开拖入图片 path={source} error={exc}", flush=True)
+            return None
+
+    def _quick_edit_source(self, photo_id, source_path=None) -> tuple[dict | None, Path | None]:
+        try:
+            numeric_id = int(photo_id)
+        except (TypeError, ValueError):
+            numeric_id = 0
+        photo = storage.get_photo(numeric_id) if numeric_id > 0 else None
+        if photo:
+            source = Path(str(photo.get("path") or "")).resolve(strict=False)
+            return photo, source
+        if numeric_id < 0 and source_path:
+            source = Path(str(source_path)).resolve(strict=False)
+            if (
+                self._launch_photo
+                and source == self._launch_photo
+                and source.is_file()
+                and is_previewable_image(source)
+            ):
+                return {"id": numeric_id, "path": str(source)}, source
+        return None, None
 
     def _storage_sources_payload(self) -> list[dict]:
         sources = []
@@ -758,8 +835,13 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         }
 
     def open_external_url(self, url):
+        allowed = {
+            "https://github.com/Himpq/PicScanner",
+            "https://console.tianditu.gov.cn/api/key",
+            "https://www.tianditu.gov.cn/",
+        }
         target = str(url or "").strip()
-        if target != "https://github.com/Himpq/PicScanner":
+        if target not in allowed:
             return {"success": False, "message": f"不允许打开链接: {target}"}
         webbrowser.open(target, new=2)
         return {"success": True}
@@ -2368,12 +2450,11 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             "message": f"已保存到 {target}" + ("，已完整复制原始元数据" if exif_saved else ""),
         }
 
-    def develop_quick_edit_raw_preview(self, photo_id, raw_params=None, max_side=2400, preview_profile=True):
-        photo = storage.get_photo(int(photo_id))
+    def develop_quick_edit_raw_preview(self, photo_id, raw_params=None, max_side=2400, preview_profile=True, source_path=None):
+        photo, source = self._quick_edit_source(photo_id, source_path)
         if not photo:
             return {"success": False, "message": "图片不存在"}
-        payload = self._photo_payload(photo, include_thumbnail=True)
-        source = Path(str(payload.get("path") or ""))
+        payload = self._photo_payload(photo, include_thumbnail=True) if int(photo_id) > 0 else None
         if not source.exists() or not source.is_file():
             return {"success": False, "message": f"RAW 文件不存在: {source}", "photo": payload}
         if not is_raw_image(source):
@@ -2419,11 +2500,9 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
         format_key="tif16",
         preserve_exif=False,
     ):
-        photo = storage.get_photo(int(photo_id))
+        photo, source = self._quick_edit_source(photo_id, source_path)
         if not photo:
             return {"success": False, "message": "图片不存在"}
-        payload = self._photo_payload(photo)
-        source = Path(str(payload.get("path") or ""))
         if not source.exists() or not source.is_file():
             return {"success": False, "message": f"RAW 文件不存在: {source}"}
         if not is_raw_image(source):
@@ -2952,6 +3031,9 @@ class PicScannerApi(BatchProcessingApiMixin, WindowApi):
             "width": row.get("width"),
             "height": row.get("height"),
             "orientation": row.get("orientation"),
+            "gps_lat": row.get("gps_lat"),
+            "gps_lon": row.get("gps_lon"),
+            "gps_place": row.get("gps_place"),
             "renderable": browser_renderable,
             "previewable": previewable,
             "exif_status": row.get("exif_status"),

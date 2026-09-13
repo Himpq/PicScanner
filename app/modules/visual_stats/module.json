@@ -1,0 +1,7 @@
+{
+  "key": "visual_stats",
+  "name": "视觉题材统计",
+  "version": "0.1.0",
+  "description": "复用语义图片向量，对照片做全量题材统计并报告覆盖率",
+  "frontend": ""
+}

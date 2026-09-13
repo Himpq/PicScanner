@@ -7,6 +7,7 @@ import RankChart from '../components/stats/RankChart.vue';
 import DistributionChart from '../components/stats/DistributionChart.vue';
 import HourChart from '../components/stats/HourChart.vue';
 import MonthChart from '../components/stats/MonthChart.vue';
+import VisualStatsPanel from '../components/stats/VisualStatsPanel.vue';
 
 const store = useStatsStore();
 const stats = computed(() => store.statistics || {});
@@ -36,6 +37,10 @@ onMounted(() => {
 watch(() => store.open, (isOpen) => {
   if (!isOpen) return;
   if (currentPath.value) store.fetchDetail().catch(() => {});
+});
+
+watch(() => [store.open, store.activeTab], ([isOpen, tab]) => {
+  if (isOpen && tab === 'visual') store.fetchVisualStats().catch(() => {});
 });
 
 // P3：分桶排序抽到 src/stats/bucketSort.js，纯函数且有单元测试。
@@ -91,6 +96,7 @@ const {
           <button class="stats-tab" :class="{ active: activeTab === 'gear' }" type="button" data-stats-tab="gear" @click="setTab('gear')">器材</button>
           <button class="stats-tab" :class="{ active: activeTab === 'params' }" type="button" data-stats-tab="params" @click="setTab('params')">拍摄参数</button>
           <button class="stats-tab" :class="{ active: activeTab === 'time' }" type="button" data-stats-tab="time" @click="setTab('time')">时间</button>
+          <button class="stats-tab" :class="{ active: activeTab === 'visual' }" type="button" data-stats-tab="visual" @click="setTab('visual')">题材</button>
         </div>
 
         <div class="stats-pane" :class="{ active: activeTab === 'overview' }" data-stats-pane="overview">
@@ -118,6 +124,10 @@ const {
             <HourChart :rows="stats.by_hour || []" title="拍摄时段" />
             <MonthChart :rows="stats.by_month || []" title="月份分布" />
           </div>
+        </div>
+
+        <div class="stats-pane" :class="{ active: activeTab === 'visual' }" data-stats-pane="visual">
+          <VisualStatsPanel />
         </div>
       </template>
     </div>

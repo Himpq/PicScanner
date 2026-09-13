@@ -2,6 +2,17 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { call } from '../bridge/index.js';
 
+const STATS_COLORS = [
+  '#e0a45a',
+  '#79a9d1',
+  '#8ebf9b',
+  '#c88b9f',
+  '#9a91c7',
+  '#c7a76b',
+  '#6ea6a6',
+  '#b57e61',
+];
+
 export const useStatsStore = defineStore('stats', () => {
   const loading = ref(false);
   const error = ref('');
@@ -12,6 +23,9 @@ export const useStatsStore = defineStore('stats', () => {
   // 注意显隐动画（entering / leaving / hidden）仍由 legacy 的
   // openStatsPage / closeStatsPage 操作 #stats-screen 完成，Vue 只负责内容。
   const open = ref(false);
+  const visualStats = ref({ labels: [], coverage: null, total_classified: 0, uncertain_count: 0 });
+  const visualLoading = ref(false);
+  const visualError = ref('');
 
   const total = computed(() => Number(statistics.value.total_files || 0));
   const exifComplete = computed(() => Number(statistics.value.exif_complete || 0));
@@ -57,6 +71,49 @@ export const useStatsStore = defineStore('stats', () => {
     }
   }
 
+  async function fetchVisualStats({ sourceId } = {}) {
+    visualError.value = '';
+    try {
+      const sid = sourceId !== undefined ? sourceId : (currentSourceId() || null);
+      const res = await call('module_api', 'visual_stats', 'stats', sid);
+      if (!res || !res.success) throw new Error(res?.message || '读取题材统计失败');
+      visualStats.value = res;
+      return res;
+    } catch (err) {
+      visualError.value = String(err?.message || err);
+      throw err;
+    }
+  }
+
+  async function runVisualAnalysis(force = false) {
+    const sid = currentSourceId();
+    if (!sid) {
+      visualError.value = '请先选择来源';
+      return null;
+    }
+    visualLoading.value = true;
+    visualError.value = '';
+    try {
+      const started = await call('module_api', 'visual_stats', 'analyze', sid, !!force);
+      if (!started || !started.success) throw new Error(started?.message || '题材分析启动失败');
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        const current = await fetchVisualStats({ sourceId: sid });
+        const coverage = current.coverage || {};
+        if (!coverage.running) {
+          if (coverage.error) throw new Error(coverage.error);
+          return current;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      throw new Error('题材分析等待超时，请查看 Python Terminal 日志');
+    } catch (err) {
+      visualError.value = String(err?.message || err);
+      throw err;
+    } finally {
+      visualLoading.value = false;
+    }
+  }
+
   // P3：legacy 的 openStatsPage 调这个来触发取数，不再自己渲染
   function openPage() {
     open.value = true;
@@ -93,9 +150,8 @@ export const useStatsStore = defineStore('stats', () => {
     return data.length ? data[0] : null;
   }
   function statsColor(index) {
-    const alphas = [0.92, 0.78, 0.64, 0.52, 0.42, 0.34, 0.28, 0.22];
-    const a = alphas[Math.abs(Number(index || 0)) % alphas.length];
-    return 'rgba(224,164,90,' + a + ')';
+    const normalized = Math.abs(Number(index || 0)) % STATS_COLORS.length;
+    return STATS_COLORS[normalized];
   }
 
   return {
@@ -105,6 +161,9 @@ export const useStatsStore = defineStore('stats', () => {
     statistics,
     activeTab,
     open,
+    visualStats,
+    visualLoading,
+    visualError,
     total,
     exifComplete,
     hydrateFromLegacy,
@@ -112,6 +171,8 @@ export const useStatsStore = defineStore('stats', () => {
     openPage,
     closePage,
     fetchDetail,
+    fetchVisualStats,
+    runVisualAnalysis,
     chartRows,
     compactNumber,
     topRow,
